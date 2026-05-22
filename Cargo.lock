@@ -432,6 +432,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "socsim-grid"
+version = "0.1.0"
+dependencies = [
+ "socsim-core",
+]
+
+[[package]]
 name = "socsim-hr-lifecycle"
 version = "0.1.0"
 dependencies = [
