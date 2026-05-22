@@ -6,17 +6,18 @@
 
 ## Crate workspace
 
-The workspace contains nine crates organised in three layers:
+The workspace contains ten crates organised in three layers:
 
 ```
 socsim-cli          ← binary (entry point)
     └── socsim-runner      ← multi-seed runs, sweeps, summarise
             ├── socsim-engine      ← Simulation, SimulationBuilder, schedulers
-            │       └── socsim-log         ← InMemoryRecorder, JsonlRecorder
+            │       └── socsim-log         ← InMemoryRecorder, JsonlRecorder, CsvRecorder
             ├── socsim-config      ← Params, Registry, ModulePack, Scenario loader
-            │       └── socsim-core        ← traits (Mechanism, WorldState, …), AgentId, Phase
+            │       └── socsim-core        ← traits (Mechanism, WorldState, …), AgentId, Phase, Blackboard
             ├── socsim-hr-lifecycle ← reference module (10 mechanisms)
             │       └── socsim-net         ← SocialNetwork (ER, WS, BA generators)
+            ├── socsim-grid        ← Grid, GridIndex, neighbourhoods, distances (spatial models)
             └── socsim-rng         ← SimRng (ChaCha20), derive_seed
 ```
 
@@ -27,7 +28,7 @@ Dependency rules:
 - `socsim-engine` depends on `socsim-core`, `socsim-log`, and `socsim-config`.
 - `socsim-runner` depends on all of the above and adds `rayon` for parallelism.
 - `socsim-cli` wires everything together into the `socsim` binary.
-- `socsim-hr-lifecycle` and `socsim-net` sit beside the engine layer and are orthogonal to it.
+- `socsim-hr-lifecycle`, `socsim-net`, and `socsim-grid` sit beside the engine layer and are orthogonal to it; `socsim-grid` depends only on `socsim-core`.
 
 ---
 

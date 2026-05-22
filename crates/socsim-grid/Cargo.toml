@@ -1,0 +1,10 @@
+[package]
+name        = "socsim-grid"
+description = "2D lattice, neighborhoods and spatial indexing for socsim"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+socsim-core = { path = "../socsim-core" }

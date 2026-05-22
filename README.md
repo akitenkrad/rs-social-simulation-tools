@@ -8,7 +8,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 ![tests: 78 passing](https://img.shields.io/badge/tests-78%20passing-brightgreen)
 
-`socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, and a CLI for running, sweeping, and summarising scenarios — all in a nine-crate workspace. A reference HR lifecycle module ships with ten mechanisms calibrated against published empirical findings.
+`socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, spatial-grid primitives, and a CLI for running, sweeping, and summarising scenarios — all in a ten-crate workspace. A reference HR lifecycle module ships with ten mechanisms calibrated against published empirical findings.
 
 ## Installation
 

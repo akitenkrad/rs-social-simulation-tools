@@ -163,7 +163,74 @@ sim.run().unwrap();
 println!("Final value: {}", sim.world().value);
 ```
 
-`Simulation::run` は `world.clock().is_done()` になるまでループします．細かい制御が必要な場合は `Simulation::step` を使って1ステップずつ進めます．
+`Simulation::run` は `world.clock().is_done()` になる**か**，メカニズムが早期停止を要求するまでループします．細かい制御が必要な場合は `Simulation::step` を使って1ステップずつ進めます．
+
+---
+
+## 収束時の早期停止
+
+多くのABMは `t_max` よりもずっと早く不動点に到達します．`run()` を諦めて `step()` ループを手書きしなくて済むように，2つのメカニズムが用意されています：
+
+- **メカニズムの内部から** `ctx.request_stop()` を呼び出します．現在のステップは最後まで実行され（残りのすべてのメカニズムが動作する），その後 `run()` が終了します．後から `sim.stop_requested()` で問い合わせできます．
+- **ドライバーから** `run_until(predicate)` を使います．これは各ステップの*後*にワールドに対して述語をチェックします：
+
+```rust,ignore
+// Stop as soon as the world reports convergence (but always at least one step).
+sim.run_until(|w| w.is_converged())?;
+```
+
+```rust,ignore
+// Equivalent from inside a mechanism (PostStep is a good place to check):
+fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, MyWorld>) -> Result<()> {
+    if ctx.world.no_agent_moved_this_step() {
+        ctx.request_stop();
+    }
+    Ok(())
+}
+```
+
+---
+
+## エージェントの部分集合に作用する
+
+スケジューラーは**すべての**エージェントに対する活性化順序を返します．しかし多くのモデルでは，ある条件を満たす部分集合（分居モデルにおける*不満を持つ者*，感染モデルにおける*感染者*）にのみ作用します．慣用的なパターンは，**ステップ開始時に対象集合をスナップショットする**ことであり，その後活性化順序をそれに対してフィルタリングします：
+
+```rust,ignore
+fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, MyWorld>) -> Result<()> {
+    // Snapshot eligible agents BEFORE anyone acts, so mid-step state changes
+    // (e.g. a neighbour moving away) don't pull extra agents into this step.
+    let eligible: std::collections::HashSet<AgentId> = ctx.world
+        .agent_ids().into_iter()
+        .filter(|id| ctx.world.is_eligible(*id))
+        .collect();
+
+    for id in ctx.agent_order {              // shuffled by the scheduler
+        if !eligible.contains(id) { continue; }
+        if ctx.world.is_eligible(*id) {      // may have changed since snapshot
+            ctx.world.act(*id);
+        }
+    }
+    Ok(())
+}
+```
+
+（すでにシャッフルされた）全体の順序をフィルタリングすることは，対象となる部分集合だけをシャッフルすることと統計的に等価です．**同期的か非同期的かのセマンティクスは重要です：** 対象集合をスナップショットすると同期的スタイルの更新になります（作用するエージェントの数はステップ開始時に固定される）；その時点で対象となっているエージェントに作用すると非同期的な更新になります．意図的に選択してください — ダイナミクスが変わります．
+
+---
+
+## ステップスコープのスクラッチ（`Blackboard`）
+
+`ctx.scratch` は，エンジンが**各ステップの開始時にクリアする**型消去されたキー/バリューストアです．`WorldState` にステップ毎のブックキーピングフィールドを追加することなく，同じステップ内のメカニズム間で，あるいはドライバーへ一時的な値を渡すために使います：
+
+```rust,ignore
+// In a mechanism:
+ctx.scratch.insert("n_moved", n_moved_usize);
+
+// In a later mechanism the same step, or in the driver right after step():
+let moved = sim.scratch().get::<usize>("n_moved").copied().unwrap_or(0);
+```
+
+ステップ中に書き込まれた値は，次の `step()` 呼び出しまで読み取り可能であり，その後クリアされます．
 
 ---
 
@@ -175,25 +242,62 @@ println!("Final value: {}", sim.world().value);
 2. **ソートされたエージェントID．** `HrWorld` の `WorldState::agent_ids` はIDをソート順に返し，チーム平均の集計はソートされたコピーで反復します．ハッシュマップの反復順序は結果に影響しません．
 3. **`SimRng::derive` による子RNG．** メカニズムは `SimRng::derive(&[agent_id, phase_index])` を使い，親ストリームを変更せずにエージェントやフェーズごとの独立した子RNGを派生させることができます．
 
+### ワールド初期化用RNGをエンジンのRNGと分離する
+
+`SimulationBuilder::seed(seed)` はエンジンのRNGを内部で構築しますが，ビルダーが存在する**前**にもランダム性が必要になることがよくあります — 例えばワールドを構築するときにエージェントを配置する場合などです．2つの独立した `SimRng` を*同じ* `seed` でシードしても動作しますが，2つのストリームが結合してしまいます．きれいなパターンは，`seed` を**ルート**として扱い，ラベル付けされた子シードを派生させることです：
+
+```rust,ignore
+use socsim_core::{derive_seed, SimRng};
+
+const RNG_WORLD_INIT: u64 = 0;
+const RNG_ENGINE: u64 = 1;
+
+let root = seed;
+let mut init_rng = SimRng::from_seed(derive_seed(root, &[RNG_WORLD_INIT]));
+let world = MyWorld::new(&mut init_rng);          // place agents, etc.
+
+let mut sim = SimulationBuilder::new(world)
+    .seed(derive_seed(root, &[RNG_ENGINE]))       // independent, labelled stream
+    .build();
+```
+
+`derive_seed`（`socsim-core` から再エクスポートされています）は `SimRng::derive` が使うものと同じFNV-1aミックスなので，2つのストリームは無相関でありながら，単一のルートシードから完全に再現可能です．
+
 自作のコードで決定論性を検証するには，同じシードで2つのシミュレーションを実行して出力を比較します — `custom_mechanism.rs` の例がまさにこれを行っています．
 
 ---
 
 ## メトリクスとイベントの記録
 
-`Recorder` トレイトには2つのメソッドがあります：
+`Recorder` トレイトには3つの記録メソッドがあります：
 
 ```rust,ignore
 fn record_metric(&mut self, t: u64, key: &str, value: f64);
 fn record_event(&mut self, t: u64, kind: &str, payload: serde_json::Value);
+// Wide tabular row — many named columns sharing one t and table:
+fn record_row(&mut self, t: u64, table: &str, row: &[(&str, f64)]);
 ```
 
-`socsim-log` には2つの実装が含まれています：
+`record_row` は，多数の列を持つ `metrics.csv` 形式の出力に自然な形です；デフォルト実装は1つの行を `"{table}.{column}"` をキーとする `record_metric` 呼び出しへと展開するので，これをオーバーライドしないレコーダーも引き続き動作します．
+
+`socsim-log` には3つの実装が含まれています：
 
 | 型 | 用途 |
 |---|---|
 | `InMemoryRecorder` | テスト；実行後に `metrics()` と `events()` を検査 |
 | `JsonlRecorder<W>` | 本番環境；任意の `Write` シンクに1レコードあたり1行のJSONを書き出す |
+| `CsvRecorder` | 表形式の出力；テーブルごとに `record_row` 呼び出しを蓄積し，列を揃えたCSVを描画する（加えてロングフォーマットの `metrics_csv()` も） |
+
+```rust,ignore
+use socsim_core::Recorder;
+use socsim_log::CsvRecorder;
+
+let mut rec = CsvRecorder::new();
+rec.record_row(0, "metrics", &[("avg_same", 0.53), ("n_moved", 0.0)]);
+rec.record_row(1, "metrics", &[("avg_same", 0.64), ("n_moved", 21.0)]);
+let csv = rec.table_csv("metrics").unwrap();   // "t,avg_same,n_moved\n0,0.53,0\n1,0.64,21\n"
+std::fs::write("metrics.csv", csv).unwrap();
+```
 
 `sim.run()` 後にレコーダーを検査する：
 
@@ -250,3 +354,65 @@ println!("org_performance = {}", sim.world().org_performance);
 ```
 
 完全な出力付きバージョンは `crates/socsim-hr-lifecycle/examples/hr_baseline.rs` を参照してください．
+
+---
+
+## `socsim-grid` による空間モデル
+
+格子ベースのモデル（分居，格子上の感染，拡散）のために，`socsim-grid` は既製の2D空間を提供するので，近傍や距離を再実装せずに済みます：
+
+```rust,ignore
+use socsim_grid::{Grid, GridIndex, Boundary, Neighborhood, Metric};
+use socsim_core::AgentId;
+
+let mut idx = GridIndex::new(Grid::new(13, 16, Boundary::Fixed));
+idx.place(AgentId(0), 3, 4).unwrap();
+
+let nbrs = idx.grid().neighbors(3, 4, Neighborhood::Moore);     // 8-neighbourhood
+let occupied = idx.occupant_neighbors(3, 4, Neighborhood::Moore);
+let target = idx.nearest_vacant((3, 4), Metric::Chebyshev);     // greedy relocation
+idx.move_to(AgentId(0), target.unwrap().0, target.unwrap().1).unwrap();
+```
+
+| 型 | 役割 |
+|---|---|
+| `Grid` | 寸法 + `Boundary`（`Fixed` / `Toroidal`）；`neighbors`, `neighbors_radius`, ラップ対応の `distance` |
+| `Neighborhood` | `Moore`（8） / `VonNeumann`（4） |
+| `Metric` | `Chebyshev` / `Manhattan` / `Euclidean` |
+| `GridIndex` | `AgentId ↔ cell` の占有：`place`, `move_to`, `vacant_cells`, `nearest_vacant`, ソートされた `agent_ids` |
+
+`WorldState` の内部に `GridIndex`（あるいは素の `Grid`）を保持し，`Mechanism` から移動を駆動します．
+
+---
+
+## 軽量：エンジンのみの利用（TOML / Runner なし）
+
+`ModulePack` → `Registry` → シナリオTOML → `socsim-runner` という経路（上記のステップ3〜4）はオプションです．すでに独自のCLIと出力形式を持っている場合 — 例えば既存プロジェクトを移植する場合 — **エンジンコアだけ**を使い，TOML，レジストリ，ランナーを完全にスキップできます：
+
+```rust,ignore
+use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
+
+// 1. Build the world yourself (your own config struct, your own RNG).
+let world = MyWorld::new(/* ... */);
+
+// 2. Add mechanisms directly — no Registry, no ModulePack.
+let mut sim = SimulationBuilder::new(world)
+    .scheduler(Box::new(RandomActivationScheduler))
+    .seed(seed)
+    .add_mechanism(Box::new(MyMechanism::new(/* ... */)))
+    .build();
+
+// 3. Drive it yourself and stop on convergence; write your own output.
+sim.run_until(|w| w.is_converged())?;
+write_my_csv(sim.world());          // your existing schema, no Recorder required
+```
+
+**どちらを選ぶか：**
+
+| | フルスタック（ModulePack + TOML + Runner） | エンジンのみ |
+|---|---|---|
+| 設定 | シナリオ `.toml`，`socsim-runner` でスイープ | 独自の構造体 / CLI |
+| 出力 | `JsonlRecorder` / ランナーサマリー | 自分で書くもの |
+| 最適な用途 | 新規プロジェクト，パラメータスイープ，再現可能なシナリオファイル | 既存ツールへのエンジン埋め込み，カスタム出力スキーマ |
+
+実際に動作するエンジンのみの例は `crates/socsim-engine/examples/engine_only.rs` にあります．

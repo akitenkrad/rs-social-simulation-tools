@@ -163,17 +163,105 @@ sim.run().unwrap();
 println!("Final value: {}", sim.world().value);
 ```
 
-`Simulation::run` loops until `world.clock().is_done()`. `Simulation::step` advances one step at a time if you need fine-grained control.
+`Simulation::run` loops until `world.clock().is_done()` **or** a mechanism requests an early stop. `Simulation::step` advances one step at a time if you need fine-grained control.
+
+---
+
+## Stopping early on convergence
+
+Many ABMs reach a fixed point long before `t_max`. Two mechanisms are provided so you don't have to abandon `run()` and hand-roll a `step()` loop:
+
+- **From inside a mechanism**, call `ctx.request_stop()`. The current step finishes (all remaining mechanisms run), then `run()` terminates. Query it later with `sim.stop_requested()`.
+- **From the driver**, use `run_until(predicate)`, which checks the predicate against the world *after* each step:
+
+```rust,ignore
+// Stop as soon as the world reports convergence (but always at least one step).
+sim.run_until(|w| w.is_converged())?;
+```
+
+```rust,ignore
+// Equivalent from inside a mechanism (PostStep is a good place to check):
+fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, MyWorld>) -> Result<()> {
+    if ctx.world.no_agent_moved_this_step() {
+        ctx.request_stop();
+    }
+    Ok(())
+}
+```
+
+---
+
+## Acting on a subset of agents
+
+The scheduler returns an activation order over **all** agents. Many models, however, only act on a subset that satisfies some condition (the *dissatisfied* in a segregation model, the *infected* in a contagion model). The idiomatic pattern is to **snapshot the eligible set at the start of the step**, then filter the activation order against it:
+
+```rust,ignore
+fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, MyWorld>) -> Result<()> {
+    // Snapshot eligible agents BEFORE anyone acts, so mid-step state changes
+    // (e.g. a neighbour moving away) don't pull extra agents into this step.
+    let eligible: std::collections::HashSet<AgentId> = ctx.world
+        .agent_ids().into_iter()
+        .filter(|id| ctx.world.is_eligible(*id))
+        .collect();
+
+    for id in ctx.agent_order {              // shuffled by the scheduler
+        if !eligible.contains(id) { continue; }
+        if ctx.world.is_eligible(*id) {      // may have changed since snapshot
+            ctx.world.act(*id);
+        }
+    }
+    Ok(())
+}
+```
+
+Filtering the (already shuffled) full order is statistically equivalent to shuffling just the eligible subset. **Synchronous vs. asynchronous semantics matter:** snapshotting the eligible set gives synchronous-style updates (the count of actors is fixed at step start); acting on whoever is currently eligible gives asynchronous updates. Choose deliberately — it changes the dynamics.
+
+---
+
+## Step-scoped scratch (`Blackboard`)
+
+`ctx.scratch` is a type-erased key/value store the engine **clears at the start of every step**. Use it to pass transient values between mechanisms in the same step, or out to the driver, without adding per-step bookkeeping fields to `WorldState`:
+
+```rust,ignore
+// In a mechanism:
+ctx.scratch.insert("n_moved", n_moved_usize);
+
+// In a later mechanism the same step, or in the driver right after step():
+let moved = sim.scratch().get::<usize>("n_moved").copied().unwrap_or(0);
+```
+
+Values written during a step remain readable until the next `step()` call, then they are cleared.
 
 ---
 
 ## Determinism
 
-Determinism is guaranteed by three design choices:
+Determinism is guaranteed by these design choices:
 
 1. **Seeded ChaCha20 RNG.** `SimRng::from_seed(seed)` creates a fully deterministic generator. The same seed + same code always produces the same trajectory.
-2. **Sorted agent IDs.** `WorldState::agent_ids` in `HrWorld` returns IDs in sorted order; team-mean aggregations iterate a sorted copy. Hash-map iteration order never influences results.
+2. **Sorted agent IDs.** `WorldState::agent_ids` should return IDs in sorted order; aggregations iterate a sorted copy. Hash-map iteration order never influences results.
 3. **Child RNGs via `SimRng::derive`.** Mechanisms can derive independent child RNGs per agent or phase using `SimRng::derive(&[agent_id, phase_index])` without mutating the parent stream.
+
+### Separating world-init RNG from the engine RNG
+
+`SimulationBuilder::seed(seed)` builds the engine's RNG internally, but you often also need randomness **before** the builder exists — e.g. to place agents when constructing the world. Seeding two independent `SimRng`s with the *same* `seed` works but couples the two streams. The clean pattern is to treat `seed` as a **root** and derive labelled child seeds:
+
+```rust,ignore
+use socsim_core::{derive_seed, SimRng};
+
+const RNG_WORLD_INIT: u64 = 0;
+const RNG_ENGINE: u64 = 1;
+
+let root = seed;
+let mut init_rng = SimRng::from_seed(derive_seed(root, &[RNG_WORLD_INIT]));
+let world = MyWorld::new(&mut init_rng);          // place agents, etc.
+
+let mut sim = SimulationBuilder::new(world)
+    .seed(derive_seed(root, &[RNG_ENGINE]))       // independent, labelled stream
+    .build();
+```
+
+`derive_seed` (re-exported from `socsim-core`) is the same FNV-1a mix used by `SimRng::derive`, so the two streams are decorrelated yet fully reproducible from a single root seed.
 
 To verify determinism in your own code, run two simulations with the same seed and compare outputs — the `custom_mechanism.rs` example does exactly this.
 
@@ -181,19 +269,35 @@ To verify determinism in your own code, run two simulations with the same seed a
 
 ## Recording metrics and events
 
-The `Recorder` trait has two methods:
+The `Recorder` trait has three recording methods:
 
 ```rust,ignore
 fn record_metric(&mut self, t: u64, key: &str, value: f64);
 fn record_event(&mut self, t: u64, kind: &str, payload: serde_json::Value);
+// Wide tabular row — many named columns sharing one t and table:
+fn record_row(&mut self, t: u64, table: &str, row: &[(&str, f64)]);
 ```
 
-`socsim-log` ships two implementations:
+`record_row` is the natural shape for `metrics.csv`-style output with many columns; the default implementation fans a row out into `record_metric` calls keyed `"{table}.{column}"`, so recorders that don't override it keep working.
+
+`socsim-log` ships three implementations:
 
 | Type | Use |
 |---|---|
 | `InMemoryRecorder` | Tests; inspect `metrics()` and `events()` after the run |
 | `JsonlRecorder<W>` | Production; writes one JSON line per record to any `Write` sink |
+| `CsvRecorder` | Tabular output; accumulates `record_row` calls per table and renders column-aligned CSV (plus long-format `metrics_csv()`) |
+
+```rust,ignore
+use socsim_core::Recorder;
+use socsim_log::CsvRecorder;
+
+let mut rec = CsvRecorder::new();
+rec.record_row(0, "metrics", &[("avg_same", 0.53), ("n_moved", 0.0)]);
+rec.record_row(1, "metrics", &[("avg_same", 0.64), ("n_moved", 21.0)]);
+let csv = rec.table_csv("metrics").unwrap();   // "t,avg_same,n_moved\n0,0.53,0\n1,0.64,21\n"
+std::fs::write("metrics.csv", csv).unwrap();
+```
 
 To inspect the recorder after `sim.run()`:
 
@@ -250,3 +354,65 @@ println!("org_performance = {}", sim.world().org_performance);
 ```
 
 For the full printout version see `crates/socsim-hr-lifecycle/examples/hr_baseline.rs`.
+
+---
+
+## Spatial models with `socsim-grid`
+
+For lattice-based models (segregation, contagion on a grid, diffusion), `socsim-grid` provides ready-made 2D space so you don't reimplement neighbourhoods and distances:
+
+```rust,ignore
+use socsim_grid::{Grid, GridIndex, Boundary, Neighborhood, Metric};
+use socsim_core::AgentId;
+
+let mut idx = GridIndex::new(Grid::new(13, 16, Boundary::Fixed));
+idx.place(AgentId(0), 3, 4).unwrap();
+
+let nbrs = idx.grid().neighbors(3, 4, Neighborhood::Moore);     // 8-neighbourhood
+let occupied = idx.occupant_neighbors(3, 4, Neighborhood::Moore);
+let target = idx.nearest_vacant((3, 4), Metric::Chebyshev);     // greedy relocation
+idx.move_to(AgentId(0), target.unwrap().0, target.unwrap().1).unwrap();
+```
+
+| Type | Purpose |
+|---|---|
+| `Grid` | dimensions + `Boundary` (`Fixed` / `Toroidal`); `neighbors`, `neighbors_radius`, wrap-aware `distance` |
+| `Neighborhood` | `Moore` (8) / `VonNeumann` (4) |
+| `Metric` | `Chebyshev` / `Manhattan` / `Euclidean` |
+| `GridIndex` | `AgentId ↔ cell` occupancy: `place`, `move_to`, `vacant_cells`, `nearest_vacant`, sorted `agent_ids` |
+
+Hold a `GridIndex` (or a bare `Grid`) inside your `WorldState` and drive moves from a `Mechanism`.
+
+---
+
+## Lightweight: engine-only usage (no TOML / Runner)
+
+The `ModulePack` → `Registry` → scenario-TOML → `socsim-runner` path (Steps 3–4 above) is optional. If you already have your own CLI and output format — e.g. when porting an existing project — you can use **just the engine core** and skip TOML, the registry, and the runner entirely:
+
+```rust,ignore
+use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
+
+// 1. Build the world yourself (your own config struct, your own RNG).
+let world = MyWorld::new(/* ... */);
+
+// 2. Add mechanisms directly — no Registry, no ModulePack.
+let mut sim = SimulationBuilder::new(world)
+    .scheduler(Box::new(RandomActivationScheduler))
+    .seed(seed)
+    .add_mechanism(Box::new(MyMechanism::new(/* ... */)))
+    .build();
+
+// 3. Drive it yourself and stop on convergence; write your own output.
+sim.run_until(|w| w.is_converged())?;
+write_my_csv(sim.world());          // your existing schema, no Recorder required
+```
+
+**When to choose which:**
+
+| | Full-stack (ModulePack + TOML + Runner) | Engine-only |
+|---|---|---|
+| Config | scenario `.toml`, swept by `socsim-runner` | your own structs / CLI |
+| Output | `JsonlRecorder` / runner summaries | whatever you write |
+| Best for | new projects, parameter sweeps, reproducible scenario files | embedding the engine in an existing tool, custom output schemas |
+
+A worked engine-only example lives at `crates/socsim-engine/examples/engine_only.rs`.
