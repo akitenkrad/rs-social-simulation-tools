@@ -173,6 +173,65 @@ pub struct StepContext<'a, W: WorldState> {
     pub recorder: &'a mut dyn Recorder,
     /// Activation order for this step as decided by the [`Scheduler`].
     pub agent_order: &'a [AgentId],
+    /// Step-scoped scratch space, cleared by the engine at the start of every
+    /// step.  Use it to pass transient values between mechanisms (or out to the
+    /// driver) without polluting [`WorldState`] with per-step bookkeeping.
+    pub scratch: &'a mut Blackboard,
+    /// Stop flag.  A mechanism calls [`StepContext::request_stop`] to ask the
+    /// engine to terminate the run after the current step completes.
+    pub stop: &'a mut bool,
+}
+
+impl<W: WorldState> StepContext<'_, W> {
+    /// Request that the simulation stop after the current step finishes.
+    ///
+    /// All remaining mechanisms in the current step still run; the engine
+    /// checks the flag once the step completes (see
+    /// [`Simulation::run`](../socsim_engine/struct.Simulation.html#method.run)).
+    pub fn request_stop(&mut self) {
+        *self.stop = true;
+    }
+}
+
+// ── Blackboard ────────────────────────────────────────────────────────────────
+
+/// Step-scoped, type-erased key/value store handed to mechanisms via
+/// [`StepContext::scratch`].
+///
+/// The engine clears it at the start of every step, so values written during a
+/// step are visible to later mechanisms in the same step and to the driver
+/// immediately after [`Simulation::step`](../socsim_engine/struct.Simulation.html#method.step)
+/// returns — but not on the next step.
+#[derive(Default)]
+pub struct Blackboard {
+    map: std::collections::HashMap<&'static str, Box<dyn std::any::Any>>,
+}
+
+impl Blackboard {
+    /// Create an empty blackboard.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert a value under `key`, replacing any previous value.
+    pub fn insert<T: std::any::Any>(&mut self, key: &'static str, value: T) {
+        self.map.insert(key, Box::new(value));
+    }
+
+    /// Borrow the value stored under `key`, if present and of type `T`.
+    pub fn get<T: std::any::Any>(&self, key: &'static str) -> Option<&T> {
+        self.map.get(key).and_then(|b| b.downcast_ref::<T>())
+    }
+
+    /// Mutably borrow the value stored under `key`, if present and of type `T`.
+    pub fn get_mut<T: std::any::Any>(&mut self, key: &'static str) -> Option<&mut T> {
+        self.map.get_mut(key).and_then(|b| b.downcast_mut::<T>())
+    }
+
+    /// Remove all entries.  Called by the engine at the start of each step.
+    pub fn clear(&mut self) {
+        self.map.clear();
+    }
 }
 
 // ── Mechanism ─────────────────────────────────────────────────────────────────
@@ -254,5 +313,26 @@ mod tests {
         let a = AgentId(1);
         let b = AgentId(2);
         assert!(a < b);
+    }
+
+    #[test]
+    fn blackboard_round_trips_typed_values() {
+        let mut bb = Blackboard::new();
+        bb.insert("count", 42u32);
+        bb.insert("label", "hello".to_string());
+        assert_eq!(bb.get::<u32>("count"), Some(&42));
+        assert_eq!(bb.get::<String>("label").map(String::as_str), Some("hello"));
+        // Wrong type → None.
+        assert_eq!(bb.get::<i64>("count"), None);
+        // Missing key → None.
+        assert_eq!(bb.get::<u32>("missing"), None);
+    }
+
+    #[test]
+    fn blackboard_clear_removes_all() {
+        let mut bb = Blackboard::new();
+        bb.insert("x", 1u8);
+        bb.clear();
+        assert_eq!(bb.get::<u8>("x"), None);
     }
 }

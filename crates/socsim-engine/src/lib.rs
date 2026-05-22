@@ -8,7 +8,8 @@
 //! - [`SimulationBuilder`] — fluent builder with sensible defaults.
 
 use socsim_core::{
-    AgentId, Mechanism, Phase, Recorder, Result, Scheduler, SimRng, StepContext, WorldState,
+    AgentId, Blackboard, Mechanism, Phase, Recorder, Result, Scheduler, SimRng, StepContext,
+    WorldState,
 };
 use socsim_log::InMemoryRecorder;
 
@@ -58,6 +59,11 @@ pub struct Simulation<W: WorldState> {
     scheduler: Box<dyn Scheduler<W>>,
     rng: SimRng,
     recorder: Box<dyn Recorder>,
+    /// Step-scoped scratch space (cleared at the start of every step).
+    scratch: Blackboard,
+    /// Set to `true` when a mechanism calls
+    /// [`StepContext::request_stop`](socsim_core::StepContext::request_stop).
+    stop_requested: bool,
 }
 
 impl<W: WorldState> Simulation<W> {
@@ -77,6 +83,11 @@ impl<W: WorldState> Simulation<W> {
         // `&mut world` borrow below.
         let clock_snapshot = *self.world.clock();
 
+        // Clear step-scoped scratch so values from the previous step don't
+        // leak into this one.  Values written this step remain readable by the
+        // driver until the next `step()` call.
+        self.scratch.clear();
+
         // Determine activation order.  We need a shared borrow of world here,
         // which is fine because we drop it before taking the mutable borrow
         // inside the phase loop.
@@ -92,6 +103,8 @@ impl<W: WorldState> Simulation<W> {
                         rng: &mut self.rng,
                         recorder: self.recorder.as_mut(),
                         agent_order: &order,
+                        scratch: &mut self.scratch,
+                        stop: &mut self.stop_requested,
                     };
                     mech.apply(phase, &mut ctx)?;
                 }
@@ -101,12 +114,51 @@ impl<W: WorldState> Simulation<W> {
         Ok(())
     }
 
-    /// Run the simulation to completion (until `world.clock().is_done()`).
+    /// Run the simulation to completion.
+    ///
+    /// Stops when **either** the clock reaches `t_max`
+    /// ([`SimClock::is_done`](socsim_core::SimClock::is_done)) **or** a
+    /// mechanism has requested a stop via
+    /// [`StepContext::request_stop`](socsim_core::StepContext::request_stop).
     pub fn run(&mut self) -> Result<()> {
-        while !self.world.clock().is_done() {
+        while !self.world.clock().is_done() && !self.stop_requested {
             self.step()?;
         }
         Ok(())
+    }
+
+    /// Run until the clock is done, a stop is requested, **or** `predicate`
+    /// returns `true` when evaluated against the world after a step.
+    ///
+    /// The predicate is checked *after* each step, so the simulation always
+    /// advances at least one step before it can terminate via the predicate.
+    /// This is the idiomatic way to stop on convergence:
+    ///
+    /// ```ignore
+    /// sim.run_until(|w| w.is_converged())?;
+    /// ```
+    pub fn run_until<F>(&mut self, predicate: F) -> Result<()>
+    where
+        F: Fn(&W) -> bool,
+    {
+        while !self.world.clock().is_done() && !self.stop_requested {
+            self.step()?;
+            if predicate(&self.world) {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns `true` if a mechanism has requested the run to stop.
+    pub fn stop_requested(&self) -> bool {
+        self.stop_requested
+    }
+
+    /// Shared reference to the step-scoped scratch space.  Most useful right
+    /// after [`Simulation::step`] to read values a mechanism left for the driver.
+    pub fn scratch(&self) -> &Blackboard {
+        &self.scratch
     }
 
     /// Shared reference to the world state.
@@ -203,6 +255,8 @@ impl<W: WorldState> SimulationBuilder<W> {
             recorder: self
                 .recorder
                 .unwrap_or_else(|| Box::new(InMemoryRecorder::new())),
+            scratch: Blackboard::new(),
+            stop_requested: false,
         }
     }
 }
@@ -328,5 +382,86 @@ mod tests {
         sim.run().unwrap();
         // Just check the accessor compiles and doesn't panic.
         let _ = sim.recorder();
+    }
+
+    // ── #1: early stop ────────────────────────────────────────────────────────
+
+    /// A mechanism that requests a stop once `world.counter` reaches a target.
+    struct StopAtMechanism {
+        target: u32,
+    }
+
+    impl Mechanism<SimpleWorld> for StopAtMechanism {
+        fn name(&self) -> &str {
+            "stop_at"
+        }
+        fn phases(&self) -> &'static [Phase] {
+            &[Phase::PostStep]
+        }
+        fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, SimpleWorld>) -> Result<()> {
+            if ctx.world.counter >= self.target {
+                ctx.request_stop();
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn request_stop_halts_run_before_t_max() {
+        // t_max = 100 but we stop as soon as counter hits 3.
+        let world = SimpleWorld::new(100, 1);
+        let mut sim = SimulationBuilder::new(world)
+            .add_mechanism(Box::new(CountMechanism)) // counter += 1 each step
+            .add_mechanism(Box::new(StopAtMechanism { target: 3 }))
+            .build();
+        sim.run().unwrap();
+        assert!(sim.stop_requested());
+        assert_eq!(sim.world().counter, 3);
+        assert!(sim.world().clock().t() < sim.world().clock().t_max());
+    }
+
+    #[test]
+    fn run_until_stops_on_predicate() {
+        let world = SimpleWorld::new(100, 1);
+        let mut sim = SimulationBuilder::new(world)
+            .add_mechanism(Box::new(CountMechanism))
+            .build();
+        sim.run_until(|w| w.counter >= 5).unwrap();
+        assert_eq!(sim.world().counter, 5);
+        assert!(sim.world().clock().t() < 100);
+    }
+
+    // ── #6: step-scoped scratch ────────────────────────────────────────────────
+
+    /// Writes a transient value into the blackboard each step.
+    struct ScratchWriter;
+
+    impl Mechanism<SimpleWorld> for ScratchWriter {
+        fn name(&self) -> &str {
+            "scratch_writer"
+        }
+        fn phases(&self) -> &'static [Phase] {
+            &[Phase::Decision]
+        }
+        fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, SimpleWorld>) -> Result<()> {
+            let t = ctx.clock.t();
+            ctx.scratch.insert("last_t", t);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn scratch_is_readable_by_driver_after_step_and_cleared_next_step() {
+        let world = SimpleWorld::new(10, 1);
+        let mut sim = SimulationBuilder::new(world)
+            .add_mechanism(Box::new(ScratchWriter))
+            .build();
+
+        sim.step().unwrap();
+        assert_eq!(sim.scratch().get::<u64>("last_t"), Some(&1));
+
+        sim.step().unwrap();
+        // Cleared at the start of step 2, then re-written with the new t.
+        assert_eq!(sim.scratch().get::<u64>("last_t"), Some(&2));
     }
 }
