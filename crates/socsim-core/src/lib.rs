@@ -149,6 +149,23 @@ pub trait Recorder {
     /// Record a structured event at time `t`.
     fn record_event(&mut self, t: u64, kind: &str, payload: serde_json::Value);
 
+    /// Record a *wide* row: several named columns sharing one time step and
+    /// `table`.  This is the natural shape for tabular per-step output (e.g. a
+    /// `metrics.csv` with many columns) that the scalar [`record_metric`] API
+    /// forces callers to pivot back together.
+    ///
+    /// The default implementation fans the row out into individual
+    /// [`record_metric`] calls keyed as `"{table}.{column}"`, so existing
+    /// recorders keep working unchanged.  Recorders that can represent rows
+    /// natively (e.g. a CSV writer) should override this.
+    ///
+    /// [`record_metric`]: Recorder::record_metric
+    fn record_row(&mut self, t: u64, table: &str, row: &[(&str, f64)]) {
+        for (col, value) in row {
+            self.record_metric(t, &format!("{table}.{col}"), *value);
+        }
+    }
+
     /// Optional downcast support.  Returns `Some(&dyn std::any::Any)` when the
     /// concrete type supports it; `None` by default.
     fn as_any(&self) -> Option<&dyn std::any::Any> {
