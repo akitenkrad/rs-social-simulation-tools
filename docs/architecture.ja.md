@@ -6,17 +6,18 @@
 
 ## クレートワークスペース
 
-ワークスペースは3層に整理された9つのクレートで構成されています：
+ワークスペースは3層に整理された10個のクレートで構成されています：
 
 ```
 socsim-cli          ← バイナリ（エントリーポイント）
     └── socsim-runner      ← マルチシード実行，スイープ，サマリー
             ├── socsim-engine      ← Simulation, SimulationBuilder, スケジューラー
-            │       └── socsim-log         ← InMemoryRecorder, JsonlRecorder
+            │       └── socsim-log         ← InMemoryRecorder, JsonlRecorder, CsvRecorder
             ├── socsim-config      ← Params, Registry, ModulePack, Scenarioローダー
-            │       └── socsim-core        ← トレイト (Mechanism, WorldState, …), AgentId, Phase
+            │       └── socsim-core        ← トレイト (Mechanism, WorldState, …), AgentId, Phase, Blackboard
             ├── socsim-hr-lifecycle ← リファレンスモジュール（10メカニズム）
             │       └── socsim-net         ← SocialNetwork（ER, WS, BAジェネレーター）
+            ├── socsim-grid        ← Grid, GridIndex, 近傍, 距離（空間モデル）
             └── socsim-rng         ← SimRng (ChaCha20), derive_seed
 ```
 
@@ -27,7 +28,7 @@ socsim-cli          ← バイナリ（エントリーポイント）
 - `socsim-engine` は `socsim-core`，`socsim-log`，`socsim-config` に依存します．
 - `socsim-runner` は上記すべてに依存し，並列処理のために `rayon` を追加します．
 - `socsim-cli` はすべてを `socsim` バイナリとして結合します．
-- `socsim-hr-lifecycle` と `socsim-net` はエンジン層の隣に位置し，直交しています．
+- `socsim-hr-lifecycle`，`socsim-net`，`socsim-grid` はエンジン層の隣に位置し，直交しています；`socsim-grid` は `socsim-core` にのみ依存します．
 
 ---
 
