@@ -1,0 +1,17 @@
+[package]
+name        = "socsim-engine"
+description = "Simulation engine and builder for socsim"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rand.workspace       = true
+serde_json.workspace = true
+socsim-core   = { path = "../socsim-core" }
+socsim-log    = { path = "../socsim-log" }
+
+[dev-dependencies]
+socsim-config = { path = "../socsim-config" }
+socsim-log    = { path = "../socsim-log" }

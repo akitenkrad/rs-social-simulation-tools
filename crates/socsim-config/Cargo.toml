@@ -1,0 +1,12 @@
+[package]
+name        = "socsim-config"
+description = "Mechanism Registry and TOML parameter handling for socsim"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+toml.workspace      = true
+serde.workspace     = true
+socsim-core = { path = "../socsim-core" }

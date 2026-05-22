@@ -1,0 +1,12 @@
+[package]
+name        = "socsim-core"
+description = "Core traits and types for the socsim social-simulation platform"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace  = true
+socsim-rng = { path = "../socsim-rng" }

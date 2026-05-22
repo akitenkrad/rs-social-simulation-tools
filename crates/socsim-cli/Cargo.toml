@@ -1,0 +1,22 @@
+[package]
+name        = "socsim-cli"
+description = "CLI binary `socsim` for the socsim social-simulation platform"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "socsim"
+path = "src/main.rs"
+
+[dependencies]
+socsim-core         = { path = "../socsim-core" }
+socsim-config       = { path = "../socsim-config" }
+socsim-engine       = { path = "../socsim-engine" }
+socsim-log          = { path = "../socsim-log" }
+socsim-runner       = { path = "../socsim-runner" }
+socsim-hr-lifecycle = { path = "../socsim-hr-lifecycle" }
+clap.workspace      = true
+serde_json.workspace = true
+anyhow.workspace    = true

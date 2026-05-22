@@ -1,0 +1,19 @@
+[package]
+name        = "socsim-runner"
+description = "Trial management, multi-seed runs, and parameter sweeps for socsim"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+socsim-core   = { path = "../socsim-core" }
+socsim-config = { path = "../socsim-config" }
+socsim-engine = { path = "../socsim-engine" }
+socsim-log    = { path = "../socsim-log" }
+serde.workspace      = true
+serde_json.workspace = true
+rayon.workspace      = true
+
+[dev-dependencies]
+socsim-hr-lifecycle = { path = "../socsim-hr-lifecycle" }

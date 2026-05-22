@@ -1,0 +1,20 @@
+[package]
+name        = "socsim-hr-lifecycle"
+description = "Reference research module: 9-stage employee lifecycle ABM for socsim"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace      = true
+serde_json.workspace = true
+rand.workspace       = true
+rand_distr.workspace = true
+socsim-core   = { path = "../socsim-core" }
+socsim-net    = { path = "../socsim-net" }
+socsim-config = { path = "../socsim-config" }
+
+[dev-dependencies]
+socsim-engine = { path = "../socsim-engine" }
+socsim-log    = { path = "../socsim-log" }

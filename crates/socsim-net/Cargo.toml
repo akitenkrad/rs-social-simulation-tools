@@ -1,0 +1,12 @@
+[package]
+name        = "socsim-net"
+description = "Social network layer for socsim (petgraph wrapper with reproducible generators)"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+petgraph.workspace   = true
+rand.workspace       = true
+socsim-core = { path = "../socsim-core" }

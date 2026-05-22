@@ -1,0 +1,58 @@
+<svg width="100%" viewBox="0 0 1200 300" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>rs-social-simulation-tools (socsim)</title>
+<desc>A composable agent-based social-simulation platform in Rust. Mechanisms compose like neural-network layers over an ABM + RL-style tick loop.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="1194" height="294" rx="22" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<!-- left: wordmark + taglines -->
+<text class="title" x="70" y="132" font-size="74" fill="#2C2C2A">soc<tspan fill="#534AB7">sim</tspan></text>
+<text class="body" x="74" y="170" font-size="21" fill="#0F6E56" font-weight="600">rs-social-simulation-tools</text>
+<text class="body" x="74" y="206" font-size="19" fill="#444441">Composable agent-based social-simulation platform · Rust</text>
+<text class="body" x="74" y="234" font-size="14.5" fill="#6B6A64">ABM + RL-style tick loop · Mechanisms compose like neural-net layers</text>
+<text class="body" x="74" y="256" font-size="14.5" fill="#6B6A64">Deterministic · scenario-driven CLI · pluggable research modules</text>
+
+<!-- right motif: social network of agents -->
+<g stroke="#9B98C9" stroke-width="1.4">
+  <line x1="930" y1="95" x2="1010" y2="70"/>
+  <line x1="930" y1="95" x2="985" y2="150"/>
+  <line x1="1010" y1="70" x2="1085" y2="110"/>
+  <line x1="985" y1="150" x2="1085" y2="110"/>
+  <line x1="985" y1="150" x2="1060" y2="175"/>
+  <line x1="1085" y1="110" x2="1060" y2="175"/>
+</g>
+<g>
+  <circle cx="930"  cy="95"  r="15" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.4"/>
+  <circle cx="1010" cy="70"  r="15" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+  <circle cx="1085" cy="110" r="15" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.4"/>
+  <circle cx="985"  cy="150" r="15" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+  <circle cx="1060" cy="175" r="15" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.4"/>
+</g>
+
+<!-- right motif: 6-phase tick loop strip -->
+<g>
+  <rect x="900"  y="225" width="30" height="22" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <rect x="942"  y="225" width="30" height="22" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <rect x="984"  y="225" width="30" height="22" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <rect x="1026" y="225" width="30" height="22" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <rect x="1068" y="225" width="30" height="22" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <rect x="1110" y="225" width="30" height="22" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <path d="M930 236 H942" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+  <path d="M972 236 H984" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+  <path d="M1014 236 H1026" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+  <path d="M1056 236 H1068" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+  <path d="M1098 236 H1110" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+</g>
+</svg>

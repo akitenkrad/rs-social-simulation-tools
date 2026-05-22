@@ -1,0 +1,11 @@
+[package]
+name        = "socsim-rng"
+description = "Deterministic RNG with explicit seed hierarchy for socsim"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rand.workspace       = true
+rand_chacha.workspace = true

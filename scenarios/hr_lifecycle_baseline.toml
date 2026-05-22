@@ -1,0 +1,88 @@
+# HR Lifecycle Baseline Scenario
+# 5 teams × 8 employees, 60 monthly steps, seed 42, random activation.
+# Runs all 9 HR lifecycle mechanisms with their calibrated default parameters.
+
+[simulation]
+name        = "hr_lifecycle_baseline"
+module_pack = "hr-lifecycle"
+t_max       = 60
+seed        = 42
+scheduler   = "random_activation"
+
+[world]
+n_teams           = 5
+team_size_initial = 8
+network_model     = "watts_strogatz"
+network_k         = 4
+network_beta      = 0.1
+
+# --- Mechanisms are composed in declaration order ---
+
+[[mechanism]]
+name  = "learning_curve"
+phase = "environment"
+[mechanism.params]
+lambda_learn = 0.15          # Bahk & Gort (1993)
+
+[[mechanism]]
+name  = "peer_effect"
+phase = "interaction"
+[mechanism.params]
+alpha_peer = 0.17            # Mas & Moretti (2009)
+
+[[mechanism]]
+name  = "ocb"
+phase = "interaction"
+[mechanism.params]
+alpha_k = 0.30
+
+[[mechanism]]
+name  = "fit"
+phase = "decision"
+[mechanism.params]
+rho_pj = 0.20                # Kristof-Brown et al. (2005)
+rho_po = 0.07
+
+[[mechanism]]
+name  = "turnover"
+phase = "decision"
+[mechanism.params]
+rho_po_turn       = -0.35    # Kristof-Brown et al. (2005)
+base_quit_logit   = -4.82
+quit_embed_sens   = 1.0
+quit_sat_sens     = 0.8
+quit_cascade_bump = 0.30
+
+[[mechanism]]
+name  = "knowledge_loss"
+phase = "post_step"
+[mechanism.params]
+phi_tacit  = 0.85            # Nonaka (1994)
+beta_loss  = 1.0
+kappa_loss = 0.40
+
+[[mechanism]]
+name  = "toxic_spread"
+phase = "interaction"
+[mechanism.params]
+p_toxic  = 0.04              # Housman & Minor (2015)
+p_spread = 0.46
+
+[[mechanism]]
+name  = "hiring"
+phase = "decision"
+[mechanism.params]
+rho_si  = 0.51               # Schmidt & Hunter (1998)
+p_toxic = 0.04
+
+[[mechanism]]
+name  = "socialization"
+phase = "post_step"
+
+[[mechanism]]
+name  = "org_performance"
+phase = "reward"
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"
+metrics  = ["org_performance", "avg_tenure", "turnover_rate", "knowledge_stock"]

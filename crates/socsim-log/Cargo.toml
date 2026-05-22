@@ -1,0 +1,11 @@
+[package]
+name        = "socsim-log"
+description = "Recorder implementations for socsim (in-memory and JSONL)"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+socsim-core = { path = "../socsim-core" }
