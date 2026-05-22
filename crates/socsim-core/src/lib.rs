@@ -15,7 +15,7 @@
 //! `socsim-rng`'s [`SimRng`] is re-exported here so downstream crates only
 //! need to depend on `socsim-core`.
 
-pub use socsim_rng::SimRng;
+pub use socsim_rng::{derive_seed, SimRng};
 
 // ── AgentId ──────────────────────────────────────────────────────────────────
 
