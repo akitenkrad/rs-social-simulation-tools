@@ -178,6 +178,29 @@ pub trait Recorder {
     }
 }
 
+// ── NullRecorder ───────────────────────────────────────────────────────────────
+
+/// A no-op [`Recorder`] that silently discards everything recorded through it.
+///
+/// This is the default sink used by the engine's builder, so that pure-library
+/// users who do not need any recording need not depend on a concrete recorder
+/// implementation (e.g. `socsim-log`).  Every method does nothing; downcasting
+/// via [`as_any`](Recorder::as_any) is supported so callers can detect it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NullRecorder;
+
+impl Recorder for NullRecorder {
+    fn record_metric(&mut self, _t: u64, _key: &str, _value: f64) {}
+
+    fn record_event(&mut self, _t: u64, _kind: &str, _payload: serde_json::Value) {}
+
+    fn record_row(&mut self, _t: u64, _table: &str, _row: &[(&str, f64)]) {}
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
+
 // ── StepContext ───────────────────────────────────────────────────────────────
 
 /// Execution context passed to every [`Mechanism::apply`] call.
@@ -356,5 +379,18 @@ mod tests {
         bb.insert("x", 1u8);
         bb.clear();
         assert_eq!(bb.get::<u8>("x"), None);
+    }
+
+    #[test]
+    fn null_recorder_discards_everything() {
+        let mut rec = NullRecorder;
+        // All recording calls are no-ops and must not panic.
+        rec.record_metric(0, "avg", 1.5);
+        rec.record_event(1, "hired", serde_json::json!({ "id": 7 }));
+        rec.record_row(2, "metrics", &[("avg", 0.5), ("moved", 3.0)]);
+
+        // as_any downcasts to the concrete NullRecorder, as documented.
+        let any = rec.as_any().expect("NullRecorder supports downcasting");
+        assert!(any.downcast_ref::<NullRecorder>().is_some());
     }
 }

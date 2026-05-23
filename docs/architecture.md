@@ -65,6 +65,21 @@ A mechanism registers its phases by returning a `'static` slice from `Mechanism:
 | `toxic_spread` | Interaction |
 | `org_performance` | Reward |
 
+### Event-driven / sub-tick models
+
+The fixed tick loop does **not** restrict socsim to one-action-per-agent-per-tick models. Event-driven, sub-tick dynamics (Gillespie-style reactions, voter models, contact-process contagion) are supported via a simple idiom: **batch many micro-events inside a single `Mechanism::apply` and map those events onto one tick.** One `apply()` call performs `events_per_step` random single-cell/agent updates (all drawn from `ctx.rng`), so the engine tick becomes the observation/checkpoint cadence while the per-event update semantics are preserved. A mechanism can call `ctx.request_stop()` when the model reaches an absorbing state. See `crates/socsim-engine/examples/cellular_automata.rs` for a worked lattice voter model.
+
+---
+
+## Two usage paths: scenario-CLI vs. library mode
+
+socsim is usable two ways, and **both are first-class**:
+
+- **Scenario-TOML / CLI path** — `ModulePack` → `Registry` → scenario `.toml` → `socsim-runner` → `socsim` binary. Best for new projects, reproducible scenario files, and parameter sweeps.
+- **Library mode** — depend on just `socsim-core` / `socsim-engine` (and optionally `socsim-grid`), build the world yourself, add mechanisms directly to `SimulationBuilder`, drive it with `run` / `run_until` / `run_observed`, and bring your own recorder (or none — the default is `NullRecorder`, so the engine forces no `socsim-log` dependency). Best for embedding the engine in an existing tool, custom output schemas, and self-contained lattice/CA models.
+
+The two paths share the same engine and determinism guarantees; choose per project rather than per platform. See the [library guide](library.md#lightweight-engine-only-usage-no-toml--runner) for the trade-off table.
+
 ---
 
 ## Deterministic RNG

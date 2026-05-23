@@ -65,6 +65,21 @@ PreStep → Environment → Decision → Interaction → Reward → PostStep
 | `toxic_spread` | Interaction |
 | `org_performance` | Reward |
 
+### イベント駆動 / サブティックモデル
+
+固定のティックループは，socsim を1ティックあたりエージェント1アクションのモデルに制限**しません**．イベント駆動・サブティックのダイナミクス（Gillespie型反応，投票者モデル，接触過程の感染）は，単純な慣用句でサポートされます：**多数の微小イベントを1つの `Mechanism::apply` 内でバッチ処理し，それらのイベントを1ティックにマッピングする**ことです．1回の `apply()` 呼び出しが `events_per_step` 個のランダムな単一セル／エージェント更新（すべて `ctx.rng` から引く）を実行するので，エンジンのティックが観測／チェックポイントの間隔となり，イベントごとの更新セマンティクスは保たれます．モデルが吸収状態に達したとき，メカニズムは `ctx.request_stop()` を呼べます．動作する格子投票者モデルは `crates/socsim-engine/examples/cellular_automata.rs` を参照してください．
+
+---
+
+## 2つの利用経路：シナリオCLI vs. ライブラリモード
+
+socsim は2通りの使い方ができ，**どちらもファーストクラス**です：
+
+- **シナリオTOML / CLI経路** — `ModulePack` → `Registry` → シナリオ `.toml` → `socsim-runner` → `socsim` バイナリ．新規プロジェクト，再現可能なシナリオファイル，パラメータスイープに最適です．
+- **ライブラリモード** — `socsim-core` / `socsim-engine`（および任意で `socsim-grid`）だけに依存し，ワールドを自分で構築し，メカニズムを `SimulationBuilder` に直接追加し，`run` / `run_until` / `run_observed` で駆動し，独自のレコーダーを持ち込みます（あるいは持ち込まない — デフォルトは `NullRecorder` なので，エンジンは `socsim-log` 依存を強制しません）．既存ツールへのエンジン埋め込み，カスタム出力スキーマ，自己完結型の格子／CAモデルに最適です．
+
+2つの経路は同じエンジンと決定論性の保証を共有します；プラットフォームごとではなくプロジェクトごとに選択してください．トレードオフ表は[ライブラリガイド](library.ja.md#軽量エンジンのみの利用toml--runner-なし)を参照してください．
+
 ---
 
 ## 決定論的RNG

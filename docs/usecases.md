@@ -202,3 +202,62 @@ cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover
 ```
 
 This trains a `burn` policy network so employees learn to stay/quit by individual-rationality reward, reproducing rational turnover as an emergent policy. To wire MARL into your own world, implement `ObsEncoder` / `ActionApplier` / `RewardFn` and drive `MarlTrainer` — see the [library guide](library.md#learnable-policies-marl).
+
+---
+
+## 7. Event-driven / cellular-automata lattice model
+
+Not every model is one-action-per-agent-per-tick. **Event-driven** (Gillespie-style) models — voter models, contact-process contagion, sub-tick reaction dynamics — fire *many* micro-events between observable points in time. socsim runs on a discrete tick loop, so the idiom is to **batch a fixed number of micro-events inside one `Mechanism::apply` and map those events onto a single tick**. The runnable example is `crates/socsim-engine/examples/cellular_automata.rs` — a voter model on a toroidal lattice.
+
+```sh
+cargo run -p socsim-engine --example cellular_automata
+```
+
+### Lattice state with `CellGrid` + precomputed `Adjacency`
+
+Hold per-cell state in a `CellGrid<T>` and precompute the neighbour table **once** as an `Adjacency`, so the hot loop never allocates:
+
+```rust,ignore
+use socsim_grid::{Adjacency, Boundary, CellGrid, Grid, Neighborhood};
+
+struct VoterWorld {
+    clock: socsim_core::SimClock,
+    cells: CellGrid<u8>,   // one opinion per cell, row-major
+    adjacency: Adjacency,  // CSR neighbour table, flat indices
+}
+
+let grid = Grid::new(16, 16, Boundary::Toroidal);
+let adjacency = grid.adjacency(Neighborhood::Moore);            // built once
+let cells = CellGrid::from_fn(grid, |_r, _c| rng.gen_range(0..4));
+```
+
+### Batch many events into one tick
+
+```rust,ignore
+fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, VoterWorld>) -> Result<()> {
+    let n = ctx.world.cells.len();
+    // One engine tick == `events_per_step` voter events.
+    for _ in 0..self.events_per_step {
+        let idx = ctx.rng.gen_range(0..n);                       // random cell
+        let nbrs = ctx.world.adjacency.neighbors(idx);           // O(1) slice
+        if nbrs.is_empty() { continue; }
+        let nbr = nbrs[ctx.rng.gen_range(0..nbrs.len())];
+        let opinion = *ctx.world.cells.get_idx(nbr).unwrap();
+        *ctx.world.cells.get_idx_mut(idx).unwrap() = opinion;    // copy neighbour
+    }
+    // Absorbing state: stop once the lattice is uniform.
+    if ctx.world.distinct_opinions() <= 1 { ctx.request_stop(); }
+    Ok(())
+}
+```
+
+### Collect a per-step metric with `run_observed`
+
+```rust,ignore
+sim.run_observed(|report| {
+    // distinct opinions after each tick; report.stopped == true at consensus
+    println!("t={} distinct={}", report.t, report.world.distinct_opinions());
+})?;
+```
+
+The model uses the default `NullRecorder` — no `socsim-log` dependency required. See the [library guide](library.md#non-allocating-neighbour-queries) for the neighbour-API details and the [per-step observation](library.md#per-step-observation-run_observed--stepreport) section for `run_observed` / `StepReport`.

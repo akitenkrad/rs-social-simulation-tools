@@ -146,7 +146,7 @@ let growth: Box<dyn Mechanism<CounterWorld>> = reg.build("growth", &params).unwr
 |---|---|
 | scheduler | `SequentialScheduler`（`AgentId` のソート順） |
 | seed | `0` |
-| recorder | `InMemoryRecorder` |
+| recorder | `NullRecorder`（no-op） |
 
 ```rust,ignore
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
@@ -188,6 +188,33 @@ fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, MyWorld>) -> Result<()>
     Ok(())
 }
 ```
+
+---
+
+## ステップごとの観測：`run_observed` / `StepReport`
+
+**各ステップの後に**メトリクスが必要なとき — 収束曲線，ティックごとのカウント，進捗のライブ表示など — `step()` でループを自分で駆動し，`world()` / `scratch()` を読むこともできます．`run_observed` はそのパターンをまとめたもので，ループを手書きしたり，壊れやすい文字列ベースのスクラッチ読み出しに頼ったりする必要をなくします：
+
+```rust,ignore
+let mut history = Vec::new();
+sim.run_observed(|report| {
+    // report: StepReport { t, stopped, world, scratch }
+    history.push(report.world.distinct_opinions());
+})?;
+```
+
+クロージャは実行された各ステップごとに1回，そのステップの**後**の状態を反映した `StepReport` とともに呼び出されます：
+
+| フィールド | 意味 |
+|---|---|
+| `t` | ステップ後のクロック時刻 |
+| `stopped` | このステップ中にメカニズムが停止を要求した場合 `true` |
+| `world` | ステップ後の共有 `&W` |
+| `scratch` | ステップ後の共有 `&Blackboard`（メカニズムが残したステップ毎の値） |
+
+終了条件は `run()` と同じです（クロック完了**または**停止要求）；オブザーバーは停止が要求されたステップでも呼ばれ（そのレポートは `stopped == true`），その後のステップでは呼ばれません．1ステップずつ進めたい場合は `step_reported()` が1ステップ分の同じ `StepReport` を返します．
+
+これがライブラリモデルにおける推奨のステップごとループです — `crates/socsim-engine/examples/cellular_automata.rs` を参照してください．
 
 ---
 
@@ -263,6 +290,26 @@ let mut sim = SimulationBuilder::new(world)
 
 `derive_seed`（`socsim-core` から再エクスポートされています）は `SimRng::derive` が使うものと同じFNV-1aミックスなので，2つのストリームは無相関でありながら，単一のルートシードから完全に再現可能です．
 
+#### RNGストリームのラベル付け規約
+
+各モデルが独自のラベルを再発明しなくて済むように，socsim はほぼすべてのモデルが必要とする2つのストリームに対して，小さな固定規約を推奨します：
+
+| ラベル | ストリーム |
+|---|---|
+| `derive_seed(root, &[0])` | ワールド初期化（エージェント配置，セルのランダム化） |
+| `derive_seed(root, &[1])` | エンジン / スケジューラー（`SimulationBuilder::seed` に渡す） |
+
+```rust,ignore
+let root = seed;
+let mut init_rng = SimRng::from_seed(derive_seed(root, &[0])); // world init
+let world = MyWorld::new(&mut init_rng);
+let mut sim = SimulationBuilder::new(world)
+    .seed(derive_seed(root, &[1]))                              // engine
+    .build();
+```
+
+モデルが所有する追加の独立ストリームには，さらなるラベル（`&[2]`，`&[3]`，…）を割り当ててください．`cellular_automata` の例はまさにこの規約に従っています．
+
 自作のコードで決定論性を検証するには，同じシードで2つのシミュレーションを実行して出力を比較します — `custom_mechanism.rs` の例がまさにこれを行っています．
 
 ---
@@ -280,7 +327,9 @@ fn record_row(&mut self, t: u64, table: &str, row: &[(&str, f64)]);
 
 `record_row` は，多数の列を持つ `metrics.csv` 形式の出力に自然な形です；デフォルト実装は1つの行を `"{table}.{column}"` をキーとする `record_metric` 呼び出しへと展開するので，これをオーバーライドしないレコーダーも引き続き動作します．
 
-`socsim-log` には3つの実装が含まれています：
+エンジンの**デフォルト**レコーダーは `NullRecorder`（`socsim-core` に定義）です．これはすべてを破棄するno-opシンクです．このため，エンジンはもはや `socsim-log` に依存しません：自前で出力を行う純粋なライブラリモデル（`cellular_automata` の例のような）は `socsim-core` / `socsim-engine` / `socsim-grid` だけで足り，具体的なレコーダーを取り込む必要はありません．メトリクス／イベントの記録が実際に必要なときにだけ `socsim-log` を追加し，`SimulationBuilder::recorder(...)` を呼び出します．
+
+`socsim-log` には3つの具体的な実装が含まれています：
 
 | 型 | 用途 |
 |---|---|
@@ -298,6 +347,15 @@ rec.record_row(1, "metrics", &[("avg_same", 0.64), ("n_moved", 21.0)]);
 let csv = rec.table_csv("metrics").unwrap();   // "t,avg_same,n_moved\n0,0.53,0\n1,0.64,21\n"
 std::fs::write("metrics.csv", csv).unwrap();
 ```
+
+デフォルトでは `CsvRecorder` は列が最初に観測された順序で列を発見します．**呼び出し側が定義した**列の順序とスキーマを固定したい場合 — 下流のツールが正確なヘッダーを期待する場合などに便利です — 描画の前に `set_columns` を呼び出します：
+
+```rust,ignore
+rec.set_columns("metrics", &["n_moved", "avg_same"]);  // 列順を固定
+let csv = rec.table_csv("metrics").unwrap();            // ヘッダー: "t,n_moved,avg_same"
+```
+
+スキーマに列挙されていない列は省略されます；ある行に存在しないスキーマ列は空フィールドとして描画されます．`set_columns` は描画方法にのみ影響し，どの行が保存されるかには影響しません．
 
 `sim.run()` 後にレコーダーを検査する：
 
@@ -380,8 +438,41 @@ idx.move_to(AgentId(0), target.unwrap().0, target.unwrap().1).unwrap();
 | `Neighborhood` | `Moore`（8） / `VonNeumann`（4） |
 | `Metric` | `Chebyshev` / `Manhattan` / `Euclidean` |
 | `GridIndex` | `AgentId ↔ cell` の占有：`place`, `move_to`, `vacant_cells`, `nearest_vacant`, ソートされた `agent_ids` |
+| `CellGrid<T>` | すべてのセルにセルごとの可変状態 `T`（セルオートマトン／格子属性モデル） |
+| `Adjacency` | ホットな格子ループ向けの事前計算済みCSR近傍テーブル |
 
 `WorldState` の内部に `GridIndex`（あるいは素の `Grid`）を保持し，`Mechanism` から移動を駆動します．
+
+### アロケーションを伴わない近傍クエリ
+
+`Grid::neighbors` は呼び出しごとに新しい `Vec` をアロケートします．これは時折のルックアップには問題ありませんが，ホットループでは無駄です．ステップごとの格子コードでは，次のいずれかを推奨します：
+
+- `Grid::neighbors_into(r, c, nbhd, &mut buf)` / `neighbors_radius_into(...)` — 呼び出し側が所有する1つの `Vec` を呼び出し間で再利用し（クリアして再充填する），呼び出しごとのアロケーションを回避します．
+- `Grid::neighbors_iter(r, c, nbhd)` — 半径1のイテレーターで，近傍をスタックから直接生成し，ヒープアロケーションを一切行いません．
+- `Grid::adjacency(nbhd)` / `adjacency_radius(nbhd, radius)` — 近傍テーブル全体を **一度だけ事前計算** して `Adjacency`（CSR，行優先のフラットインデックス）にします．`adj.neighbors(idx)` はセル `idx = r * cols + c` の近傍をO(1)の借用 `&[usize]` として返します．これは*同じ*近傍集合を毎ティック問い合わせる場合（セルオートマトン，拡散，格子上の感染）に推奨される構造です：ワールド構築時に構築し，`WorldState` に保持してください．
+
+4つともすべて同じ決定論的なソート済み行優先順で近傍を返すので，結果は相互に交換可能です．
+
+### `CellGrid<T>` によるセルごとの状態
+
+`GridIndex` が「このセルに*どのエージェント*がいるか」に答えるのに対し，`CellGrid<T>` は**すべての**セルに値 `T` を保持します — セルオートマトンや格子属性モデル（各セルが意見・戦略・カウンターを保持する）の基本要素です．`Grid` の境界対応の近傍クエリと，行優先のバッキング `Vec<T>` への直接的な可変アクセスを組み合わせます：
+
+```rust,ignore
+use socsim_grid::{CellGrid, Grid, Boundary, Neighborhood};
+
+// 意見の格子を構築；各セルは座標から（あるいはRNGから）初期化する．
+let grid = Grid::new(16, 16, Boundary::Toroidal);
+let adjacency = grid.adjacency(Neighborhood::Moore);   // 一度だけ事前計算
+let mut cells: CellGrid<u8> = CellGrid::from_fn(grid, |r, c| ((r + c) % 4) as u8);
+
+// ホットループ：O(1)の近傍ルックアップ，直接的なセル変更，アロケーションなし．
+let idx = 5 * 16 + 7;                       // セル (5, 7)，行優先のフラット
+let nbr = adjacency.neighbors(idx)[0];      // 近傍のフラットインデックス
+let opinion = *cells.get_idx(nbr).unwrap();
+*cells.get_idx_mut(idx).unwrap() = opinion; // それをコピーする
+```
+
+コンストラクタ：`CellGrid::new(grid, fill)`（すべてのセル `= fill.clone()`）と `CellGrid::from_fn(grid, |r, c| ...)`．アクセスは座標で（`get` / `get_mut`），フラットインデックスで（`get_idx` / `get_idx_mut`，`Adjacency` と一致），あるいは行優先のスライス全体で（`cells` / `cells_mut`）；`neighbors` / `neighbor_values` は近傍を直接読み取ります．`CellGrid` + `Adjacency` で構築した動作するイベント駆動CAは `crates/socsim-engine/examples/cellular_automata.rs` にあります．
 
 ---
 
@@ -415,7 +506,7 @@ write_my_csv(sim.world());          // your existing schema, no Recorder require
 | 出力 | `JsonlRecorder` / ランナーサマリー | 自分で書くもの |
 | 最適な用途 | 新規プロジェクト，パラメータスイープ，再現可能なシナリオファイル | 既存ツールへのエンジン埋め込み，カスタム出力スキーマ |
 
-実際に動作するエンジンのみの例は `crates/socsim-engine/examples/engine_only.rs` にあります．
+動作するライブラリモードの例は `crates/socsim-engine/examples/engine_only.rs`（収束する非空間モデル）と `crates/socsim-engine/examples/cellular_automata.rs`（`run_observed` を使い `CellGrid` + `Adjacency` 上に構築したイベント駆動の格子CA）にあります．
 
 ---
 
