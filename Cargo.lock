@@ -3707,6 +3707,7 @@ checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.6.4",
+ "serde",
 ]
 
 [[package]]
@@ -4312,6 +4313,7 @@ dependencies = [
 name = "socsim-core"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "socsim-rng",
  "thiserror 1.0.69",
@@ -4322,6 +4324,7 @@ name = "socsim-engine"
 version = "0.1.0"
 dependencies = [
  "rand 0.8.6",
+ "serde",
  "serde_json",
  "socsim-config",
  "socsim-core",
@@ -4377,6 +4380,8 @@ version = "0.1.0"
 dependencies = [
  "petgraph 0.6.5",
  "rand 0.8.6",
+ "serde",
+ "serde_json",
  "socsim-core",
 ]
 
@@ -4386,6 +4391,8 @@ version = "0.1.0"
 dependencies = [
  "rand 0.8.6",
  "rand_chacha 0.3.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -7,9 +7,11 @@
 //! - [`Simulation`] — drives the 6-phase execution loop.
 //! - [`SimulationBuilder`] — fluent builder with sensible defaults.
 
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use socsim_core::{
-    AgentId, Blackboard, Mechanism, Phase, Recorder, Result, Scheduler, SimRng, StepContext,
-    WorldState,
+    AgentId, Blackboard, Mechanism, Phase, Recorder, Result, Scheduler, SimRng, SocsimError,
+    StepContext, WorldState,
 };
 use socsim_log::InMemoryRecorder;
 
@@ -174,6 +176,90 @@ impl<W: WorldState> Simulation<W> {
     /// Mutable reference to the recorder, e.g. to downcast it for inspection.
     pub fn recorder_mut(&mut self) -> &mut dyn Recorder {
         self.recorder.as_mut()
+    }
+}
+
+// ── Snapshot ──────────────────────────────────────────────────────────────────
+
+/// On-disk format version for [`Snapshot`].  Bumped on any breaking change to
+/// the snapshot layout; [`Snapshot::load`] rejects mismatched versions.
+pub const SNAPSHOT_VERSION: u32 = 1;
+
+/// A serialisable capture of a simulation's **mutable state** — the analogue of
+/// a PyTorch `state_dict` (§6.1).
+///
+/// It holds the world (which owns the [`SimClock`](socsim_core::SimClock)), the
+/// exact RNG stream position, and the early-stop flag.  It deliberately does
+/// **not** capture mechanisms, the scheduler, or the recorder: those are *code*
+/// (the model architecture), supplied when the simulation is rebuilt.  Restoring
+/// a snapshot into a [`Simulation`] wired with the same mechanisms reproduces
+/// the run bit-identically from the saved step onward.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Snapshot<W> {
+    /// Format version, checked on [`Snapshot::load`].
+    pub version: u32,
+    /// Captured world state (includes the clock).
+    pub world: W,
+    /// Exact RNG stream state (seed + word position).
+    pub rng: SimRng,
+    /// Whether a mechanism had requested an early stop.
+    pub stop_requested: bool,
+}
+
+impl<W: WorldState + Clone> Simulation<W> {
+    /// Capture the current mutable state as an in-memory [`Snapshot`].
+    ///
+    /// Clones the world and RNG; the simulation is left untouched and can keep
+    /// running.  Requires `W: Clone`.
+    pub fn snapshot(&self) -> Snapshot<W> {
+        Snapshot {
+            version: SNAPSHOT_VERSION,
+            world: self.world.clone(),
+            rng: self.rng.clone(),
+            stop_requested: self.stop_requested,
+        }
+    }
+}
+
+impl<W: WorldState> Simulation<W> {
+    /// Overwrite this simulation's state with `snapshot`'s.
+    ///
+    /// Replaces the world, RNG stream, and stop flag, and clears the step-scoped
+    /// scratch.  Mechanisms, scheduler, and recorder are kept as-is — restore
+    /// into a simulation built with the **same** mechanisms to resume exactly.
+    pub fn restore(&mut self, snapshot: Snapshot<W>) {
+        self.world = snapshot.world;
+        self.rng = snapshot.rng;
+        self.stop_requested = snapshot.stop_requested;
+        self.scratch.clear();
+    }
+}
+
+impl<W: Serialize> Snapshot<W> {
+    /// Serialise this snapshot to a pretty-printed JSON file.
+    pub fn save<P: AsRef<std::path::Path>>(&self, path: P) -> Result<()> {
+        let file = std::fs::File::create(path)
+            .map_err(|e| SocsimError::Snapshot(format!("create: {e}")))?;
+        serde_json::to_writer_pretty(std::io::BufWriter::new(file), self)
+            .map_err(|e| SocsimError::Snapshot(format!("serialise: {e}")))
+    }
+}
+
+impl<W: DeserializeOwned> Snapshot<W> {
+    /// Load a snapshot from a JSON file, rejecting a mismatched
+    /// [`SNAPSHOT_VERSION`].
+    pub fn load<P: AsRef<std::path::Path>>(path: P) -> Result<Self> {
+        let file =
+            std::fs::File::open(path).map_err(|e| SocsimError::Snapshot(format!("open: {e}")))?;
+        let snap: Snapshot<W> = serde_json::from_reader(std::io::BufReader::new(file))
+            .map_err(|e| SocsimError::Snapshot(format!("deserialise: {e}")))?;
+        if snap.version != SNAPSHOT_VERSION {
+            return Err(SocsimError::Snapshot(format!(
+                "version mismatch: file is v{}, expected v{SNAPSHOT_VERSION}",
+                snap.version
+            )));
+        }
+        Ok(snap)
     }
 }
 

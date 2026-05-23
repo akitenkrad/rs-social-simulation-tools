@@ -7,6 +7,7 @@
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
+use serde::{Deserialize, Serialize};
 
 /// Deterministic RNG wrapper.
 ///
@@ -14,6 +15,11 @@ use rand_chacha::ChaCha20Rng;
 /// Use [`SimRng::from_seed`] to create the root RNG, then [`SimRng::derive`]
 /// to produce child RNGs for each agent, phase, or trial without mutating the
 /// parent.
+///
+/// Implements [`Clone`] and serde so the **exact** stream state (seed + word
+/// position) can be captured in a snapshot and resumed bit-identically — see
+/// [`Simulation::snapshot`](../socsim_engine/struct.Simulation.html#method.snapshot).
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SimRng {
     inner: ChaCha20Rng,
 }
@@ -125,5 +131,19 @@ mod tests {
     #[test]
     fn derive_seed_fn_is_deterministic() {
         assert_eq!(derive_seed(42, &[1, 2]), derive_seed(42, &[1, 2]));
+    }
+
+    #[test]
+    fn serde_round_trip_preserves_stream_position() {
+        // Advance the stream, snapshot it, then keep drawing.
+        let mut rng = SimRng::from_seed(123);
+        for _ in 0..5 {
+            let _ = rng.next_u64();
+        }
+        // Restore from a serialised copy and compare the *continuation*.
+        let json = serde_json::to_string(&rng).unwrap();
+        let mut restored: SimRng = serde_json::from_str(&json).unwrap();
+        assert_eq!(rng.next_u64(), restored.next_u64());
+        assert_eq!(rng.next_u64(), restored.next_u64());
     }
 }

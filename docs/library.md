@@ -415,4 +415,83 @@ write_my_csv(sim.world());          // your existing schema, no Recorder require
 | Output | `JsonlRecorder` / runner summaries | whatever you write |
 | Best for | new projects, parameter sweeps, reproducible scenario files | embedding the engine in an existing tool, custom output schemas |
 
+---
+
+## Snapshots: save & resume
+
+If your world derives `serde`, you can capture and restore a run's **mutable state** (world + exact RNG stream + clock + stop flag). Mechanisms, the scheduler, and the recorder are *not* captured — they are code you supply when rebuilding the simulation (the PyTorch `state_dict` vs. architecture split).
+
+```rust,ignore
+use socsim_engine::{SimulationBuilder, Snapshot};
+
+// 1. The world must be serde-serialisable (and Clone for in-memory snapshots).
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct MyWorld { /* ... */ }
+
+let mut sim = SimulationBuilder::new(MyWorld::new(/* ... */)).seed(7).build();
+for _ in 0..100 { sim.step()?; }
+
+// 2. Capture — in memory or to a JSON file.
+let snap = sim.snapshot();            // requires W: Clone
+snap.save("run.snapshot.json")?;      // requires W: Serialize
+
+// 3. Later (even a fresh process): rebuild the SAME mechanisms, then restore.
+let snap = Snapshot::load("run.snapshot.json")?;   // version-checked
+let mut resumed = SimulationBuilder::new(MyWorld::placeholder())
+    .seed(0)                          // overwritten by restore
+    .add_mechanism(Box::new(MyMechanism::new(/* same as before */)))
+    .build();
+resumed.restore(snap);
+resumed.run()?;                       // continues bit-identically from step 100
+```
+
+The methods are added by `impl` blocks gated on `W: Clone` / `Serialize` / `DeserializeOwned`, so the `WorldState` trait is unchanged — non-serde worlds simply lack them. The reference `HrWorld` (including its `SocialNetwork`, which serialises as a `{nodes, edges}` pair) is fully serde-able; see `examples/snapshot_resume.rs`. Restoring into a simulation wired with the same mechanisms reproduces the run bit-for-bit from the saved step onward, regardless of the new simulation's seed.
+
+---
+
+## Learnable policies (MARL)
+
+The `Decision` phase can be made *learnable* with `socsim-marl` (Phase 6): a `PolicyMechanism` wraps a `Policy` and plugs into the six-phase loop like any other mechanism. The default `Policy` is `DiscretePolicyNet`, a small [`burn`](https://burn.dev) MLP trained with REINFORCE on CPU, with weights seeded from `SimRng` for bit-reproducibility. Because the policy operates on flat `&[f32]` features and `usize` actions, you bridge your world with three small traits:
+
+```rust,ignore
+use socsim_marl::{
+    ActionApplier, DiscretePolicyNet, MarlTrainer, NetConfig, ObsEncoder,
+    PolicyMechanism, RewardFn, TrainConfig, TrajectoryBuffer,
+};
+
+struct MyEncoder;          // world + agent → feature vector
+impl ObsEncoder<MyWorld> for MyEncoder {
+    fn obs_dim(&self) -> usize { 4 }
+    fn encode(&self, w: &MyWorld, a: AgentId) -> Option<Vec<f32>> { /* ... */ }
+}
+struct MyApplier;          // chosen action index → world mutation
+impl ActionApplier<MyWorld> for MyApplier {
+    fn n_actions(&self) -> usize { 2 }
+    fn apply(&self, w: &mut MyWorld, a: AgentId, action: usize, rng: &mut SimRng) { /* ... */ }
+}
+struct MyReward;           // per-agent reward, read after each step
+impl RewardFn<MyWorld> for MyReward {
+    fn reward(&self, w: &MyWorld, a: AgentId) -> f32 { /* ... */ }
+}
+
+// Outer learning loop: build a fresh sim per episode with a collect-mode policy.
+let net = std::rc::Rc::new(std::cell::RefCell::new(
+    DiscretePolicyNet::new(NetConfig::new(4, 2), &mut SimRng::from_seed(0))?,
+));
+let mut trainer = MarlTrainer::new(net);
+let stats = trainer.train(
+    &TrainConfig { episodes: 50, seed: 0 },
+    |policy, buffer: std::rc::Rc<std::cell::RefCell<TrajectoryBuffer>>, seed| {
+        SimulationBuilder::new(MyWorld::new(/* ... */))
+            .seed(seed)
+            .add_mechanism(Box::new(PolicyMechanism::collecting(
+                policy, MyEncoder, MyApplier, buffer)))
+            .build()
+    },
+    &MyReward,
+)?;
+```
+
+After training, build the mechanism with `PolicyMechanism::inference(policy, …)` to run the **frozen** policy: it takes greedy actions, consumes no RNG, and stays bit-reproducible. `socsim-marl` pulls in `burn`, so the hr-lifecycle integration is gated behind a `marl` feature (`cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover`).
+
 A worked engine-only example lives at `crates/socsim-engine/examples/engine_only.rs`.

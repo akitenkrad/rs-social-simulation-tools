@@ -168,3 +168,37 @@ println!("Final GDP: {}", sim.world().gdp);
 ```
 
 このパターンの完全な実行可能バージョンは `crates/socsim-engine/examples/custom_mechanism.rs` を参照してください．
+
+---
+
+## 5. 長時間実行の一時停止と再開（スナップショット）
+
+実行をディスクにチェックポイントして後で再開できます — 長時間のスイープ，クラッシュ復旧，共通状態からの分岐 what-if 分析に有用です．World は `serde` を導出している必要があります．スナップショットは World・厳密な RNG ストリーム・クロックを捕捉しますが，mechanisms は**含みません**（再構築します）．
+
+```rust,ignore
+use socsim_engine::Snapshot;
+
+// ... 途中まで実行 ...
+for _ in 0..12 { sim.step()?; }
+sim.snapshot().save("checkpoint.json")?;
+
+// 後で：同じ mechanisms でシミュレーションを再構築してから復元．
+let snap = Snapshot::load("checkpoint.json")?;
+let mut resumed = build_my_sim(/* 任意のシード */);
+resumed.restore(snap);
+resumed.run()?;   // 12ヶ月目からビット単位で継続
+```
+
+実行可能デモ：`cargo run -p socsim-hr-lifecycle --example snapshot_resume`．詳細は[ライブラリガイド](library.ja.md#スナップショット保存と再開)を参照してください．
+
+---
+
+## 6. 学習する離職ポリシーの訓練（MARL）
+
+固定の意思決定ヒューリスティックを REINFORCE で学習したポリシーに置き換えます．参照モジュールは `marl` feature の背後に学習可能な離職ポリシーを同梱しています：
+
+```sh
+cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover
+```
+
+これは `burn` のポリシーネットワークを訓練し，従業員が個人合理性報酬によって stay/quit を学習，合理的離職を創発的なポリシーとして再現します．MARL を独自の World に組み込むには `ObsEncoder` / `ActionApplier` / `RewardFn` を実装し `MarlTrainer` を回します — [ライブラリガイド](library.ja.md#学習ポリシーmarl)を参照してください．
