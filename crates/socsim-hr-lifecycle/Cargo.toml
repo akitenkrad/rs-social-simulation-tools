@@ -14,7 +14,16 @@ rand_distr.workspace = true
 socsim-core   = { path = "../socsim-core" }
 socsim-net    = { path = "../socsim-net" }
 socsim-config = { path = "../socsim-config" }
+socsim-marl   = { path = "../socsim-marl", optional = true }
+
+[features]
+# Phase 6: learnable turnover policy (pulls in burn via socsim-marl).
+marl = ["dep:socsim-marl"]
 
 [dev-dependencies]
 socsim-engine = { path = "../socsim-engine" }
 socsim-log    = { path = "../socsim-log" }
+
+[[example]]
+name = "marl_turnover"
+required-features = ["marl"]

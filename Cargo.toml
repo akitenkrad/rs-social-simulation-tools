@@ -9,6 +9,7 @@ members = [
     "crates/socsim-net",
     "crates/socsim-grid",
     "crates/socsim-hr-lifecycle",
+    "crates/socsim-marl",
     "crates/socsim-runner",
     "crates/socsim-cli",
 ]
@@ -42,3 +43,7 @@ rayon = "1"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+
+# Neural-network policies (MARL, Phase 6).
+# Pure-Rust NdArray backend + autodiff; no system BLAS/CUDA dependency.
+burn = { version = "0.21", default-features = false, features = ["ndarray", "autodiff", "std"] }

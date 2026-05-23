@@ -1,0 +1,16 @@
+[package]
+name = "socsim-marl"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Multi-agent reinforcement-learning policies for the socsim platform (Phase 6)."
+
+[dependencies]
+socsim-core = { path = "../socsim-core" }
+socsim-engine = { path = "../socsim-engine" }
+socsim-log = { path = "../socsim-log" }
+
+burn = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
