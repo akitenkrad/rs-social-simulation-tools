@@ -11,8 +11,8 @@ rand.workspace       = true
 serde.workspace      = true
 serde_json.workspace = true
 socsim-core   = { path = "../socsim-core" }
-socsim-log    = { path = "../socsim-log" }
 
 [dev-dependencies]
 socsim-config = { path = "../socsim-config" }
+socsim-grid   = { path = "../socsim-grid" }
 socsim-log    = { path = "../socsim-log" }

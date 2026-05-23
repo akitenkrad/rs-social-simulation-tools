@@ -194,6 +194,10 @@ struct WideTable {
 #[derive(Debug, Default)]
 pub struct CsvRecorder {
     tables: BTreeMap<String, WideTable>,
+    /// Caller-pinned column schemas, keyed by table name.  When present for a
+    /// table, [`CsvRecorder::table_csv`] uses exactly these columns in this
+    /// order instead of the auto-discovered schema.
+    schemas: BTreeMap<String, Vec<String>>,
     metrics: Vec<MetricRow>,
     events: Vec<EventRow>,
 }
@@ -210,10 +214,42 @@ impl CsvRecorder {
         self.tables.keys().map(String::as_str).collect()
     }
 
+    /// Pin the column order (and the exact set of columns) for `table`'s CSV
+    /// output.
+    ///
+    /// After this call, [`CsvRecorder::table_csv`] for `table` emits the header
+    /// `t,<columns...>` in exactly the order given here, regardless of the order
+    /// in which columns were first observed in the data.  Columns not listed in
+    /// the schema are omitted from the output; schema columns absent from a
+    /// recorded row render as empty fields.
+    ///
+    /// Calling this does not affect which rows are stored — only how they are
+    /// rendered.  When no schema is set for a table, [`CsvRecorder::table_csv`]
+    /// keeps its default auto-discovered behaviour.
+    pub fn set_columns(&mut self, table: &str, columns: &[&str]) {
+        self.schemas.insert(
+            table.to_owned(),
+            columns.iter().map(|c| (*c).to_owned()).collect(),
+        );
+    }
+
     /// Render `table` as CSV with header `t,<col1>,<col2>,...`, or `None` if no
     /// rows were recorded for it.
+    ///
+    /// If a column schema was pinned via [`CsvRecorder::set_columns`], the
+    /// header uses exactly those columns in that order, omitting any columns not
+    /// in the schema and rendering schema columns missing from a row as empty
+    /// fields.  Otherwise the columns are those auto-discovered from the data.
     pub fn table_csv(&self, table: &str) -> Option<String> {
         let t = self.tables.get(table)?;
+        match self.schemas.get(table) {
+            Some(schema) => Some(self.table_csv_with_schema(t, schema)),
+            None => Some(Self::table_csv_auto(t)),
+        }
+    }
+
+    /// Auto-discovered rendering: columns in the order they were first observed.
+    fn table_csv_auto(t: &WideTable) -> String {
         let mut out = String::new();
         out.push('t');
         for col in &t.columns {
@@ -229,7 +265,38 @@ impl CsvRecorder {
             }
             out.push('\n');
         }
-        Some(out)
+        out
+    }
+
+    /// Schema-pinned rendering: columns exactly as given, missing values empty.
+    fn table_csv_with_schema(&self, t: &WideTable, schema: &[String]) -> String {
+        // Map each schema column to its index in the stored (auto) column
+        // order, or `None` if the table never saw that column.
+        let indices: Vec<Option<usize>> = schema
+            .iter()
+            .map(|col| t.columns.iter().position(|c| c == col))
+            .collect();
+
+        let mut out = String::new();
+        out.push('t');
+        for col in schema {
+            out.push(',');
+            out.push_str(col);
+        }
+        out.push('\n');
+        for (time, values) in &t.rows {
+            out.push_str(&time.to_string());
+            for idx in &indices {
+                out.push(',');
+                match idx.and_then(|i| values.get(i)) {
+                    Some(v) if v.is_nan() => {} // missing value → empty field
+                    Some(v) => out.push_str(&fmt_f64(*v)),
+                    None => {} // column absent from this table → empty field
+                }
+            }
+            out.push('\n');
+        }
+        out
     }
 
     /// Render all scalar metrics (recorded via
@@ -380,6 +447,65 @@ mod tests {
         assert_eq!(lines[0], "t,key,value");
         assert_eq!(lines[1], "0,score,1.5");
         assert_eq!(lines[2], "1,score,2");
+    }
+
+    #[test]
+    fn csv_recorder_set_columns_pins_header_order_and_omits_extras() {
+        let mut rec = CsvRecorder::new();
+        // Data observed in this order: moved, avg, extra.
+        rec.record_row(0, "metrics", &[("moved", 3.0), ("avg", 0.5), ("extra", 9.0)]);
+        rec.record_row(1, "metrics", &[("moved", 1.0), ("avg", 0.75), ("extra", 8.0)]);
+        // Pin a different order and drop "extra".
+        rec.set_columns("metrics", &["avg", "moved"]);
+        let csv = rec.table_csv("metrics").unwrap();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "t,avg,moved");
+        assert_eq!(lines[1], "0,0.5,3");
+        assert_eq!(lines[2], "1,0.75,1");
+    }
+
+    #[test]
+    fn csv_recorder_set_columns_renders_missing_as_empty() {
+        let mut rec = CsvRecorder::new();
+        // "b" is never recorded for this table; "a" is.
+        rec.record_row(0, "m", &[("a", 1.0)]);
+        rec.record_row(1, "m", &[("a", 2.0)]);
+        // Schema requests a, b, c — only "a" exists in the data.
+        rec.set_columns("m", &["a", "b", "c"]);
+        let csv = rec.table_csv("m").unwrap();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "t,a,b,c");
+        // b and c absent → empty fields.
+        assert_eq!(lines[1], "0,1,,");
+        assert_eq!(lines[2], "1,2,,");
+    }
+
+    #[test]
+    fn csv_recorder_set_columns_missing_value_in_some_rows_is_empty() {
+        let mut rec = CsvRecorder::new();
+        // Establish schema with both columns on the first row, then omit "b".
+        rec.record_row(0, "m", &[("a", 1.0), ("b", 2.0)]);
+        rec.record_row(1, "m", &[("a", 5.0)]); // b missing → stored as NaN
+        rec.set_columns("m", &["a", "b"]);
+        let csv = rec.table_csv("m").unwrap();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "t,a,b");
+        assert_eq!(lines[1], "0,1,2");
+        // b missing in row 1 → empty field (not "NaN").
+        assert_eq!(lines[2], "1,5,");
+    }
+
+    #[test]
+    fn csv_recorder_auto_discovery_unchanged_without_schema() {
+        // No set_columns call → behaviour identical to the default.
+        let mut rec = CsvRecorder::new();
+        rec.record_row(0, "metrics", &[("avg", 0.5), ("moved", 3.0)]);
+        rec.record_row(1, "metrics", &[("avg", 0.75), ("moved", 1.0)]);
+        let csv = rec.table_csv("metrics").unwrap();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "t,avg,moved");
+        assert_eq!(lines[1], "0,0.5,3");
+        assert_eq!(lines[2], "1,0.75,1");
     }
 
     #[test]
