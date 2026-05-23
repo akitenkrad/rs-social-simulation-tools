@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
+use serde::{Deserialize, Serialize};
 use socsim_core::{AgentId, SimClock, SimRng, WorldState};
 use socsim_net::SocialNetwork;
 
@@ -14,7 +15,7 @@ use crate::calibration::{LAMBDA_LEARN, P_TOXIC, THETA_FLOOR, THETA_MEAN, THETA_S
 // ── Employee ──────────────────────────────────────────────────────────────────
 
 /// Per-employee agent state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Employee {
     /// True ability draw (positive scale, ~N(THETA_MEAN, THETA_SD) at hiring).
     pub theta: f64,
@@ -80,7 +81,7 @@ impl Employee {
 // ── Team ──────────────────────────────────────────────────────────────────────
 
 /// Aggregate team state.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Team {
     /// Team knowledge stock K_team (grows via OCB, shrinks on departure).
     pub knowledge_stock: f64,
@@ -94,6 +95,7 @@ pub struct Team {
 ///
 /// Holds the employee roster, team aggregate states, the inter-agent social
 /// network, and the simulation clock.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct HrWorld {
     /// Simulation clock.
     pub clock: SimClock,

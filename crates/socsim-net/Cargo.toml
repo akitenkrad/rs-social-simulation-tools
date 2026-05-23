@@ -9,4 +9,8 @@ license.workspace = true
 [dependencies]
 petgraph.workspace   = true
 rand.workspace       = true
+serde.workspace      = true
 socsim-core = { path = "../socsim-core" }
+
+[dev-dependencies]
+serde_json.workspace = true

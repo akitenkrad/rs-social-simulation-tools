@@ -17,6 +17,9 @@ use std::collections::HashMap;
 
 use petgraph::graph::{NodeIndex, UnGraph};
 use rand::Rng;
+use serde::de::Deserializer;
+use serde::ser::Serializer;
+use serde::{Deserialize, Serialize};
 use socsim_core::AgentId;
 
 // Re-export SimRng so callers need only one dep.
@@ -28,9 +31,60 @@ pub use socsim_core::SimRng;
 ///
 /// Internally stores a [`petgraph::graph::UnGraph`] and an `AgentId →
 /// NodeIndex` index for O(1) agent lookups.  All edge weights are `()`.
+///
+/// Serialises as a plain `{ nodes, edges }` pair of [`AgentId`]s (petgraph's
+/// internal `NodeIndex`es are *not* persisted) and is rebuilt on load, so
+/// snapshots stay stable across petgraph versions.
+#[derive(Clone)]
 pub struct SocialNetwork {
     graph: UnGraph<AgentId, ()>,
     index: HashMap<AgentId, NodeIndex>,
+}
+
+/// Wire format for [`SocialNetwork`]: node list + undirected edge list.
+#[derive(Serialize, Deserialize)]
+struct NetData {
+    nodes: Vec<AgentId>,
+    edges: Vec<(AgentId, AgentId)>,
+}
+
+impl Serialize for SocialNetwork {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Sort nodes/edges for a deterministic, diff-friendly representation.
+        let mut nodes: Vec<AgentId> = self.index.keys().copied().collect();
+        nodes.sort();
+
+        let mut edges: Vec<(AgentId, AgentId)> = self
+            .graph
+            .edge_indices()
+            .filter_map(|e| self.graph.edge_endpoints(e))
+            .map(|(a, b)| {
+                let (ia, ib) = (self.graph[a], self.graph[b]);
+                if ia <= ib {
+                    (ia, ib)
+                } else {
+                    (ib, ia)
+                }
+            })
+            .collect();
+        edges.sort();
+
+        NetData { nodes, edges }.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SocialNetwork {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = NetData::deserialize(deserializer)?;
+        let mut net = SocialNetwork::empty();
+        for id in data.nodes {
+            net.add_node(id);
+        }
+        for (a, b) in data.edges {
+            net.add_edge(a, b);
+        }
+        Ok(net)
+    }
 }
 
 impl SocialNetwork {
@@ -462,5 +516,25 @@ mod tests {
         let ids = ids(5);
         let net = SocialNetwork::erdos_renyi(&ids, 1.0, &mut rng);
         assert_eq!(net.connected_components(), 1);
+    }
+
+    #[test]
+    fn serde_round_trip_preserves_topology() {
+        let mut rng = SimRng::from_seed(3);
+        let ids = ids(8);
+        let net = SocialNetwork::watts_strogatz(&ids, 4, 0.2, &mut rng);
+
+        let json = serde_json::to_string(&net).unwrap();
+        let restored: SocialNetwork = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.node_count(), net.node_count());
+        assert_eq!(restored.connected_components(), net.connected_components());
+        for &id in &ids {
+            let mut a = net.neighbors(id);
+            let mut b = restored.neighbors(id);
+            a.sort();
+            b.sort();
+            assert_eq!(a, b, "neighbours of {id:?} must survive round-trip");
+        }
     }
 }

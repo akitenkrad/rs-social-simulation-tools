@@ -16,11 +16,12 @@
 //! need to depend on `socsim-core`.
 
 pub use socsim_rng::{derive_seed, SimRng};
+use serde::{Deserialize, Serialize};
 
 // ── AgentId ──────────────────────────────────────────────────────────────────
 
 /// Opaque, cheaply-copyable identifier for a simulation agent.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct AgentId(pub u64);
 
 // ── SimClock ─────────────────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ pub struct AgentId(pub u64);
 /// Passed **by value** into [`StepContext`] so that mechanisms can read the
 /// current time without holding a shared reference to `world`, which would
 /// prevent the mutable `world` borrow inside the same context.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SimClock {
     t: u64,
     t_max: u64,
@@ -113,6 +114,10 @@ pub enum SocsimError {
     /// Attempt to look up a mechanism that has not been registered.
     #[error("unknown mechanism: '{0}'")]
     UnknownMechanism(String),
+
+    /// A snapshot save/load (I/O or (de)serialisation) error.
+    #[error("snapshot error: {0}")]
+    Snapshot(String),
 }
 
 /// Convenience alias used throughout the `socsim` workspace.
