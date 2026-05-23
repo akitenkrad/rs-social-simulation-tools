@@ -42,6 +42,8 @@
 //! ```
 
 pub mod calibration;
+#[cfg(feature = "marl")]
+pub mod marl;
 mod mechanisms;
 mod world;
 
