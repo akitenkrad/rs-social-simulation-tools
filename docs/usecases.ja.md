@@ -202,3 +202,62 @@ cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover
 ```
 
 これは `burn` のポリシーネットワークを訓練し，従業員が個人合理性報酬によって stay/quit を学習，合理的離職を創発的なポリシーとして再現します．MARL を独自の World に組み込むには `ObsEncoder` / `ActionApplier` / `RewardFn` を実装し `MarlTrainer` を回します — [ライブラリガイド](library.ja.md#学習ポリシーmarl)を参照してください．
+
+---
+
+## 7. イベント駆動 / セルオートマトンの格子モデル
+
+すべてのモデルが1ティックあたりエージェント1アクションというわけではありません．**イベント駆動**（Gillespie型）モデル — 投票者モデル，接触過程の感染，サブティック反応ダイナミクス — は，観測可能な時点の間に*多数*の微小イベントを発火させます．socsim は離散的なティックループ上で動作するので，慣用句は**一定数の微小イベントを1つの `Mechanism::apply` 内でバッチ処理し，それらのイベントを1ティックにマッピングする**ことです．動作する例は `crates/socsim-engine/examples/cellular_automata.rs` — トーラス格子上の投票者モデルです．
+
+```sh
+cargo run -p socsim-engine --example cellular_automata
+```
+
+### `CellGrid` + 事前計算済み `Adjacency` による格子状態
+
+セルごとの状態を `CellGrid<T>` に保持し，近傍テーブルを `Adjacency` として**一度だけ**事前計算することで，ホットループがアロケーションを行わないようにします：
+
+```rust,ignore
+use socsim_grid::{Adjacency, Boundary, CellGrid, Grid, Neighborhood};
+
+struct VoterWorld {
+    clock: socsim_core::SimClock,
+    cells: CellGrid<u8>,   // セルごとに1つの意見，行優先
+    adjacency: Adjacency,  // CSR近傍テーブル，フラットインデックス
+}
+
+let grid = Grid::new(16, 16, Boundary::Toroidal);
+let adjacency = grid.adjacency(Neighborhood::Moore);            // 一度だけ構築
+let cells = CellGrid::from_fn(grid, |_r, _c| rng.gen_range(0..4));
+```
+
+### 多数のイベントを1ティックにバッチ処理する
+
+```rust,ignore
+fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, VoterWorld>) -> Result<()> {
+    let n = ctx.world.cells.len();
+    // 1エンジンティック == `events_per_step` 個の投票者イベント．
+    for _ in 0..self.events_per_step {
+        let idx = ctx.rng.gen_range(0..n);                       // ランダムなセル
+        let nbrs = ctx.world.adjacency.neighbors(idx);           // O(1)スライス
+        if nbrs.is_empty() { continue; }
+        let nbr = nbrs[ctx.rng.gen_range(0..nbrs.len())];
+        let opinion = *ctx.world.cells.get_idx(nbr).unwrap();
+        *ctx.world.cells.get_idx_mut(idx).unwrap() = opinion;    // 近傍をコピー
+    }
+    // 吸収状態：格子が一様になったら停止する．
+    if ctx.world.distinct_opinions() <= 1 { ctx.request_stop(); }
+    Ok(())
+}
+```
+
+### `run_observed` でステップごとのメトリクスを収集する
+
+```rust,ignore
+sim.run_observed(|report| {
+    // 各ティック後の異なる意見の数；合意時に report.stopped == true
+    println!("t={} distinct={}", report.t, report.world.distinct_opinions());
+})?;
+```
+
+このモデルはデフォルトの `NullRecorder` を使います — `socsim-log` 依存は不要です．近傍APIの詳細は[ライブラリガイド](library.ja.md#アロケーションを伴わない近傍クエリ)を，`run_observed` / `StepReport` については[ステップごとの観測](library.ja.md#ステップごとの観測run_observed--stepreport)の節を参照してください．

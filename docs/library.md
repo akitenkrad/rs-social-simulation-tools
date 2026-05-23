@@ -146,7 +146,7 @@ let growth: Box<dyn Mechanism<CounterWorld>> = reg.build("growth", &params).unwr
 |---|---|
 | scheduler | `SequentialScheduler` (sorted `AgentId` order) |
 | seed | `0` |
-| recorder | `InMemoryRecorder` |
+| recorder | `NullRecorder` (no-op) |
 
 ```rust,ignore
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
@@ -188,6 +188,33 @@ fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, MyWorld>) -> Result<()>
     Ok(())
 }
 ```
+
+---
+
+## Per-step observation: `run_observed` / `StepReport`
+
+When you need a metric **after every step** — a convergence curve, a per-tick count, a live progress print — you can drive the loop yourself with `step()` and then read `world()` / `scratch()`. `run_observed` packages that pattern so you don't hand-roll the loop or rely on fragile stringly-typed scratch reads:
+
+```rust,ignore
+let mut history = Vec::new();
+sim.run_observed(|report| {
+    // report: StepReport { t, stopped, world, scratch }
+    history.push(report.world.distinct_opinions());
+})?;
+```
+
+The closure is called once per executed step with a `StepReport` reflecting the state **after** that step:
+
+| Field | Meaning |
+|---|---|
+| `t` | clock time after the step |
+| `stopped` | `true` if a mechanism requested stop during this step |
+| `world` | shared `&W` after the step |
+| `scratch` | shared `&Blackboard` after the step (per-step values mechanisms left) |
+
+Termination matches `run()` (clock done **or** stop requested); the observer is called for the step in which stop is requested (its report has `stopped == true`) and **not** for any step afterward. For one step at a time, `step_reported()` returns the same `StepReport` for a single step.
+
+This is the recommended per-step loop for library-mode models — see `crates/socsim-engine/examples/cellular_automata.rs`.
 
 ---
 
@@ -263,6 +290,26 @@ let mut sim = SimulationBuilder::new(world)
 
 `derive_seed` (re-exported from `socsim-core`) is the same FNV-1a mix used by `SimRng::derive`, so the two streams are decorrelated yet fully reproducible from a single root seed.
 
+#### RNG stream labeling convention
+
+To avoid every model reinventing its own labels, socsim recommends a small fixed convention for the two streams almost every model needs:
+
+| Label | Stream |
+|---|---|
+| `derive_seed(root, &[0])` | world initialisation (placing agents, randomising cells) |
+| `derive_seed(root, &[1])` | the engine / scheduler (passed to `SimulationBuilder::seed`) |
+
+```rust,ignore
+let root = seed;
+let mut init_rng = SimRng::from_seed(derive_seed(root, &[0])); // world init
+let world = MyWorld::new(&mut init_rng);
+let mut sim = SimulationBuilder::new(world)
+    .seed(derive_seed(root, &[1]))                              // engine
+    .build();
+```
+
+Reserve further labels (`&[2]`, `&[3]`, …) for any additional independent streams your model owns. The `cellular_automata` example follows exactly this convention.
+
 To verify determinism in your own code, run two simulations with the same seed and compare outputs — the `custom_mechanism.rs` example does exactly this.
 
 ---
@@ -280,7 +327,9 @@ fn record_row(&mut self, t: u64, table: &str, row: &[(&str, f64)]);
 
 `record_row` is the natural shape for `metrics.csv`-style output with many columns; the default implementation fans a row out into `record_metric` calls keyed `"{table}.{column}"`, so recorders that don't override it keep working.
 
-`socsim-log` ships three implementations:
+The engine's **default** recorder is `NullRecorder` (defined in `socsim-core`), a no-op sink that discards everything. Because of this, the engine no longer depends on `socsim-log`: a pure-library model that does its own output (like the `cellular_automata` example) needs only `socsim-core` / `socsim-engine` / `socsim-grid` and never has to pull in a concrete recorder. Add `socsim-log` and call `SimulationBuilder::recorder(...)` only when you actually want metric/event capture.
+
+`socsim-log` ships three concrete implementations:
 
 | Type | Use |
 |---|---|
@@ -298,6 +347,15 @@ rec.record_row(1, "metrics", &[("avg_same", 0.64), ("n_moved", 21.0)]);
 let csv = rec.table_csv("metrics").unwrap();   // "t,avg_same,n_moved\n0,0.53,0\n1,0.64,21\n"
 std::fs::write("metrics.csv", csv).unwrap();
 ```
+
+By default `CsvRecorder` discovers columns in the order they are first observed. To pin a **caller-defined** column order and schema — useful when a downstream tool expects an exact header — call `set_columns` before rendering:
+
+```rust,ignore
+rec.set_columns("metrics", &["n_moved", "avg_same"]);  // fixed order
+let csv = rec.table_csv("metrics").unwrap();            // header: "t,n_moved,avg_same"
+```
+
+Columns not listed in the schema are omitted; schema columns missing from a given row render as empty fields. `set_columns` only affects rendering, not which rows are stored.
 
 To inspect the recorder after `sim.run()`:
 
@@ -380,8 +438,41 @@ idx.move_to(AgentId(0), target.unwrap().0, target.unwrap().1).unwrap();
 | `Neighborhood` | `Moore` (8) / `VonNeumann` (4) |
 | `Metric` | `Chebyshev` / `Manhattan` / `Euclidean` |
 | `GridIndex` | `AgentId ↔ cell` occupancy: `place`, `move_to`, `vacant_cells`, `nearest_vacant`, sorted `agent_ids` |
+| `CellGrid<T>` | per-cell mutable state `T` for every cell (cellular-automata / lattice-attribute models) |
+| `Adjacency` | precomputed CSR neighbour table for hot lattice loops |
 
 Hold a `GridIndex` (or a bare `Grid`) inside your `WorldState` and drive moves from a `Mechanism`.
+
+### Non-allocating neighbour queries
+
+`Grid::neighbors` allocates a fresh `Vec` per call, which is fine for occasional lookups but wasteful in a hot loop. For per-step lattice code prefer one of:
+
+- `Grid::neighbors_into(r, c, nbhd, &mut buf)` / `neighbors_radius_into(...)` — reuse one caller-owned `Vec` across calls (clears and refills it), avoiding per-call allocation.
+- `Grid::neighbors_iter(r, c, nbhd)` — a radius-1 iterator that yields neighbours straight off the stack, with no heap allocation at all.
+- `Grid::adjacency(nbhd)` / `adjacency_radius(nbhd, radius)` — **precompute the whole neighbour table once** as an `Adjacency` (CSR, flat row-major indices). `adj.neighbors(idx)` then returns the neighbours of cell `idx = r * cols + c` as an O(1) borrowed `&[usize]`. This is the recommended structure when the *same* neighbour sets are queried every tick (cellular automata, diffusion, contagion-on-a-grid): build it at world-construction time and store it in your `WorldState`.
+
+All four return neighbours in the same deterministic sorted, row-major order, so results are interchangeable.
+
+### Per-cell state with `CellGrid<T>`
+
+Where `GridIndex` answers "*which agent* is in this cell", `CellGrid<T>` stores a value `T` for **every** cell — the primitive for cellular-automata and lattice-attribute models (each cell holding an opinion, strategy, or counter). It pairs the `Grid`'s boundary-aware neighbour queries with direct mutable access to the row-major backing `Vec<T>`:
+
+```rust,ignore
+use socsim_grid::{CellGrid, Grid, Boundary, Neighborhood};
+
+// Build a grid of opinions; each cell starts from its coordinates (or an RNG).
+let grid = Grid::new(16, 16, Boundary::Toroidal);
+let adjacency = grid.adjacency(Neighborhood::Moore);   // precompute once
+let mut cells: CellGrid<u8> = CellGrid::from_fn(grid, |r, c| ((r + c) % 4) as u8);
+
+// Hot loop: O(1) neighbour lookups, direct cell mutation, no allocation.
+let idx = 5 * 16 + 7;                       // cell (5, 7), flat row-major
+let nbr = adjacency.neighbors(idx)[0];      // a neighbour's flat index
+let opinion = *cells.get_idx(nbr).unwrap();
+*cells.get_idx_mut(idx).unwrap() = opinion; // copy it over
+```
+
+Constructors: `CellGrid::new(grid, fill)` (every cell `= fill.clone()`) and `CellGrid::from_fn(grid, |r, c| ...)`. Access by coordinate (`get` / `get_mut`), by flat index (`get_idx` / `get_idx_mut`, matching `Adjacency`), or over the whole row-major slice (`cells` / `cells_mut`); `neighbors` / `neighbor_values` read the neighbourhood directly. A worked event-driven CA built on `CellGrid` + `Adjacency` lives at `crates/socsim-engine/examples/cellular_automata.rs`.
 
 ---
 
@@ -494,4 +585,4 @@ let stats = trainer.train(
 
 After training, build the mechanism with `PolicyMechanism::inference(policy, …)` to run the **frozen** policy: it takes greedy actions, consumes no RNG, and stays bit-reproducible. `socsim-marl` pulls in `burn`, so the hr-lifecycle integration is gated behind a `marl` feature (`cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover`).
 
-A worked engine-only example lives at `crates/socsim-engine/examples/engine_only.rs`.
+Worked library-mode examples live at `crates/socsim-engine/examples/engine_only.rs` (a converging non-spatial model) and `crates/socsim-engine/examples/cellular_automata.rs` (an event-driven lattice CA on `CellGrid` + `Adjacency` using `run_observed`).
