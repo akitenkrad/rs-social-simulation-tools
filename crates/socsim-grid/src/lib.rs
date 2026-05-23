@@ -10,7 +10,16 @@
 //!   distance queries.
 //! - [`GridIndex`] — an occupancy / spatial index layered over a [`Grid`] that
 //!   maps [`AgentId`]s to cells and back.
+//! - [`CellGrid`] — a generic, row-major per-cell state container over a
+//!   [`Grid`], the primitive for cellular-automata / lattice-attribute models.
+//! - [`Adjacency`] — a precomputed CSR neighbor table for hot lattice loops.
 //! - [`GridError`] — error type returned by mutating [`GridIndex`] operations.
+//!
+//! For performance-sensitive code the crate also offers non-allocating neighbor
+//! queries: [`Grid::neighbors_into`] / [`Grid::neighbors_radius_into`] reuse a
+//! caller-supplied buffer, [`Grid::neighbors_iter`] yields radius-1 neighbors
+//! without a heap allocation, and [`Grid::adjacency`] precomputes the whole
+//! neighbor table once for repeated lookups.
 //!
 //! All neighbor and cell listings are returned in a deterministic order
 //! (sorted / row-major) so that simulations built on this crate are
@@ -168,8 +177,29 @@ impl Grid {
     ///
     /// Equivalent to [`Grid::neighbors_radius`] with `radius = 1`.  The
     /// returned list is sorted (row-major) and never includes the center.
+    ///
+    /// This allocates a fresh `Vec` per call; for hot loops prefer
+    /// [`Grid::neighbors_into`] (reuse a buffer), [`Grid::neighbors_iter`]
+    /// (no heap allocation), or [`Grid::adjacency`] (precomputed table).
     pub fn neighbors(&self, r: usize, c: usize, nbhd: Neighborhood) -> Vec<(usize, usize)> {
-        self.neighbors_radius(r, c, nbhd, 1)
+        let mut out = Vec::new();
+        self.neighbors_into(r, c, nbhd, &mut out);
+        out
+    }
+
+    /// Like [`Grid::neighbors`], but writes into a caller-supplied buffer.
+    ///
+    /// `out` is cleared and then filled with the same neighbors in the same
+    /// order (sorted row-major, center excluded, boundary-aware).  Reusing a
+    /// single `Vec` across many calls avoids a per-call heap allocation.
+    pub fn neighbors_into(
+        &self,
+        r: usize,
+        c: usize,
+        nbhd: Neighborhood,
+        out: &mut Vec<(usize, usize)>,
+    ) {
+        self.neighbors_radius_into(r, c, nbhd, 1, out);
     }
 
     /// All cells within `radius` of `(r, c)` under the given neighborhood.
@@ -191,12 +221,32 @@ impl Grid {
         nbhd: Neighborhood,
         radius: usize,
     ) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        self.neighbors_radius_into(r, c, nbhd, radius, &mut out);
+        out
+    }
+
+    /// Like [`Grid::neighbors_radius`], but writes into a caller-supplied
+    /// buffer.
+    ///
+    /// `out` is cleared and then filled with the same cells in the same order
+    /// (sorted row-major, center excluded, boundary-aware, deduplicated).
+    /// Reusing a single `Vec` across many calls avoids a per-call heap
+    /// allocation.
+    pub fn neighbors_radius_into(
+        &self,
+        r: usize,
+        c: usize,
+        nbhd: Neighborhood,
+        radius: usize,
+        out: &mut Vec<(usize, usize)>,
+    ) {
+        out.clear();
         if radius == 0 || self.is_empty() {
-            return Vec::new();
+            return;
         }
 
         let rad = radius as isize;
-        let mut out: Vec<(usize, usize)> = Vec::new();
 
         for dr in -rad..=rad {
             for dc in -rad..=rad {
@@ -222,7 +272,28 @@ impl Grid {
 
         out.sort_unstable();
         out.dedup();
-        out
+    }
+
+    /// A non-allocating iterator over the radius-1 neighbors of `(r, c)`.
+    ///
+    /// Yields the same cells in the same order as [`Grid::neighbors`] (sorted
+    /// row-major, center excluded, boundary-aware, deduplicated) but without
+    /// allocating a heap `Vec`.
+    ///
+    /// # Scope
+    ///
+    /// This is **radius-1 only** — a radius-1 [`Neighborhood::Moore`] cell has
+    /// at most 8 neighbors and Von Neumann at most 4, so the candidates are
+    /// computed into a fixed-size stack array and the iterator borrows from it.
+    /// For larger radii use [`Grid::neighbors_radius`] /
+    /// [`Grid::neighbors_radius_into`], which handle the general case.
+    pub fn neighbors_iter(
+        &self,
+        r: usize,
+        c: usize,
+        nbhd: Neighborhood,
+    ) -> impl Iterator<Item = (usize, usize)> + '_ {
+        NeighborsIter::new(self, r, c, nbhd)
     }
 
     /// Wrap-aware distance between two cells under the given [`Metric`].
@@ -240,6 +311,178 @@ impl Grid {
                 metric.combine(dr, dc)
             }
         }
+    }
+
+    /// Precompute the radius-1 adjacency table for the whole grid.
+    ///
+    /// Equivalent to [`Grid::adjacency_radius`] with `radius = 1`.
+    pub fn adjacency(&self, nbhd: Neighborhood) -> Adjacency {
+        self.adjacency_radius(nbhd, 1)
+    }
+
+    /// Precompute the radius-`radius` adjacency table for the whole grid.
+    ///
+    /// Returns an [`Adjacency`] in CSR (compressed sparse row) layout keyed by
+    /// flat cell index `idx = r * cols + c`.  Building it once and reusing
+    /// [`Adjacency::neighbors`] is the recommended pattern for hot lattice /
+    /// cellular-automata loops, where the same neighbor sets are queried every
+    /// tick: it amortizes the offset enumeration, shape test and sort done by
+    /// [`Grid::neighbors_radius`] into a single up-front pass and then answers
+    /// each lookup with an O(1) slice.
+    ///
+    /// Each cell's neighbor list preserves the deterministic sorted row-major
+    /// order of [`Grid::neighbors_radius`] (now expressed as flat indices).
+    pub fn adjacency_radius(&self, nbhd: Neighborhood, radius: usize) -> Adjacency {
+        let n = self.len();
+        let cols = self.cols;
+        let mut offsets = Vec::with_capacity(n + 1);
+        let mut flat = Vec::new();
+        offsets.push(0usize);
+
+        // Reused scratch buffer so we don't allocate per cell.
+        let mut buf: Vec<(usize, usize)> = Vec::new();
+        for idx in 0..n {
+            let r = idx / cols;
+            let c = idx % cols;
+            self.neighbors_radius_into(r, c, nbhd, radius, &mut buf);
+            for &(nr, nc) in buf.iter() {
+                flat.push(nr * cols + nc);
+            }
+            offsets.push(flat.len());
+        }
+
+        Adjacency { offsets, flat }
+    }
+}
+
+// ── NeighborsIter ────────────────────────────────────────────────────────────
+
+/// Non-allocating iterator backing [`Grid::neighbors_iter`].
+///
+/// Radius-1 Moore neighborhoods yield at most 8 cells and Von Neumann at most
+/// 4, so the (already ordered, deduplicated) candidates are materialized into a
+/// fixed `[(usize, usize); 8]` array on the stack — no heap allocation — and
+/// the iterator walks that array.
+struct NeighborsIter {
+    buf: [(usize, usize); 8],
+    len: usize,
+    pos: usize,
+}
+
+impl NeighborsIter {
+    fn new(grid: &Grid, r: usize, c: usize, nbhd: Neighborhood) -> Self {
+        let mut buf = [(0usize, 0usize); 8];
+        let mut len = 0usize;
+
+        if !grid.is_empty() {
+            // Enumerate the 3x3 offsets in row-major order so the result is
+            // already sorted before deduplication, matching neighbors_into.
+            let mut tmp: [(usize, usize); 8] = [(0, 0); 8];
+            let mut tmp_len = 0usize;
+            for dr in -1isize..=1 {
+                for dc in -1isize..=1 {
+                    if dr == 0 && dc == 0 {
+                        continue;
+                    }
+                    let in_shape = match nbhd {
+                        Neighborhood::Moore => true,
+                        Neighborhood::VonNeumann => {
+                            dr.unsigned_abs() + dc.unsigned_abs() <= 1
+                        }
+                    };
+                    if !in_shape {
+                        continue;
+                    }
+                    if let Some(cell) = grid.resolve(r as isize + dr, c as isize + dc) {
+                        if cell != (r, c) {
+                            tmp[tmp_len] = cell;
+                            tmp_len += 1;
+                        }
+                    }
+                }
+            }
+            // Offsets are visited row-major, so tmp[0..tmp_len] is already
+            // sorted.  Toroidal grids may produce duplicates; drop adjacent
+            // repeats (equivalent to Vec::dedup on sorted data).
+            tmp[..tmp_len].sort_unstable();
+            for i in 0..tmp_len {
+                if i == 0 || tmp[i] != tmp[i - 1] {
+                    buf[len] = tmp[i];
+                    len += 1;
+                }
+            }
+        }
+
+        Self { buf, len, pos: 0 }
+    }
+}
+
+impl Iterator for NeighborsIter {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos < self.len {
+            let v = self.buf[self.pos];
+            self.pos += 1;
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let rem = self.len - self.pos;
+        (rem, Some(rem))
+    }
+}
+
+impl ExactSizeIterator for NeighborsIter {}
+
+// ── Adjacency ──────────────────────────────────────────────────────────────────
+
+/// A precomputed neighbor table for a [`Grid`], in CSR (compressed sparse row)
+/// layout.
+///
+/// Cells are addressed by their flat row-major index `idx = r * cols + c`, and
+/// each cell's neighbors are likewise stored as flat indices.  `offsets` has
+/// length `n_cells + 1`; the neighbors of cell `idx` are
+/// `flat[offsets[idx] .. offsets[idx + 1]]`.
+///
+/// Build one with [`Grid::adjacency`] / [`Grid::adjacency_radius`].  This is the
+/// recommended structure for hot loops (lattice / cellular-automata models)
+/// that query the same neighbor sets every tick, replacing repeated allocating
+/// [`Grid::neighbors`] calls with O(1) slice lookups.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Adjacency {
+    /// CSR row offsets; length is `n_cells + 1`.
+    offsets: Vec<usize>,
+    /// Flattened neighbor cell indices (`r * cols + c`) for every cell, in CSR
+    /// order.
+    flat: Vec<usize>,
+}
+
+impl Adjacency {
+    /// The flat neighbor indices of cell `idx` (`idx = r * cols + c`).
+    ///
+    /// Returned as an O(1) borrowed slice, in the deterministic sorted
+    /// row-major order produced by [`Grid::neighbors_radius`].
+    ///
+    /// # Panics
+    /// Panics if `idx` is out of range (`idx >= self.len()`).
+    pub fn neighbors(&self, idx: usize) -> &[usize] {
+        let start = self.offsets[idx];
+        let end = self.offsets[idx + 1];
+        &self.flat[start..end]
+    }
+
+    /// The number of cells the table covers.
+    pub fn len(&self) -> usize {
+        self.offsets.len().saturating_sub(1)
+    }
+
+    /// Returns `true` if the table covers no cells.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -479,6 +722,143 @@ impl GridIndex {
             .neighbors(r, c, nbhd)
             .into_iter()
             .filter_map(|(nr, nc)| self.occupant(nr, nc))
+            .collect()
+    }
+}
+
+// ── CellGrid ───────────────────────────────────────────────────────────────────
+
+/// A generic, row-major per-cell state container layered over a [`Grid`].
+///
+/// Where [`GridIndex`] tracks *which agent* occupies each cell, `CellGrid<T>`
+/// stores an arbitrary value `T` for *every* cell.  It is the primitive for
+/// cellular-automata and lattice-attribute models — e.g. each cell holding a
+/// strategy, opinion, or counter — and combines the [`Grid`]'s boundary-aware
+/// neighbor queries with direct mutable access to the underlying `Vec<T>`.
+///
+/// Cells are stored row-major: cell `(r, c)` lives at flat index
+/// `r * cols + c`, matching [`Grid`] and [`Adjacency`].
+#[derive(Clone, Debug)]
+pub struct CellGrid<T> {
+    grid: Grid,
+    /// Row-major per-cell state: `cells[r * cols + c]`.
+    cells: Vec<T>,
+}
+
+impl<T: Clone> CellGrid<T> {
+    /// Create a `CellGrid` over `grid` with every cell initialized to
+    /// `fill.clone()`.
+    pub fn new(grid: Grid, fill: T) -> Self {
+        let n = grid.len();
+        Self {
+            grid,
+            cells: vec![fill; n],
+        }
+    }
+}
+
+impl<T> CellGrid<T> {
+    /// Create a `CellGrid` over `grid`, computing each cell's value from its
+    /// coordinates via `f(r, c)`.
+    ///
+    /// Cells are visited in row-major order.
+    pub fn from_fn(grid: Grid, mut f: impl FnMut(usize, usize) -> T) -> Self {
+        let cols = grid.cols();
+        let n = grid.len();
+        let mut cells = Vec::with_capacity(n);
+        for idx in 0..n {
+            cells.push(f(idx / cols, idx % cols));
+        }
+        Self { grid, cells }
+    }
+
+    /// Borrow the underlying [`Grid`].
+    pub fn grid(&self) -> &Grid {
+        &self.grid
+    }
+
+    /// Number of rows.
+    pub fn rows(&self) -> usize {
+        self.grid.rows()
+    }
+
+    /// Number of columns.
+    pub fn cols(&self) -> usize {
+        self.grid.cols()
+    }
+
+    /// Total number of cells (`rows * cols`).
+    pub fn len(&self) -> usize {
+        self.cells.len()
+    }
+
+    /// Returns `true` if the grid has no cells.
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
+    /// Flat row-major index for `(r, c)` (`r * cols + c`).
+    ///
+    /// Does not bounds-check; callers passing untrusted coordinates should use
+    /// [`CellGrid::get`] / [`CellGrid::get_mut`] instead.
+    pub fn index(&self, r: usize, c: usize) -> usize {
+        r * self.grid.cols() + c
+    }
+
+    /// Borrow the value at `(r, c)`, or `None` if out of bounds.
+    pub fn get(&self, r: usize, c: usize) -> Option<&T> {
+        if r < self.grid.rows() && c < self.grid.cols() {
+            self.cells.get(self.index(r, c))
+        } else {
+            None
+        }
+    }
+
+    /// Mutably borrow the value at `(r, c)`, or `None` if out of bounds.
+    pub fn get_mut(&mut self, r: usize, c: usize) -> Option<&mut T> {
+        if r < self.grid.rows() && c < self.grid.cols() {
+            let i = self.index(r, c);
+            self.cells.get_mut(i)
+        } else {
+            None
+        }
+    }
+
+    /// Borrow the value at flat index `idx`, or `None` if out of range.
+    pub fn get_idx(&self, idx: usize) -> Option<&T> {
+        self.cells.get(idx)
+    }
+
+    /// Mutably borrow the value at flat index `idx`, or `None` if out of range.
+    pub fn get_idx_mut(&mut self, idx: usize) -> Option<&mut T> {
+        self.cells.get_mut(idx)
+    }
+
+    /// Borrow all cell values as a row-major slice.
+    pub fn cells(&self) -> &[T] {
+        &self.cells
+    }
+
+    /// Mutably borrow all cell values as a row-major slice.
+    pub fn cells_mut(&mut self) -> &mut [T] {
+        &mut self.cells
+    }
+
+    /// The radius-1 neighbor coordinates of `(r, c)` (delegates to the
+    /// underlying [`Grid::neighbors`]).
+    pub fn neighbors(&self, r: usize, c: usize, nbhd: Neighborhood) -> Vec<(usize, usize)> {
+        self.grid.neighbors(r, c, nbhd)
+    }
+
+    /// The values stored at the radius-1 neighbors of `(r, c)`.
+    ///
+    /// Returned in the deterministic (sorted, row-major) neighbor order of the
+    /// underlying grid.
+    pub fn neighbor_values(&self, r: usize, c: usize, nbhd: Neighborhood) -> Vec<&T> {
+        self.grid
+            .neighbors(r, c, nbhd)
+            .into_iter()
+            .filter_map(|(nr, nc)| self.get(nr, nc))
             .collect()
     }
 }
@@ -821,5 +1201,168 @@ mod tests {
         assert!(!g.in_bounds(3, 0));
         assert!(!g.in_bounds(-1, 0));
         assert!(Grid::new(0, 5, Boundary::Fixed).is_empty());
+    }
+
+    // ── neighbors_into / neighbors_iter (issue #11) ──────────────────────────────
+
+    #[test]
+    fn neighbors_into_matches_neighbors() {
+        // Corner, edge, and interior cells under both boundaries and both
+        // neighborhoods must produce identical results to the allocating API.
+        let cells = [(0, 0), (0, 2), (2, 0), (4, 4), (2, 2)];
+        for boundary in [Boundary::Fixed, Boundary::Toroidal] {
+            let g = Grid::new(5, 5, boundary);
+            for nbhd in [Neighborhood::Moore, Neighborhood::VonNeumann] {
+                let mut buf = Vec::new();
+                for &(r, c) in &cells {
+                    g.neighbors_into(r, c, nbhd, &mut buf);
+                    assert_eq!(buf, g.neighbors(r, c, nbhd), "cell {:?} {:?} {:?}", (r, c), boundary, nbhd);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn neighbors_radius_into_matches_and_reuses_buffer() {
+        let g = Grid::new(7, 7, Boundary::Toroidal);
+        let mut buf = vec![(99, 99); 50]; // pre-dirtied buffer
+        g.neighbors_radius_into(3, 3, Neighborhood::Moore, 2, &mut buf);
+        assert_eq!(buf, g.neighbors_radius(3, 3, Neighborhood::Moore, 2));
+        // Radius 0 clears the buffer.
+        g.neighbors_radius_into(3, 3, Neighborhood::Moore, 0, &mut buf);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn neighbors_iter_matches_neighbors() {
+        let cells = [(0, 0), (0, 2), (2, 0), (4, 4), (2, 2)];
+        for boundary in [Boundary::Fixed, Boundary::Toroidal] {
+            let g = Grid::new(5, 5, boundary);
+            for nbhd in [Neighborhood::Moore, Neighborhood::VonNeumann] {
+                for &(r, c) in &cells {
+                    let got: Vec<(usize, usize)> = g.neighbors_iter(r, c, nbhd).collect();
+                    assert_eq!(got, g.neighbors(r, c, nbhd), "cell {:?} {:?} {:?}", (r, c), boundary, nbhd);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn neighbors_iter_dedups_on_small_torus() {
+        let g = Grid::new(2, 2, Boundary::Toroidal);
+        let got: Vec<(usize, usize)> = g.neighbors_iter(0, 0, Neighborhood::Moore).collect();
+        assert_eq!(got, vec![(0, 1), (1, 0), (1, 1)]);
+    }
+
+    // ── Adjacency (issue #11) ────────────────────────────────────────────────────
+
+    #[test]
+    fn adjacency_matches_grid_neighbors_every_cell() {
+        for boundary in [Boundary::Fixed, Boundary::Toroidal] {
+            let g = Grid::new(4, 5, boundary);
+            let cols = g.cols();
+            for nbhd in [Neighborhood::Moore, Neighborhood::VonNeumann] {
+                let adj = g.adjacency(nbhd);
+                assert_eq!(adj.len(), g.len());
+                assert!(!adj.is_empty());
+                for r in 0..g.rows() {
+                    for c in 0..g.cols() {
+                        let idx = r * cols + c;
+                        let expected: Vec<usize> = g
+                            .neighbors(r, c, nbhd)
+                            .into_iter()
+                            .map(|(nr, nc)| nr * cols + nc)
+                            .collect();
+                        assert_eq!(adj.neighbors(idx), expected.as_slice());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adjacency_radius_matches_grid_neighbors_radius() {
+        let g = Grid::new(6, 6, Boundary::Fixed);
+        let cols = g.cols();
+        let adj = g.adjacency_radius(Neighborhood::VonNeumann, 2);
+        for r in 0..g.rows() {
+            for c in 0..g.cols() {
+                let idx = r * cols + c;
+                let expected: Vec<usize> = g
+                    .neighbors_radius(r, c, Neighborhood::VonNeumann, 2)
+                    .into_iter()
+                    .map(|(nr, nc)| nr * cols + nc)
+                    .collect();
+                assert_eq!(adj.neighbors(idx), expected.as_slice());
+            }
+        }
+    }
+
+    // ── CellGrid (issue #12) ─────────────────────────────────────────────────────
+
+    #[test]
+    fn cell_grid_new_fills_all_cells() {
+        let cg = CellGrid::new(Grid::new(3, 4, Boundary::Fixed), 7u32);
+        assert_eq!(cg.rows(), 3);
+        assert_eq!(cg.cols(), 4);
+        assert_eq!(cg.len(), 12);
+        assert!(!cg.is_empty());
+        assert!(cg.cells().iter().all(|&v| v == 7));
+        assert_eq!(cg.grid().boundary(), Boundary::Fixed);
+    }
+
+    #[test]
+    fn cell_grid_from_fn_uses_coordinates() {
+        let cg = CellGrid::from_fn(Grid::new(2, 3, Boundary::Fixed), |r, c| r * 10 + c);
+        assert_eq!(cg.get(0, 0), Some(&0));
+        assert_eq!(cg.get(0, 2), Some(&2));
+        assert_eq!(cg.get(1, 0), Some(&10));
+        assert_eq!(cg.get(1, 2), Some(&12));
+        assert_eq!(cg.cells(), &[0, 1, 2, 10, 11, 12]);
+    }
+
+    #[test]
+    fn cell_grid_get_mut_round_trip() {
+        let mut cg = CellGrid::new(Grid::new(3, 3, Boundary::Fixed), 0i32);
+        *cg.get_mut(1, 2).unwrap() = 42;
+        assert_eq!(cg.get(1, 2), Some(&42));
+        *cg.get_idx_mut(0).unwrap() = -5;
+        assert_eq!(cg.get_idx(0), Some(&-5));
+        // Out-of-bounds queries return None.
+        assert_eq!(cg.get(3, 0), None);
+        assert_eq!(cg.get_mut(0, 3), None);
+        assert_eq!(cg.get_idx(99), None);
+    }
+
+    #[test]
+    fn cell_grid_index_mapping() {
+        let cg = CellGrid::new(Grid::new(3, 4, Boundary::Fixed), 0u8);
+        assert_eq!(cg.index(0, 0), 0);
+        assert_eq!(cg.index(0, 3), 3);
+        assert_eq!(cg.index(2, 1), 9);
+    }
+
+    #[test]
+    fn cell_grid_neighbor_values() {
+        // Each cell holds its flat index; neighbor_values at the center should
+        // line up with grid.neighbors mapped to those values.
+        let g = Grid::new(3, 3, Boundary::Fixed);
+        let cg = CellGrid::from_fn(g, |r, c| r * 3 + c);
+        let expected: Vec<usize> = g
+            .neighbors(1, 1, Neighborhood::VonNeumann)
+            .into_iter()
+            .map(|(r, c)| r * 3 + c)
+            .collect();
+        let got: Vec<usize> = cg
+            .neighbor_values(1, 1, Neighborhood::VonNeumann)
+            .into_iter()
+            .copied()
+            .collect();
+        assert_eq!(got, expected);
+        // Delegated neighbors() matches the grid's.
+        assert_eq!(
+            cg.neighbors(0, 0, Neighborhood::Moore),
+            g.neighbors(0, 0, Neighborhood::Moore)
+        );
     }
 }
