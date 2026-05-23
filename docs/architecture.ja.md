@@ -6,7 +6,7 @@
 
 ## クレートワークスペース
 
-ワークスペースは3層に整理された10個のクレートで構成されています：
+ワークスペースは3層に整理された11個のクレートで構成されています：
 
 ```
 socsim-cli          ← バイナリ（エントリーポイント）
@@ -18,6 +18,7 @@ socsim-cli          ← バイナリ（エントリーポイント）
             ├── socsim-hr-lifecycle ← リファレンスモジュール（10メカニズム）
             │       └── socsim-net         ← SocialNetwork（ER, WS, BAジェネレーター）
             ├── socsim-grid        ← Grid, GridIndex, 近傍, 距離（空間モデル）
+            ├── socsim-marl        ← 学習ポリシー(MARL): Policy, PolicyMechanism, MarlTrainer（burn; ライブラリ専用）
             └── socsim-rng         ← SimRng (ChaCha20), derive_seed
 ```
 
@@ -29,6 +30,7 @@ socsim-cli          ← バイナリ（エントリーポイント）
 - `socsim-runner` は上記すべてに依存し，並列処理のために `rayon` を追加します．
 - `socsim-cli` はすべてを `socsim` バイナリとして結合します．
 - `socsim-hr-lifecycle`，`socsim-net`，`socsim-grid` はエンジン層の隣に位置し，直交しています；`socsim-grid` は `socsim-core` にのみ依存します．
+- `socsim-marl`（Phase 6）は `socsim-engine` と `socsim-core` に依存します．**ライブラリ専用**（`socsim` バイナリには含まれません）で，ニューラルネットフレームワーク `burn` を取り込むため，hr-lifecycle 連携は `marl` feature でゲートしています．
 
 ---
 
@@ -75,6 +77,23 @@ PreStep → Environment → Decision → Interaction → Reward → PostStep
 エンジンはシナリオの `seed` フィールドからルートRNGをシードします．同じシードは，マシンアーキテクチャやRustのバージョンに関わらず，常に同じエージェント軌跡を生成します．
 
 エージェントとチームの集計は常にソートされた `AgentId` 順で反復し，ハッシュマップの反復非決定性を排除します．
+
+---
+
+## スナップショット：保存と再開
+
+シミュレーションの**可変状態**を捕捉・復元できます — PyTorch の `state_dict`（状態）と model architecture（コード）の分離に相当します．`Snapshot<W>` は World（`SimClock` を含む），`SimRng` の厳密なストリーム位置（`rand_chacha` の `serde1` でシリアライズ），early-stop フラグを保持します．mechanisms・scheduler・recorder は*コード*であり再構築側が用意するため，意図的に含めません．
+
+- `Simulation::snapshot()` / `restore(snapshot)` — メモリ上での捕捉/復元（`snapshot()` は `W: Clone` が必要）．
+- `Snapshot::save(path)` / `Snapshot::load(path)` — JSON 永続化，`SNAPSHOT_VERSION` で版チェック．
+
+**同じ** mechanisms で構築した `Simulation` にスナップショットを復元すると，保存時点以降の実行がビット単位で再現されます — *別シード*で構築した sim に復元しても無中断実行と一致することをテストで検証しています．境界はオプトイン（`W: Serialize` / `DeserializeOwned` でゲートした `impl`）なので `WorldState` トレイトは不変で，serde 非対応の World は単にこれらのメソッドを持ちません．`SocialNetwork` は `{nodes, edges}` のペアとしてシリアライズし（petgraph の `NodeIndex` は永続化せず再構築），petgraph のバージョン差にも安定です．
+
+---
+
+## 学習ポリシー（MARL, Phase 6）
+
+`socsim-marl` は `Decision` フェーズを学習可能にします：`PolicyMechanism` が `Policy`（`burn` の小さな MLP を REINFORCE で学習する `DiscretePolicyNet` が実装）をラップし，他のメカニズムと同じ6フェーズループに差し込めます — エンジンの変更は不要です．`ObsEncoder`/`ActionApplier`/`RewardFn` が具体的な World とフラットな特徴・行動空間を橋渡しし，`TrajectoryBuffer` がエピソードを収集，`MarlTrainer` が外側の学習ループを回します．重みは `SimRng` からシードされ全テンソル演算は CPU 上なので，凍結ポリシーはビット単位で再現可能です．使い方は[ライブラリガイド](library.ja.md#学習ポリシーmarl)を参照してください．
 
 ---
 

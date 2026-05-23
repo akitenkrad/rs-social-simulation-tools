@@ -168,3 +168,37 @@ println!("Final GDP: {}", sim.world().gdp);
 ```
 
 For the complete, runnable version of this pattern see `crates/socsim-engine/examples/custom_mechanism.rs`.
+
+---
+
+## 5. Pause and resume a long run (snapshots)
+
+Checkpoint a run to disk and resume it later — useful for long sweeps, crash recovery, or branching what-if analyses from a common state. The world must derive `serde`; the snapshot captures the world, the exact RNG stream, and the clock, but **not** the mechanisms (you rebuild those).
+
+```rust,ignore
+use socsim_engine::Snapshot;
+
+// ... run partway ...
+for _ in 0..12 { sim.step()?; }
+sim.snapshot().save("checkpoint.json")?;
+
+// Later: rebuild a simulation with the SAME mechanisms, then restore.
+let snap = Snapshot::load("checkpoint.json")?;
+let mut resumed = build_my_sim(/* any seed */);
+resumed.restore(snap);
+resumed.run()?;   // continues bit-identically from month 12
+```
+
+Runnable demo: `cargo run -p socsim-hr-lifecycle --example snapshot_resume`. See the [library guide](library.md#snapshots-save--resume) for details.
+
+---
+
+## 6. Train a learnable turnover policy (MARL)
+
+Replace a fixed decision heuristic with a policy learned by REINFORCE. The reference module ships a learnable turnover policy behind the `marl` feature:
+
+```sh
+cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover
+```
+
+This trains a `burn` policy network so employees learn to stay/quit by individual-rationality reward, reproducing rational turnover as an emergent policy. To wire MARL into your own world, implement `ObsEncoder` / `ActionApplier` / `RewardFn` and drive `MarlTrainer` — see the [library guide](library.md#learnable-policies-marl).

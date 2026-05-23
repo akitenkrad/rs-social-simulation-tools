@@ -416,3 +416,82 @@ write_my_csv(sim.world());          // your existing schema, no Recorder require
 | 最適な用途 | 新規プロジェクト，パラメータスイープ，再現可能なシナリオファイル | 既存ツールへのエンジン埋め込み，カスタム出力スキーマ |
 
 実際に動作するエンジンのみの例は `crates/socsim-engine/examples/engine_only.rs` にあります．
+
+---
+
+## スナップショット：保存と再開
+
+World が `serde` を導出していれば，実行の**可変状態**（World + 厳密な RNG ストリーム + クロック + stop フラグ）を捕捉・復元できます．mechanisms・scheduler・recorder は捕捉されません — シミュレーションを再構築するときに用意するコードです（PyTorch の `state_dict` と architecture の分離）．
+
+```rust,ignore
+use socsim_engine::{SimulationBuilder, Snapshot};
+
+// 1. World は serde シリアライズ可能（メモリ上スナップショットには Clone も）であること．
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct MyWorld { /* ... */ }
+
+let mut sim = SimulationBuilder::new(MyWorld::new(/* ... */)).seed(7).build();
+for _ in 0..100 { sim.step()?; }
+
+// 2. 捕捉 — メモリ上または JSON ファイルへ．
+let snap = sim.snapshot();            // W: Clone が必要
+snap.save("run.snapshot.json")?;      // W: Serialize が必要
+
+// 3. 後で（別プロセスでも）：同じ mechanisms を再構築してから復元．
+let snap = Snapshot::load("run.snapshot.json")?;   // 版チェックあり
+let mut resumed = SimulationBuilder::new(MyWorld::placeholder())
+    .seed(0)                          // restore で上書きされる
+    .add_mechanism(Box::new(MyMechanism::new(/* 以前と同じ */)))
+    .build();
+resumed.restore(snap);
+resumed.run()?;                       // ステップ100からビット単位で継続
+```
+
+これらのメソッドは `W: Clone` / `Serialize` / `DeserializeOwned` でゲートした `impl` ブロックで追加されるため，`WorldState` トレイトは不変です — serde 非対応の World は単にこれらを持ちません．参照実装の `HrWorld`（`{nodes, edges}` としてシリアライズされる `SocialNetwork` を含む）は完全に serde 対応です．`examples/snapshot_resume.rs` を参照してください．同じ mechanisms で構築したシミュレーションに復元すれば，新しいシミュレーションのシードに関わらず，保存時点以降の実行がビット単位で再現されます．
+
+---
+
+## 学習ポリシー（MARL）
+
+`Decision` フェーズは `socsim-marl`（Phase 6）で*学習可能*にできます：`PolicyMechanism` が `Policy` をラップし，他のメカニズムと同様に6フェーズループに差し込めます．既定の `Policy` は `DiscretePolicyNet`（[`burn`](https://burn.dev) の小さな MLP を CPU 上で REINFORCE 学習）で，重みは `SimRng` からシードされビット再現可能です．ポリシーはフラットな `&[f32]` 特徴と `usize` 行動を扱うため，3つの小さなトレイトで World を橋渡しします：
+
+```rust,ignore
+use socsim_marl::{
+    ActionApplier, DiscretePolicyNet, MarlTrainer, NetConfig, ObsEncoder,
+    PolicyMechanism, RewardFn, TrainConfig, TrajectoryBuffer,
+};
+
+struct MyEncoder;          // World + agent → 特徴ベクトル
+impl ObsEncoder<MyWorld> for MyEncoder {
+    fn obs_dim(&self) -> usize { 4 }
+    fn encode(&self, w: &MyWorld, a: AgentId) -> Option<Vec<f32>> { /* ... */ }
+}
+struct MyApplier;          // 選択された行動インデックス → World の変更
+impl ActionApplier<MyWorld> for MyApplier {
+    fn n_actions(&self) -> usize { 2 }
+    fn apply(&self, w: &mut MyWorld, a: AgentId, action: usize, rng: &mut SimRng) { /* ... */ }
+}
+struct MyReward;           // 各ステップ後に読むエージェント単位の報酬
+impl RewardFn<MyWorld> for MyReward {
+    fn reward(&self, w: &MyWorld, a: AgentId) -> f32 { /* ... */ }
+}
+
+// 外側の学習ループ：エピソードごとに collect モードのポリシーで新規 sim を構築．
+let net = std::rc::Rc::new(std::cell::RefCell::new(
+    DiscretePolicyNet::new(NetConfig::new(4, 2), &mut SimRng::from_seed(0))?,
+));
+let mut trainer = MarlTrainer::new(net);
+let stats = trainer.train(
+    &TrainConfig { episodes: 50, seed: 0 },
+    |policy, buffer: std::rc::Rc<std::cell::RefCell<TrajectoryBuffer>>, seed| {
+        SimulationBuilder::new(MyWorld::new(/* ... */))
+            .seed(seed)
+            .add_mechanism(Box::new(PolicyMechanism::collecting(
+                policy, MyEncoder, MyApplier, buffer)))
+            .build()
+    },
+    &MyReward,
+)?;
+```
+
+学習後は `PolicyMechanism::inference(policy, …)` でメカニズムを構築すると**凍結**ポリシーを実行できます：貪欲行動を取り，RNG を消費せず，ビット再現可能です．`socsim-marl` は `burn` を取り込むため，hr-lifecycle 連携は `marl` feature でゲートしています（`cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover`）．

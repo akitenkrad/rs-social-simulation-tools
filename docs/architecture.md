@@ -6,7 +6,7 @@
 
 ## Crate workspace
 
-The workspace contains ten crates organised in three layers:
+The workspace contains eleven crates organised in three layers:
 
 ```
 socsim-cli          ← binary (entry point)
@@ -18,6 +18,7 @@ socsim-cli          ← binary (entry point)
             ├── socsim-hr-lifecycle ← reference module (10 mechanisms)
             │       └── socsim-net         ← SocialNetwork (ER, WS, BA generators)
             ├── socsim-grid        ← Grid, GridIndex, neighbourhoods, distances (spatial models)
+            ├── socsim-marl        ← learnable (MARL) policies: Policy, PolicyMechanism, MarlTrainer (burn; library-only)
             └── socsim-rng         ← SimRng (ChaCha20), derive_seed
 ```
 
@@ -29,6 +30,7 @@ Dependency rules:
 - `socsim-runner` depends on all of the above and adds `rayon` for parallelism.
 - `socsim-cli` wires everything together into the `socsim` binary.
 - `socsim-hr-lifecycle`, `socsim-net`, and `socsim-grid` sit beside the engine layer and are orthogonal to it; `socsim-grid` depends only on `socsim-core`.
+- `socsim-marl` (Phase 6) depends on `socsim-engine` and `socsim-core`. It is **library-only** — not part of the `socsim` binary — and pulls in the `burn` neural-network framework, so the hr-lifecycle integration gates it behind a `marl` feature.
 
 ---
 
@@ -75,6 +77,23 @@ A mechanism registers its phases by returning a `'static` slice from `Mechanism:
 The engine seeds the root RNG from the scenario's `seed` field. The same seed always produces the same agent trajectories, regardless of machine architecture or Rust version.
 
 Agents and team aggregates are always iterated in sorted `AgentId` order to eliminate hash-map iteration non-determinism.
+
+---
+
+## Snapshots: save & resume
+
+A simulation's **mutable state** can be captured and restored — the analogue of a PyTorch `state_dict` (state) versus model architecture (code). `Snapshot<W>` holds the world (which owns the `SimClock`), the exact `SimRng` stream position (serialised via `rand_chacha`'s `serde1`), and the early-stop flag. It deliberately omits mechanisms, the scheduler, and the recorder: those are *code*, supplied when the simulation is rebuilt.
+
+- `Simulation::snapshot()` / `restore(snapshot)` — in-memory capture/restore (`snapshot()` requires `W: Clone`).
+- `Snapshot::save(path)` / `Snapshot::load(path)` — JSON persistence, version-checked via `SNAPSHOT_VERSION`.
+
+Restoring a snapshot into a simulation wired with the **same** mechanisms reproduces the run bit-identically from the saved step onward — verified by tests that resume into a *different-seed* simulation and match an uninterrupted run. The bound is opt-in (`impl` blocks gated on `W: Serialize` / `DeserializeOwned`), so the `WorldState` trait is unchanged and non-serde worlds simply lack these methods. `SocialNetwork` serialises as a `{nodes, edges}` pair (petgraph `NodeIndex`es are rebuilt, not persisted), keeping snapshots stable across petgraph versions.
+
+---
+
+## Learnable policies (MARL, Phase 6)
+
+`socsim-marl` makes the `Decision` phase learnable: a `PolicyMechanism` wraps a `Policy` (implemented by `DiscretePolicyNet`, a small `burn` MLP trained with REINFORCE) and slots into the same six-phase loop as any other mechanism — the engine needs no changes. `ObsEncoder`/`ActionApplier`/`RewardFn` bridge a concrete world to the flat feature/action space, a `TrajectoryBuffer` collects episodes, and `MarlTrainer` runs the outer learn loop. Weights are seeded from `SimRng` and all tensor math runs on CPU, so a frozen policy stays bit-reproducible. See the [library guide](library.md#learnable-policies-marl) for usage.
 
 ---
 
