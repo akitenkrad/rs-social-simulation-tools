@@ -10,10 +10,9 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use socsim_core::{
-    AgentId, Blackboard, Mechanism, Phase, Recorder, Result, Scheduler, SimRng, SocsimError,
-    StepContext, WorldState,
+    AgentId, Blackboard, Mechanism, NullRecorder, Phase, Recorder, Result, Scheduler, SimRng,
+    SocsimError, StepContext, WorldState,
 };
-use socsim_log::InMemoryRecorder;
 
 // ── SequentialScheduler ───────────────────────────────────────────────────────
 
@@ -44,6 +43,26 @@ impl<W: WorldState> Scheduler<W> for RandomActivationScheduler {
         ids.shuffle(rng);
         ids
     }
+}
+
+// ── StepReport ────────────────────────────────────────────────────────────────
+
+/// Snapshot of state observable after a single step. Borrows the simulation immutably.
+///
+/// Produced by [`Simulation::step_reported`] and passed to the observer closure of
+/// [`Simulation::run_observed`]. It bundles the post-step clock time, the early-stop
+/// flag, and shared references to the world and step-scoped scratch so downstreams can
+/// collect per-step metrics and detect mechanism-driven convergence without hand-rolling
+/// a `step()` + `scratch()` loop.
+pub struct StepReport<'a, W> {
+    /// Clock time after the step (i.e. `world.clock().t()`).
+    pub t: u64,
+    /// Whether a mechanism requested stop during/after this step.
+    pub stopped: bool,
+    /// Shared reference to the world state after the step.
+    pub world: &'a W,
+    /// Shared reference to the step-scoped scratch after the step.
+    pub scratch: &'a Blackboard,
 }
 
 // ── Simulation ────────────────────────────────────────────────────────────────
@@ -146,6 +165,61 @@ impl<W: WorldState> Simulation<W> {
         while !self.world.clock().is_done() && !self.stop_requested {
             self.step()?;
             if predicate(&self.world) {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Execute one step, then return a [`StepReport`] borrowing `self` immutably.
+    ///
+    /// Equivalent to calling [`Simulation::step`] and then reading
+    /// [`Simulation::world`] / [`Simulation::scratch`] / [`Simulation::stop_requested`],
+    /// but bundled into one typed value so callers avoid fragile stringly-typed reads.
+    /// `t` is the clock time after the step.
+    pub fn step_reported(&mut self) -> Result<StepReport<'_, W>> {
+        self.step()?;
+        // Capture the Copy fields first, then build the report from immutable
+        // reborrows of the now-finished mutable `step()`.
+        let t = self.world.clock().t();
+        let stopped = self.stop_requested;
+        Ok(StepReport {
+            t,
+            stopped,
+            world: &self.world,
+            scratch: &self.scratch,
+        })
+    }
+
+    /// Run to completion like [`Simulation::run`], invoking `observe` once per
+    /// executed step with a [`StepReport`] reflecting the state **after** that step.
+    ///
+    /// This is the ergonomic replacement for the hand-rolled
+    /// `for { sim.step()?; let x = *sim.scratch().get(...); ...; if sim.stop_requested() break; }`
+    /// loop used by downstream models. The observer is called for the step in which a
+    /// mechanism requests stop (that report has `stopped == true`) and is **not** called
+    /// for any step after the stop. Termination on the clock matches [`Simulation::run`].
+    ///
+    /// ```ignore
+    /// let mut history = Vec::new();
+    /// sim.run_observed(|r| history.push(*r.scratch.get::<f64>("cooperation").unwrap()))?;
+    /// ```
+    pub fn run_observed<F>(&mut self, mut observe: F) -> Result<()>
+    where
+        F: FnMut(StepReport<'_, W>),
+    {
+        while !self.world.clock().is_done() && !self.stop_requested {
+            self.step()?;
+            // Capture Copy fields by value, then borrow world/scratch immutably.
+            let t = self.world.clock().t();
+            let stopped = self.stop_requested;
+            observe(StepReport {
+                t,
+                stopped,
+                world: &self.world,
+                scratch: &self.scratch,
+            });
+            if self.stop_requested {
                 break;
             }
         }
@@ -273,7 +347,7 @@ impl<W: DeserializeOwned> Snapshot<W> {
 /// |---|---|
 /// | scheduler | [`SequentialScheduler`] |
 /// | seed | `0` |
-/// | recorder | [`InMemoryRecorder`] |
+/// | recorder | [`NullRecorder`] (no-op) |
 ///
 /// # Example
 ///
@@ -323,7 +397,7 @@ impl<W: WorldState> SimulationBuilder<W> {
         self
     }
 
-    /// Override the default [`InMemoryRecorder`].
+    /// Override the default [`NullRecorder`].
     pub fn recorder(mut self, r: Box<dyn Recorder>) -> Self {
         self.recorder = Some(r);
         self
@@ -340,7 +414,7 @@ impl<W: WorldState> SimulationBuilder<W> {
             rng: SimRng::from_seed(self.seed),
             recorder: self
                 .recorder
-                .unwrap_or_else(|| Box::new(InMemoryRecorder::new())),
+                .unwrap_or_else(|| Box::new(NullRecorder)),
             scratch: Blackboard::new(),
             stop_requested: false,
         }
@@ -470,6 +544,42 @@ mod tests {
         let _ = sim.recorder();
     }
 
+    // ── a mechanism that records a metric every step ──────────────────────────
+
+    struct RecordingMechanism;
+
+    impl Mechanism<SimpleWorld> for RecordingMechanism {
+        fn name(&self) -> &str {
+            "recording"
+        }
+        fn phases(&self) -> &'static [Phase] {
+            &[Phase::Environment]
+        }
+        fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, SimpleWorld>) -> Result<()> {
+            ctx.recorder.record_metric(ctx.clock.t(), "tick", 1.0);
+            ctx.recorder
+                .record_event(ctx.clock.t(), "ticked", serde_json::Value::Null);
+            ctx.recorder
+                .record_row(ctx.clock.t(), "metrics", &[("tick", 1.0)]);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn default_recorder_is_null_and_runs_as_noop() {
+        // No `.recorder(...)` call → the builder defaults to NullRecorder.
+        let world = SimpleWorld::new(3, 1);
+        let mut sim = SimulationBuilder::new(world)
+            .add_mechanism(Box::new(RecordingMechanism))
+            .build();
+        // Recording through the no-op sink must not panic and the run completes.
+        sim.run().unwrap();
+        assert!(sim.world().clock().is_done());
+        // The default recorder downcasts to NullRecorder.
+        let any = sim.recorder().as_any().expect("NullRecorder downcasts");
+        assert!(any.downcast_ref::<NullRecorder>().is_some());
+    }
+
     // ── #1: early stop ────────────────────────────────────────────────────────
 
     /// A mechanism that requests a stop once `world.counter` reaches a target.
@@ -549,5 +659,100 @@ mod tests {
         sim.step().unwrap();
         // Cleared at the start of step 2, then re-written with the new t.
         assert_eq!(sim.scratch().get::<u64>("last_t"), Some(&2));
+    }
+
+    // ── #14: step_reported / run_observed ──────────────────────────────────────
+
+    #[test]
+    fn run_observed_calls_observer_once_per_step_with_incrementing_t() {
+        let world = SimpleWorld::new(5, 1);
+        let mut sim = SimulationBuilder::new(world)
+            .add_mechanism(Box::new(CountMechanism))
+            .build();
+
+        let mut seen_t = Vec::new();
+        sim.run_observed(|r| {
+            assert!(!r.stopped);
+            seen_t.push(r.t);
+        })
+        .unwrap();
+
+        // Observer called exactly once per step, t increments 1..=N.
+        assert_eq!(seen_t, vec![1, 2, 3, 4, 5]);
+        assert_eq!(sim.world().counter, 5);
+    }
+
+    #[test]
+    fn run_observed_stops_at_requesting_step_and_not_after() {
+        // t_max = 100 but StopAtMechanism requests stop once counter hits K = 3.
+        let world = SimpleWorld::new(100, 1);
+        let mut sim = SimulationBuilder::new(world)
+            .add_mechanism(Box::new(CountMechanism))
+            .add_mechanism(Box::new(StopAtMechanism { target: 3 }))
+            .build();
+
+        let mut reports: Vec<(u64, bool)> = Vec::new();
+        sim.run_observed(|r| reports.push((r.t, r.stopped)))
+            .unwrap();
+
+        // Observer invoked for steps 1..=3; the 3rd has stopped == true; none after.
+        assert_eq!(reports, vec![(1, false), (2, false), (3, true)]);
+        assert!(sim.stop_requested());
+        assert_eq!(sim.world().counter, 3);
+    }
+
+    #[test]
+    fn step_reported_reflects_just_executed_step() {
+        let world = SimpleWorld::new(10, 1);
+        let mut sim = SimulationBuilder::new(world)
+            .add_mechanism(Box::new(CountMechanism))
+            .add_mechanism(Box::new(ScratchWriter))
+            .build();
+
+        let report = sim.step_reported().unwrap();
+        assert_eq!(report.t, 1);
+        assert!(!report.stopped);
+        assert_eq!(report.world.counter, 1);
+        // ScratchWriter wrote the current clock time into scratch this step.
+        assert_eq!(report.scratch.get::<u64>("last_t"), Some(&1));
+
+        let report = sim.step_reported().unwrap();
+        assert_eq!(report.t, 2);
+        assert_eq!(report.world.counter, 2);
+        assert_eq!(report.scratch.get::<u64>("last_t"), Some(&2));
+    }
+
+    #[test]
+    fn run_observed_equivalent_to_manual_step_loop() {
+        // Manual hand-rolled loop collecting per-step scratch values.
+        let manual_world = SimpleWorld::new(6, 1);
+        let mut manual = SimulationBuilder::new(manual_world)
+            .add_mechanism(Box::new(CountMechanism))
+            .add_mechanism(Box::new(ScratchWriter))
+            .build();
+        let mut manual_metrics = Vec::new();
+        while !manual.world().clock().is_done() && !manual.stop_requested() {
+            manual.step().unwrap();
+            let v = *manual.scratch().get::<u64>("last_t").unwrap();
+            manual_metrics.push(v);
+            if manual.stop_requested() {
+                break;
+            }
+        }
+
+        // run_observed collecting the same values.
+        let obs_world = SimpleWorld::new(6, 1);
+        let mut obs = SimulationBuilder::new(obs_world)
+            .add_mechanism(Box::new(CountMechanism))
+            .add_mechanism(Box::new(ScratchWriter))
+            .build();
+        let mut obs_metrics = Vec::new();
+        obs.run_observed(|r| obs_metrics.push(*r.scratch.get::<u64>("last_t").unwrap()))
+            .unwrap();
+
+        // Same per-step metrics and same final world.
+        assert_eq!(manual_metrics, obs_metrics);
+        assert_eq!(manual.world().counter, obs.world().counter);
+        assert_eq!(manual.world().clock().t(), obs.world().clock().t());
     }
 }
