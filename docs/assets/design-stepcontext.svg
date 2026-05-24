@@ -1,0 +1,75 @@
+<svg width="100%" viewBox="0 0 920 540" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Anatomy of StepContext</title>
+<desc>StepContext is the bundle every Mechanism::apply receives. It carries a mutable borrow of the world, a copy of the clock, a mutable RNG, a mutable recorder, the scheduler's activation order, a mutable step-scoped scratch blackboard, and a mutable stop flag.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="914" height="534" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+<text class="title" x="40" y="46" font-size="23" fill="#2C2C2A">What a mechanism sees: <tspan class="mono" font-size="19" fill="#534AB7">StepContext</tspan></text>
+
+<!-- center -->
+<rect x="360" y="225" width="200" height="92" rx="14" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.8"/>
+<text class="mono"  x="460" y="262" font-size="16" fill="#332E6E" text-anchor="middle">StepContext</text>
+<text class="body"  x="460" y="284" font-size="11.5" fill="#6B6A64" text-anchor="middle">passed to every</text>
+<text class="mono"  x="460" y="301" font-size="12" fill="#534AB7" text-anchor="middle">apply(phase, ctx)</text>
+
+<!-- left satellites -->
+<g>
+  <rect x="40" y="80" width="270" height="64" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
+  <text class="mono" x="56" y="104" font-size="13" fill="#0B5040">world: &amp;mut W</text>
+  <text class="body" x="56" y="124" font-size="11.5" fill="#3C7E6C">mutate the shared world state</text>
+
+  <rect x="40" y="232" width="270" height="64" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+  <text class="mono" x="56" y="256" font-size="13" fill="#2C2C2A">clock: SimClock  (Copy)</text>
+  <text class="body" x="56" y="276" font-size="11.5" fill="#6B6A64">read current t without a 2nd borrow</text>
+
+  <rect x="40" y="384" width="270" height="64" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+  <text class="mono" x="56" y="408" font-size="13" fill="#2C2C2A">rng: &amp;mut SimRng</text>
+  <text class="body" x="56" y="428" font-size="11.5" fill="#6B6A64">deterministic, seed-derived randomness</text>
+</g>
+
+<!-- right satellites -->
+<g>
+  <rect x="610" y="64" width="270" height="64" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+  <text class="mono" x="626" y="88" font-size="13" fill="#2C2C2A">recorder: &amp;mut dyn Recorder</text>
+  <text class="body" x="626" y="108" font-size="11.5" fill="#6B6A64">emit metrics &amp; events</text>
+
+  <rect x="610" y="160" width="270" height="64" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+  <text class="mono" x="626" y="184" font-size="13" fill="#2C2C2A">agent_order: &amp;[AgentId]</text>
+  <text class="body" x="626" y="204" font-size="11.5" fill="#6B6A64">this step's order, from the Scheduler</text>
+
+  <rect x="610" y="256" width="270" height="64" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+  <text class="mono" x="626" y="280" font-size="13" fill="#2C2C2A">scratch: &amp;mut Blackboard</text>
+  <text class="body" x="626" y="300" font-size="11.5" fill="#6B6A64">step-scoped inter-mechanism scratch</text>
+
+  <rect x="610" y="352" width="270" height="64" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+  <text class="mono" x="626" y="376" font-size="13" fill="#2C2C2A">stop: &amp;mut bool</text>
+  <text class="body" x="626" y="396" font-size="11.5" fill="#6B6A64">request_stop() — end run after this step</text>
+</g>
+
+<!-- connectors -->
+<g stroke="#534AB7" stroke-width="1.3" fill="none">
+  <path d="M310 112 C 350 150, 380 200, 392 224" marker-end="url(#hr)"/>
+  <path d="M310 264 C 335 264, 345 268, 358 270" marker-end="url(#hr)"/>
+  <path d="M310 416 C 350 380, 380 330, 392 318" marker-end="url(#hr)"/>
+  <path d="M610 96  C 560 150, 540 200, 528 224" marker-end="url(#hr)"/>
+  <path d="M610 192 C 575 210, 552 230, 540 240" marker-end="url(#hr)"/>
+  <path d="M610 288 C 585 282, 575 276, 562 274" marker-end="url(#hr)"/>
+  <path d="M610 384 C 560 360, 540 330, 528 318" marker-end="url(#hr)"/>
+</g>
+
+<text class="body" x="460" y="500" font-size="12" fill="#6B6A64" text-anchor="middle">The engine rebuilds this bundle from its own fields before each mechanism call — mechanisms never own the engine's state, they borrow it.</text>
+
+</svg>

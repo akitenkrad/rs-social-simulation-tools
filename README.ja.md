@@ -54,6 +54,7 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 
 | ドキュメント | 内容 |
 |---|---|
+| [設計概要](docs/design.ja.md) | コンセプトと設計思想，主要トレイト/構造体，6フェーズ実行モデル |
 | [CLIリファレンス](docs/cli.ja.md) | 全サブコマンド，フラグ，JSONL出力形式 |
 | [ユースケース＆レシピ](docs/usecases.ja.md) | 代表的な研究ワークフローのランブック |
 | [ライブラリAPI](docs/library.ja.md) | カスタムメカニズムの実装とライブラリとしての利用 |

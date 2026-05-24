@@ -1,0 +1,60 @@
+<svg width="100%" viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>State vs code: what a Snapshot captures</title>
+<desc>A Snapshot captures only mutable state — the world (which owns the clock), the exact RNG stream position, and the stop flag. It deliberately omits the code — mechanisms, scheduler, and recorder — which are re-supplied when the simulation is rebuilt. The analogy is a PyTorch state_dict (weights) versus the model architecture.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="894" height="464" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+<text class="title" x="40" y="46" font-size="23" fill="#2C2C2A">State vs code: what a <tspan class="mono" font-size="19" fill="#0F6E56">Snapshot</tspan> captures</text>
+
+<!-- State (captured) -->
+<rect x="40" y="78" width="380" height="250" rx="14" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.6"/>
+<text class="title" x="60" y="108" font-size="16" fill="#0B5040">State — captured by Snapshot&lt;W&gt;</text>
+<text class="body"  x="60" y="128" font-size="12" fill="#3C7E6C">serialised &amp; restored bit-for-bit</text>
+<g class="mono" font-size="13">
+  <rect x="60" y="146" width="340" height="44" rx="9" fill="#FFFFFF" stroke="#0F6E56" stroke-width="1"/>
+  <text x="76" y="166" fill="#0B5040">world: W</text>
+  <text class="body" x="76" y="183" font-size="11" fill="#3C7E6C">incl. SimClock (current t)</text>
+  <rect x="60" y="200" width="340" height="44" rx="9" fill="#FFFFFF" stroke="#0F6E56" stroke-width="1"/>
+  <text x="76" y="220" fill="#0B5040">rng: SimRng</text>
+  <text class="body" x="76" y="237" font-size="11" fill="#3C7E6C">exact ChaCha20 stream position</text>
+  <rect x="60" y="254" width="340" height="44" rx="9" fill="#FFFFFF" stroke="#0F6E56" stroke-width="1"/>
+  <text x="76" y="274" fill="#0B5040">stop_requested: bool</text>
+  <text class="body" x="76" y="291" font-size="11" fill="#3C7E6C">early-stop flag</text>
+</g>
+<text class="body" x="60" y="318" font-size="11.5" fill="#3C7E6C">Snapshot::save / load — JSON, SNAPSHOT_VERSION-checked</text>
+
+<!-- Code (re-supplied) -->
+<rect x="480" y="78" width="380" height="250" rx="14" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.6"/>
+<text class="title" x="500" y="108" font-size="16" fill="#332E6E">Code — re-supplied on rebuild</text>
+<text class="body"  x="500" y="128" font-size="12" fill="#6B6A64">NOT in the snapshot (it is the "architecture")</text>
+<g class="mono" font-size="13">
+  <rect x="500" y="146" width="340" height="40" rx="9" fill="#FBFAF6" stroke="#534AB7" stroke-width="1"/>
+  <text x="516" y="171" fill="#3A357A">mechanisms: Vec&lt;Box&lt;dyn Mechanism&gt;&gt;</text>
+  <rect x="500" y="196" width="340" height="40" rx="9" fill="#FBFAF6" stroke="#534AB7" stroke-width="1"/>
+  <text x="516" y="221" fill="#3A357A">scheduler: Box&lt;dyn Scheduler&gt;</text>
+  <rect x="500" y="246" width="340" height="40" rx="9" fill="#FBFAF6" stroke="#534AB7" stroke-width="1"/>
+  <text x="516" y="271" fill="#3A357A">recorder: Box&lt;dyn Recorder&gt;</text>
+</g>
+<text class="body" x="500" y="318" font-size="11.5" fill="#6B6A64">supplied again via SimulationBuilder when restoring</text>
+
+<!-- recombine arrows -->
+<path d="M420 360 H450" stroke="#0F6E56" stroke-width="1.4" fill="none" marker-end="url(#hr)"/>
+<path d="M480 360 H450" stroke="#534AB7" stroke-width="1.4" fill="none" marker-end="url(#hr)"/>
+
+<text class="body" x="450" y="400" font-size="13" fill="#2C2C2A" text-anchor="middle" font-weight="600">restore state into a sim wired with the same code  →  reproduces the run bit-identically</text>
+<text class="body" x="450" y="430" font-size="12" fill="#6B6A64" text-anchor="middle">Analogy: a PyTorch <tspan class="mono" fill="#0F6E56">state_dict</tspan> (weights = state) vs the model <tspan class="mono" fill="#534AB7">architecture</tspan> (code).</text>
+
+</svg>

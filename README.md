@@ -54,6 +54,7 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 
 | Document | Description |
 |---|---|
+| [Design overview](docs/design.md) | Concepts & design philosophy, core traits/structs, and the 6-phase execution model |
 | [CLI reference](docs/cli.md) | Every subcommand, flags, JSONL output format |
 | [Use-cases & recipes](docs/usecases.md) | Runbook for common research workflows |
 | [Library API](docs/library.md) | Implement custom mechanisms and use socsim as a library |

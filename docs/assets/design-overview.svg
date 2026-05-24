@@ -1,0 +1,96 @@
+<svg width="100%" viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>socsim design overview</title>
+<desc>The Simulation engine drives ordered, phase-tagged Mechanism layers that read and write a shared WorldState. A Scheduler and a seeded SimRng feed in; a Recorder emits metrics and events. The six-phase ribbon defines the order in which mechanisms act each step.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="gr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#0F6E56" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="994" height="594" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<text class="title" x="40" y="50" font-size="25" fill="#2C2C2A">socsim at a glance</text>
+<text class="body"  x="40" y="76" font-size="14" fill="#6B6A64">Mechanisms compose like neural-net layers over a deterministic, six-phase tick loop on a shared world.</text>
+
+<!-- engine container -->
+<rect x="38" y="96" width="770" height="456" rx="16" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.4"/>
+<text class="title" x="58" y="124" font-size="15" fill="#534AB7">Simulation — the engine (owns world, mechanisms, scheduler, rng, recorder)</text>
+
+<!-- mechanism layers -->
+<text class="body" x="300" y="150" font-size="13.5" fill="#444441" font-weight="600">Mechanisms — ordered, phase-tagged layers</text>
+<g class="body" font-size="13">
+  <rect x="300" y="160" width="380" height="28" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
+  <text x="316" y="179" fill="#332E6E" font-weight="600">learning_curve</text>
+  <text x="664" y="179" fill="#6B6A64" text-anchor="end" font-size="11.5">Environment</text>
+  <rect x="300" y="192" width="380" height="28" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
+  <text x="316" y="211" fill="#332E6E" font-weight="600">fit · turnover · hiring</text>
+  <text x="664" y="211" fill="#6B6A64" text-anchor="end" font-size="11.5">Decision</text>
+  <rect x="300" y="224" width="380" height="28" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
+  <text x="316" y="243" fill="#332E6E" font-weight="600">peer_effect · ocb · toxic_spread</text>
+  <text x="664" y="243" fill="#6B6A64" text-anchor="end" font-size="11.5">Interaction</text>
+  <rect x="300" y="256" width="380" height="28" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
+  <text x="316" y="275" fill="#332E6E" font-weight="600">knowledge_loss · socialization</text>
+  <text x="664" y="275" fill="#6B6A64" text-anchor="end" font-size="11.5">PostStep</text>
+</g>
+
+<!-- world state -->
+<rect x="300" y="312" width="380" height="78" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.5"/>
+<text class="title" x="490" y="340" font-size="16" fill="#0B5040" text-anchor="middle">WorldState</text>
+<text class="body"  x="490" y="362" font-size="12.5" fill="#0B5040" text-anchor="middle">agents · SimClock · domain state</text>
+<text class="body"  x="490" y="380" font-size="11.5" fill="#3C7E6C" text-anchor="middle">the single mutable thing mechanisms transform</text>
+
+<!-- read/write arrows between layers and world -->
+<path d="M430 288 V310" stroke="#0F6E56" stroke-width="1.4" marker-end="url(#gr)"/>
+<path d="M550 310 V288" stroke="#0F6E56" stroke-width="1.4" marker-end="url(#gr)"/>
+<text class="body" x="455" y="303" font-size="11" fill="#0F6E56">read / write</text>
+
+<!-- inputs: scheduler + rng -->
+<rect x="62" y="170" width="170" height="52" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text class="body" x="147" y="192" font-size="12.5" fill="#3C3B37" text-anchor="middle" font-weight="600">Scheduler</text>
+<text class="body" x="147" y="210" font-size="11" fill="#6B6A64" text-anchor="middle">→ agent activation order</text>
+<rect x="62" y="234" width="170" height="52" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text class="body" x="147" y="256" font-size="12.5" fill="#3C3B37" text-anchor="middle" font-weight="600">SimRng</text>
+<text class="body" x="147" y="274" font-size="11" fill="#6B6A64" text-anchor="middle">seeded ChaCha20 (determinism)</text>
+<path d="M232 205 H298" stroke="#534AB7" stroke-width="1.3" marker-end="url(#hr)"/>
+<path d="M232 258 C 265 258, 270 330, 298 345" fill="none" stroke="#534AB7" stroke-width="1.3" marker-end="url(#hr)"/>
+
+<!-- phase ribbon -->
+<text class="body" x="58" y="430" font-size="12.5" fill="#444441" font-weight="600">Every step runs the six phases in fixed order:</text>
+<g class="body" font-size="11.5">
+  <rect x="58"  y="444" width="112" height="30" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/><text x="114" y="463" text-anchor="middle" fill="#3C3B37">PreStep</text>
+  <rect x="182" y="444" width="112" height="30" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.1"/><text x="238" y="463" text-anchor="middle" fill="#534AB7" font-weight="600">Environment</text>
+  <rect x="306" y="444" width="112" height="30" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.1"/><text x="362" y="463" text-anchor="middle" fill="#534AB7" font-weight="600">Decision</text>
+  <rect x="430" y="444" width="112" height="30" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.1"/><text x="486" y="463" text-anchor="middle" fill="#534AB7" font-weight="600">Interaction</text>
+  <rect x="554" y="444" width="112" height="30" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.1"/><text x="610" y="463" text-anchor="middle" fill="#0F6E56" font-weight="600">Reward</text>
+  <rect x="678" y="444" width="112" height="30" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/><text x="734" y="463" text-anchor="middle" fill="#3C3B37">PostStep</text>
+  <path d="M170 459 H182" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+  <path d="M294 459 H306" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+  <path d="M418 459 H430" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+  <path d="M542 459 H554" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+  <path d="M666 459 H678" stroke="#534AB7" stroke-width="1.2" marker-end="url(#hr)"/>
+</g>
+<path d="M734 476 C 734 512, 114 512, 114 476" fill="none" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="2 4" marker-end="url(#hr)"/>
+<text class="body" x="424" y="528" font-size="11" fill="#6B6A64" text-anchor="middle">next step · clock.tick()</text>
+
+<!-- recorder output -->
+<rect x="836" y="300" width="140" height="86" rx="12" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+<text class="title" x="906" y="332" font-size="14" fill="#3C3B37" text-anchor="middle">Recorder</text>
+<text class="body"  x="906" y="352" font-size="11" fill="#6B6A64" text-anchor="middle">metrics · events</text>
+<text class="body"  x="906" y="368" font-size="11" fill="#6B6A64" text-anchor="middle">JSONL · CSV · memory</text>
+<text class="body"  x="906" y="384" font-size="10.5" fill="#9A988F" text-anchor="middle">(NullRecorder by default)</text>
+<path d="M680 351 H834" stroke="#0F6E56" stroke-width="1.4" marker-end="url(#gr)"/>
+<text class="body" x="756" y="344" font-size="11" fill="#0F6E56" text-anchor="middle">emit</text>
+
+</svg>
