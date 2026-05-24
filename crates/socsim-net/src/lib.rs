@@ -386,6 +386,194 @@ where
         self.index.contains_key(&id)
     }
 
+    // ── analysis / export (#20) ───────────────────────────────────────────────
+
+    /// Iterate over every edge as an `(a, b)` [`AgentId`] pair.
+    ///
+    /// For undirected graphs each edge is yielded once with `a <= b`
+    /// (canonical orientation), so the output is suitable for an undirected
+    /// edge-list export.  For directed graphs each arc is yielded as
+    /// `(source, target)`.
+    pub fn edges(&self) -> impl Iterator<Item = (AgentId, AgentId)> + '_ {
+        self.canonical_endpoints()
+    }
+
+    /// Iterate over every edge together with a reference to its payload:
+    /// `(a, b, &weight)`, with the same orientation rules as
+    /// [`edges`](Self::edges).
+    pub fn weighted_edges(&self) -> impl Iterator<Item = (AgentId, AgentId, &E)> + '_ {
+        self.graph.edge_references().map(move |e| {
+            let a = self.graph[e.source()];
+            let b = self.graph[e.target()];
+            if !Ty::is_directed() && a > b {
+                (b, a, e.weight())
+            } else {
+                (a, b, e.weight())
+            }
+        })
+    }
+
+    /// The degree sequence: every node's [`degree`](Self::degree), sorted
+    /// descending.  Node order is deterministic (sorted by `AgentId` before
+    /// sorting by degree).
+    pub fn degree_sequence(&self) -> Vec<usize> {
+        let mut ids: Vec<AgentId> = self.index.keys().copied().collect();
+        ids.sort();
+        let mut degs: Vec<usize> = ids.into_iter().map(|id| self.degree(id)).collect();
+        degs.sort_unstable_by(|a, b| b.cmp(a));
+        degs
+    }
+
+    /// The degree distribution: `histogram[d]` = number of nodes with degree
+    /// exactly `d`.  The returned `Vec` has length `max_degree + 1` (empty if
+    /// the network has no nodes).
+    pub fn degree_distribution(&self) -> Vec<usize> {
+        let degs = self.degree_sequence();
+        let max = degs.first().copied().unwrap_or(0);
+        if self.node_count() == 0 {
+            return Vec::new();
+        }
+        let mut hist = vec![0usize; max + 1];
+        for d in degs {
+            hist[d] += 1;
+        }
+        hist
+    }
+
+    /// Number of nodes in the largest connected component (0 for an empty
+    /// network).  Weak connectivity for directed graphs.
+    pub fn largest_component_size(&self) -> usize {
+        let comp = self.component_membership();
+        let mut counts: HashMap<usize, usize> = HashMap::new();
+        for &c in comp.values() {
+            *counts.entry(c).or_insert(0) += 1;
+        }
+        counts.values().copied().max().unwrap_or(0)
+    }
+
+    /// Average shortest-path length over all reachable ordered node pairs.
+    ///
+    /// Computed by an unweighted BFS from every node.  Returns `None` if the
+    /// network has fewer than two nodes or no reachable pairs at all.
+    ///
+    /// **Disconnected handling:** unreachable pairs are *excluded* from the
+    /// average (the average is taken over reachable pairs only), so a
+    /// disconnected graph still yields a finite value describing its connected
+    /// portions rather than `inf`.  For directed graphs, "reachable" follows
+    /// arc direction.
+    pub fn average_path_length(&self) -> Option<f64> {
+        if self.node_count() < 2 {
+            return None;
+        }
+        let mut total: u64 = 0;
+        let mut pairs: u64 = 0;
+        let starts: Vec<NodeIndex> = self.graph.node_indices().collect();
+        for &s in &starts {
+            for (idx, d) in self.bfs_distances(s) {
+                if idx != s {
+                    total += d as u64;
+                    pairs += 1;
+                }
+            }
+        }
+        if pairs == 0 {
+            None
+        } else {
+            Some(total as f64 / pairs as f64)
+        }
+    }
+
+    /// The clustering coefficient of node `id`: the fraction of its neighbour
+    /// pairs that are themselves connected (local transitivity).
+    ///
+    /// Returns `None` for an absent node or a node with fewer than two
+    /// neighbours (the coefficient is undefined there).  For directed graphs
+    /// the underlying neighbour relation is taken **undirectedly** (a node's
+    /// neighbours are all nodes adjacent by an arc in either direction).
+    pub fn clustering_coefficient(&self, id: AgentId) -> Option<f64> {
+        let &ni = self.index.get(&id)?;
+        let neighbours: Vec<NodeIndex> = self.undirected_neighbor_indices(ni);
+        let k = neighbours.len();
+        if k < 2 {
+            return None;
+        }
+        let mut links = 0usize;
+        for i in 0..k {
+            for j in (i + 1)..k {
+                if self.undirected_adjacent(neighbours[i], neighbours[j]) {
+                    links += 1;
+                }
+            }
+        }
+        let possible = k * (k - 1) / 2;
+        Some(links as f64 / possible as f64)
+    }
+
+    /// The **average** clustering coefficient over all nodes that have at least
+    /// two neighbours.  Returns `None` if no such node exists.
+    pub fn average_clustering_coefficient(&self) -> Option<f64> {
+        let mut ids: Vec<AgentId> = self.index.keys().copied().collect();
+        ids.sort();
+        let mut sum = 0.0;
+        let mut count = 0usize;
+        for id in ids {
+            if let Some(c) = self.clustering_coefficient(id) {
+                sum += c;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            None
+        } else {
+            Some(sum / count as f64)
+        }
+    }
+
+    /// Whether the edge `(a, b)` is a **local bridge** in Granovetter's sense:
+    /// an edge whose endpoints would be more than 2 hops apart if it were
+    /// removed (equivalently, `a` and `b` share no common neighbour).
+    ///
+    /// Returns `false` if there is no edge between `a` and `b`.  Connectivity
+    /// is evaluated **undirectedly**.
+    pub fn is_local_bridge(&self, a: AgentId, b: AgentId) -> bool {
+        let (na, nb) = match (self.index.get(&a), self.index.get(&b)) {
+            (Some(&na), Some(&nb)) => (na, nb),
+            _ => return false,
+        };
+        if !self.undirected_adjacent(na, nb) {
+            return false;
+        }
+        // A local bridge has no shared neighbour: removing it pushes the
+        // endpoints' distance above 2.
+        let an: Vec<NodeIndex> = self.undirected_neighbor_indices(na);
+        let bn: Vec<NodeIndex> = self.undirected_neighbor_indices(nb);
+        for x in &an {
+            if *x == nb {
+                continue;
+            }
+            if bn.contains(x) {
+                return false; // shared neighbour ⇒ distance stays 2 ⇒ not a bridge
+            }
+        }
+        true
+    }
+
+    /// All local bridges in the network (see [`is_local_bridge`]).
+    ///
+    /// Each is returned once as a canonical `(a, b)` pair with `a <= b` for
+    /// undirected graphs.
+    ///
+    /// [`is_local_bridge`]: Self::is_local_bridge
+    pub fn local_bridges(&self) -> Vec<(AgentId, AgentId)> {
+        let mut out: Vec<(AgentId, AgentId)> = self
+            .edges()
+            .filter(|&(a, b)| self.is_local_bridge(a, b))
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// The component id of every node, as an `AgentId → usize` map.
     ///
     /// Components are numbered `0..k` in order of their smallest member
@@ -449,6 +637,51 @@ where
                 Some((ia, ib))
             }
         })
+    }
+
+    /// Neighbour node indices treating the graph as undirected (union of in-
+    /// and out-neighbours, deduplicated).
+    fn undirected_neighbor_indices(&self, ni: NodeIndex) -> Vec<NodeIndex> {
+        if Ty::is_directed() {
+            let mut v: Vec<NodeIndex> = self
+                .graph
+                .neighbors_directed(ni, Direction::Outgoing)
+                .chain(self.graph.neighbors_directed(ni, Direction::Incoming))
+                .collect();
+            v.sort();
+            v.dedup();
+            v.retain(|&x| x != ni);
+            v
+        } else {
+            let mut v: Vec<NodeIndex> = self.graph.neighbors(ni).collect();
+            v.sort();
+            v.dedup();
+            v
+        }
+    }
+
+    /// Whether `x` and `y` are adjacent ignoring direction.
+    fn undirected_adjacent(&self, x: NodeIndex, y: NodeIndex) -> bool {
+        self.graph.find_edge(x, y).is_some() || self.graph.find_edge(y, x).is_some()
+    }
+
+    /// BFS shortest-path distances (in hops) from `start` to every reachable
+    /// node, following arc direction for directed graphs.
+    fn bfs_distances(&self, start: NodeIndex) -> Vec<(NodeIndex, u32)> {
+        let mut dist: HashMap<NodeIndex, u32> = HashMap::new();
+        let mut queue = VecDeque::new();
+        dist.insert(start, 0);
+        queue.push_back(start);
+        while let Some(cur) = queue.pop_front() {
+            let d = dist[&cur];
+            for nb in self.graph.neighbors(cur) {
+                if let std::collections::hash_map::Entry::Vacant(e) = dist.entry(nb) {
+                    e.insert(d + 1);
+                    queue.push_back(nb);
+                }
+            }
+        }
+        dist.into_iter().collect()
     }
 }
 
@@ -1053,5 +1286,119 @@ mod tests {
         assert!(!net.remove_edge(AgentId(1), AgentId(0)));
         assert!(net.remove_edge(AgentId(0), AgentId(1)));
         assert_eq!(net.edge_count(), 0);
+    }
+
+    // ── #20: analysis ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn edges_and_count() {
+        let mut net = SocialNetwork::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge(AgentId(0), AgentId(1));
+        net.add_edge(AgentId(1), AgentId(2));
+        assert_eq!(net.edge_count(), 2);
+        let mut es: Vec<(AgentId, AgentId)> = net.edges().collect();
+        es.sort();
+        assert_eq!(es, vec![(AgentId(0), AgentId(1)), (AgentId(1), AgentId(2))]);
+    }
+
+    #[test]
+    fn degree_sequence_and_distribution() {
+        // Path 0–1–2: degrees are 1, 2, 1.
+        let mut net = SocialNetwork::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge(AgentId(0), AgentId(1));
+        net.add_edge(AgentId(1), AgentId(2));
+        assert_eq!(net.degree_sequence(), vec![2, 1, 1]);
+        // histogram[0]=0, [1]=2, [2]=1
+        assert_eq!(net.degree_distribution(), vec![0, 2, 1]);
+    }
+
+    #[test]
+    fn average_path_length_path_graph() {
+        // Path 0–1–2: undirected ordered-pair distances:
+        // (0,1)=1,(1,0)=1,(1,2)=1,(2,1)=1,(0,2)=2,(2,0)=2 ⇒ sum 8 over 6 pairs.
+        let mut net = SocialNetwork::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge(AgentId(0), AgentId(1));
+        net.add_edge(AgentId(1), AgentId(2));
+        let apl = net.average_path_length().unwrap();
+        assert!((apl - (8.0 / 6.0)).abs() < 1e-12, "got {apl}");
+    }
+
+    #[test]
+    fn clustering_coefficient_triangle_and_path() {
+        // Triangle: every node's coefficient is 1.0.
+        let mut tri = SocialNetwork::empty();
+        for id in ids(3) {
+            tri.add_node(id);
+        }
+        tri.add_edge(AgentId(0), AgentId(1));
+        tri.add_edge(AgentId(1), AgentId(2));
+        tri.add_edge(AgentId(0), AgentId(2));
+        assert_eq!(tri.clustering_coefficient(AgentId(0)), Some(1.0));
+        assert_eq!(tri.average_clustering_coefficient(), Some(1.0));
+
+        // Path centre 1 has two neighbours that aren't connected ⇒ 0.0.
+        let mut path = SocialNetwork::empty();
+        for id in ids(3) {
+            path.add_node(id);
+        }
+        path.add_edge(AgentId(0), AgentId(1));
+        path.add_edge(AgentId(1), AgentId(2));
+        assert_eq!(path.clustering_coefficient(AgentId(1)), Some(0.0));
+        // Endpoints have <2 neighbours ⇒ undefined.
+        assert_eq!(path.clustering_coefficient(AgentId(0)), None);
+    }
+
+    #[test]
+    fn local_bridge_detection() {
+        // Two triangles 0-1-2 and 3-4-5 joined by a single 2–3 edge.
+        let mut net = SocialNetwork::empty();
+        for id in ids(6) {
+            net.add_node(id);
+        }
+        for (a, b) in [(0, 1), (1, 2), (0, 2), (3, 4), (4, 5), (3, 5)] {
+            net.add_edge(AgentId(a), AgentId(b));
+        }
+        net.add_edge(AgentId(2), AgentId(3)); // the bridge
+
+        assert!(net.is_local_bridge(AgentId(2), AgentId(3)));
+        // An edge inside a triangle shares a neighbour ⇒ not a bridge.
+        assert!(!net.is_local_bridge(AgentId(0), AgentId(1)));
+        assert_eq!(net.local_bridges(), vec![(AgentId(2), AgentId(3))]);
+    }
+
+    #[test]
+    fn component_membership_and_largest() {
+        // Two components: {0,1} and {2}.
+        let mut net = SocialNetwork::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge(AgentId(0), AgentId(1));
+        assert_eq!(net.connected_components(), 2);
+        let comp = net.component_membership();
+        assert_eq!(comp[&AgentId(0)], comp[&AgentId(1)]);
+        assert_ne!(comp[&AgentId(0)], comp[&AgentId(2)]);
+        assert_eq!(net.largest_component_size(), 2);
+    }
+
+    #[test]
+    fn weighted_edges_exposes_payload() {
+        let mut net: WeightedNetwork<f64> = Network::empty();
+        for id in ids(2) {
+            net.add_node(id);
+        }
+        net.add_edge_weighted(AgentId(0), AgentId(1), 0.9);
+        let es: Vec<(AgentId, AgentId, f64)> =
+            net.weighted_edges().map(|(a, b, w)| (a, b, *w)).collect();
+        assert_eq!(es, vec![(AgentId(0), AgentId(1), 0.9)]);
     }
 }
