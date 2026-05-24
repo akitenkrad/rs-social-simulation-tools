@@ -415,6 +415,120 @@ For the full printout version see `crates/socsim-hr-lifecycle/examples/hr_baseli
 
 ---
 
+## Network models with `socsim-net`
+
+For social-graph models (opinion dynamics, influence, contagion on a network, follow/unfollow dynamics), `socsim-net` provides an `AgentId`-keyed graph with reproducible generators, so you don't reimplement Erdős–Rényi / Watts–Strogatz / Barabási–Albert or neighbour lookups:
+
+```rust,ignore
+use socsim_net::SocialNetwork;
+use socsim_core::AgentId;
+
+let ids: Vec<AgentId> = (0..200u64).map(AgentId).collect();
+let net = SocialNetwork::watts_strogatz(&ids, 6, 0.1, &mut init_rng); // k=6, beta=0.1
+
+let nbrs = net.neighbors(AgentId(0));          // owned Vec
+let deg  = net.degree(AgentId(0));
+let comps = net.connected_components();
+```
+
+| Item | Purpose |
+|---|---|
+| `SocialNetwork::erdos_renyi / watts_strogatz / barabasi_albert / empty` | reproducible generators (all take `&mut SimRng`) |
+| `add_node` / `add_edge` / `remove_node` / `remove_edge` | dynamic graph mutation |
+| `neighbors` / `neighbors_into(&mut buf)` / `neighbors_iter` | neighbour access (allocating / zero-alloc / iterator) |
+| `degree` / `node_count` / `edge_count` / `contains` | basic queries |
+| `edges` / `degree_sequence` / `degree_distribution` | export & degree analysis |
+| `average_path_length` / `average_clustering_coefficient` / `local_bridges` | network metrics (Granovetter, small-world) |
+| `connected_components` / `component_membership` / `largest_component_size` | connectivity |
+| `Network<E, Ty>` + `DiSocialNetwork` / `WeightedNetwork<E>` | generic over edge payload `E` and directedness `Ty` |
+
+`SocialNetwork` is the undirected, unweighted default (`Network<(), Undirected>`). For directed follow-graphs use `DiSocialNetwork` (`out_neighbors` / `in_neighbors`); for weighted ties use `add_edge_weighted(a, b, w)` + `edge_weight(a, b)`.
+
+### Worked example: bounded-confidence opinion dynamics
+
+Hold the network in a `WorldState`, give each agent a continuous opinion, and update it from its neighbours in the `Interaction` phase. This is a **bounded-confidence DeGroot** model: each agent moves a fraction `mu` toward the mean opinion of the neighbours it still trusts (those within a confidence radius `epsilon`).
+
+```rust,ignore
+use socsim_core::{AgentId, Mechanism, Phase, Result, SimClock, SimRng, StepContext, WorldState};
+use socsim_engine::SimulationBuilder;
+use socsim_net::SocialNetwork;
+use rand::Rng;
+
+struct OpinionWorld {
+    clock: SimClock,
+    net: SocialNetwork,
+    opinions: Vec<f64>,          // indexed by AgentId.0 as usize
+    last_max_delta: f64,
+}
+
+impl OpinionWorld {
+    fn new(n: usize, k: usize, beta: f64, init_rng: &mut SimRng) -> Self {
+        let ids: Vec<AgentId> = (0..n as u64).map(AgentId).collect();
+        let net = SocialNetwork::watts_strogatz(&ids, k, beta, init_rng); // built from the world-init stream
+        let opinions = (0..n).map(|_| init_rng.gen::<f64>()).collect();
+        Self { clock: SimClock::new(u64::MAX), net, opinions, last_max_delta: f64::INFINITY }
+    }
+}
+
+impl WorldState for OpinionWorld {
+    fn agent_ids(&self) -> Vec<AgentId> { (0..self.opinions.len() as u64).map(AgentId).collect() }
+    fn clock(&self) -> &SimClock { &self.clock }
+    fn clock_mut(&mut self) -> &mut SimClock { &mut self.clock }
+}
+
+struct BoundedConfidence { epsilon: f64, mu: f64, tol: f64 }
+
+impl Mechanism<OpinionWorld> for BoundedConfidence {
+    fn name(&self) -> &str { "bounded_confidence" }
+    fn phases(&self) -> &'static [Phase] { &[Phase::Interaction] }
+
+    fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, OpinionWorld>) -> Result<()> {
+        let n = ctx.world.opinions.len();
+        let current = ctx.world.opinions.clone();   // synchronous update: read old, write new
+        let mut next = current.clone();
+        let mut buf: Vec<AgentId> = Vec::new();      // reused across agents — no per-agent alloc
+        let mut max_delta = 0.0_f64;
+
+        for i in 0..n {
+            let xi = current[i];
+            let (mut sum, mut count) = (xi, 1usize); // an agent always trusts itself
+            ctx.world.net.neighbors_into(AgentId(i as u64), &mut buf);  // zero-alloc neighbour read
+            for &AgentId(j) in &buf {
+                let xj = current[j as usize];
+                if (xj - xi).abs() <= self.epsilon { sum += xj; count += 1; }
+            }
+            next[i] = xi + self.mu * (sum / count as f64 - xi);
+            max_delta = max_delta.max((next[i] - xi).abs());
+        }
+
+        ctx.world.opinions = next;
+        ctx.world.last_max_delta = max_delta;
+        if max_delta < self.tol { ctx.request_stop(); }   // converged: opinions stopped moving
+        Ok(())
+    }
+}
+
+// RNG-stream convention: one root seed, [0] = world/network init, [1] = engine.
+let root = 7u64;
+let mut init_rng = SimRng::from_seed(socsim_core::derive_seed(root, &[0]));
+let world = OpinionWorld::new(200, 6, 0.1, &mut init_rng);
+
+let mut sim = SimulationBuilder::new(world)
+    .seed(socsim_core::derive_seed(root, &[1]))   // independent engine stream
+    .add_mechanism(Box::new(BoundedConfidence { epsilon: 0.2, mu: 0.5, tol: 1e-4 }))
+    .build();
+
+sim.run()?;     // converges into a handful of opinion clusters
+```
+
+Note the RNG-stream split: the network and the initial opinions are drawn from `derive_seed(root, &[0])` (world init), while the engine/scheduler gets the independent `derive_seed(root, &[1])` stream — the same labelling convention used for grid models above. The full runnable version (with a per-step cluster/Δ printout and a topology summary using `connected_components` / `average_clustering_coefficient`) lives at `crates/socsim-engine/examples/opinion_dynamics.rs`:
+
+```bash
+cargo run -p socsim-engine --example opinion_dynamics
+```
+
+---
+
 ## Spatial models with `socsim-grid`
 
 For lattice-based models (segregation, contagion on a grid, diffusion), `socsim-grid` provides ready-made 2D space so you don't reimplement neighbourhoods and distances:

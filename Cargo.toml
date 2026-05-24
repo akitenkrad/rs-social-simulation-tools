@@ -8,6 +8,7 @@ members = [
     "crates/socsim-config",
     "crates/socsim-net",
     "crates/socsim-grid",
+    "crates/socsim-llm",
     "crates/socsim-hr-lifecycle",
     "crates/socsim-marl",
     "crates/socsim-runner",
@@ -37,6 +38,10 @@ rand_distr  = "0.4"
 
 # Graph / network
 petgraph = "0.6"
+
+# Optional LLM layer (socsim-llm): synchronous HTTP + test fixtures.
+ureq     = { version = "2", features = ["json", "tls"] }
+tempfile = "3"
 
 # Parallelism
 rayon = "1"

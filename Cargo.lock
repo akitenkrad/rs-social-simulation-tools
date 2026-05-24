@@ -4330,6 +4330,7 @@ dependencies = [
  "socsim-core",
  "socsim-grid",
  "socsim-log",
+ "socsim-net",
 ]
 
 [[package]]
@@ -4353,6 +4354,17 @@ dependencies = [
  "socsim-log",
  "socsim-marl",
  "socsim-net",
+]
+
+[[package]]
+name = "socsim-llm"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "ureq",
 ]
 
 [[package]]
@@ -4556,6 +4568,19 @@ dependencies = [
  "thiserror 1.0.69",
  "torch-sys",
  "zip 0.6.6",
+]
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.2",
+ "once_cell",
+ "rustix",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
