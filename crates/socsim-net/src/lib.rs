@@ -25,6 +25,9 @@
 //! | [`Network::erdos_renyi`] | Erdős–Rényi G(n,p) |
 //! | [`Network::watts_strogatz`] | Watts–Strogatz small-world |
 //! | [`Network::barabasi_albert`] | Barabási–Albert preferential attachment |
+//! | [`Network::erdos_renyi_directed`] | Directed Erdős–Rényi (independent arc per ordered pair) |
+//! | [`Network::barabasi_albert_directed`] | Directed Barabási–Albert (preferential attachment on in-degree) |
+//! | [`Network::to_directed`] | Assign directions to an undirected network |
 //! | [`Network::empty`] | Start from scratch |
 
 use std::collections::{HashMap, VecDeque};
@@ -1042,6 +1045,164 @@ impl Network<(), Undirected> {
 
         net
     }
+
+    /// Build a **directed** graph by assigning a direction to each undirected
+    /// edge.
+    ///
+    /// With probability `p_mutual` an edge becomes **bidirectional** (both arcs
+    /// `a → b` and `b → a` are added); otherwise a single RNG-chosen direction
+    /// is kept.  The full node set is preserved, including isolated nodes.
+    ///
+    /// Edges are iterated in a deterministic (sorted) order, so for a fixed
+    /// `rng` seed the output is fully reproducible.  `p_mutual` is clamped to
+    /// `[0.0, 1.0]`.
+    pub fn to_directed(&self, p_mutual: f64, rng: &mut SimRng) -> Network<(), Directed> {
+        let p_mutual = p_mutual.clamp(0.0, 1.0);
+        let mut net = Network::<(), Directed>::empty();
+
+        // Preserve every node, including isolated ones, in a deterministic order.
+        let mut nodes: Vec<AgentId> = self.index.keys().copied().collect();
+        nodes.sort();
+        for id in nodes {
+            net.add_node(id);
+        }
+
+        // Iterate edges in canonical, sorted order so the RNG draws are
+        // reproducible for a fixed seed.
+        let mut edges: Vec<(AgentId, AgentId)> = self.edges().collect();
+        edges.sort();
+        for (a, b) in edges {
+            if rng.gen::<f64>() < p_mutual {
+                net.add_edge(a, b);
+                net.add_edge(b, a);
+            } else if rng.gen::<bool>() {
+                net.add_edge(a, b);
+            } else {
+                net.add_edge(b, a);
+            }
+        }
+
+        net
+    }
+}
+
+// ── generators (directed, unweighted) ───────────────────────────────────────
+
+impl Network<(), Directed> {
+    /// **Directed Erdős–Rényi**: add each possible arc independently with
+    /// probability `p`.
+    ///
+    /// Unlike the undirected [`erdos_renyi`](Network::erdos_renyi), each
+    /// **ordered** pair `(i, j)` with `i != j` is considered separately, so the
+    /// arcs `i → j` and `j → i` are drawn independently and the result may be
+    /// asymmetric.  `p` is clamped to `[0.0, 1.0]`; `p = 1.0` yields the
+    /// complete digraph (`n · (n − 1)` arcs).
+    pub fn erdos_renyi_directed(ids: &[AgentId], p: f64, rng: &mut SimRng) -> Self {
+        let p = p.clamp(0.0, 1.0);
+        let mut net = Self::empty();
+        for &id in ids {
+            net.add_node(id);
+        }
+        let n = ids.len();
+        for i in 0..n {
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                if rng.gen::<f64>() < p {
+                    net.add_edge(ids[i], ids[j]);
+                }
+            }
+        }
+        net
+    }
+
+    /// **Directed Barabási–Albert** preferential attachment on **in-degree**.
+    ///
+    /// Each new node creates `m` out-arcs to existing nodes chosen with
+    /// probability proportional to their current in-degree (+ 1 to avoid
+    /// zero-probability isolation for the seed nodes).  Because attachment
+    /// favours nodes that are already followed, this produces the heavy-tailed
+    /// **in-degree** (follower-count) distribution typical of follow networks
+    /// while every non-seed node keeps an out-degree of `m` (the number it
+    /// follows).
+    ///
+    /// Mirrors the undirected [`barabasi_albert`](Network::barabasi_albert)
+    /// seed-clique handling, adapted to arcs: the seed nodes form a mutually
+    /// connected clique (both directions).  `m` is clamped to `[1, n-1]`.
+    pub fn barabasi_albert_directed(ids: &[AgentId], m: usize, rng: &mut SimRng) -> Self {
+        let n = ids.len();
+        let m = m.clamp(1, n.saturating_sub(1).max(1));
+        let mut net = Self::empty();
+
+        if n == 0 {
+            return net;
+        }
+
+        // Seed: connect the first min(m+1, n) nodes as a mutually-linked clique
+        // (both directions), so every seed node starts with a non-zero
+        // in-degree.
+        let seed_n = (m + 1).min(n);
+        for &id in &ids[..seed_n] {
+            net.add_node(id);
+        }
+        for i in 0..seed_n {
+            for j in (i + 1)..seed_n {
+                net.add_edge(ids[i], ids[j]);
+                net.add_edge(ids[j], ids[i]);
+            }
+        }
+
+        // Preferential attachment (on in-degree) for the remaining nodes.
+        for &new_id in &ids[seed_n..n] {
+            net.add_node(new_id);
+            let ni = net.index[&new_id];
+
+            // Build in-degree-weighted cumulative distribution over existing
+            // nodes (excluding the new node itself).
+            let existing: Vec<NodeIndex> =
+                net.graph.node_indices().filter(|&idx| idx != ni).collect();
+
+            let weights: Vec<f64> = existing
+                .iter()
+                .map(|&idx| {
+                    (net.graph
+                        .neighbors_directed(idx, Direction::Incoming)
+                        .count() as f64)
+                        + 1.0
+                })
+                .collect();
+            let total: f64 = weights.iter().sum();
+
+            let mut chosen: Vec<NodeIndex> = Vec::with_capacity(m);
+            let mut attempts = 0u32;
+            while chosen.len() < m.min(existing.len()) {
+                attempts += 1;
+                if attempts > 10 * m as u32 + 100 {
+                    break;
+                }
+                let r = rng.gen::<f64>() * total;
+                let mut cum = 0.0;
+                for (idx_pos, &w) in weights.iter().enumerate() {
+                    cum += w;
+                    if r < cum {
+                        let target = existing[idx_pos];
+                        if !chosen.contains(&target) && net.graph.find_edge(ni, target).is_none() {
+                            chosen.push(target);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // New node follows the chosen nodes: arcs new_id → target.
+            for target in chosen {
+                net.graph.add_edge(ni, target, ());
+            }
+        }
+
+        net
+    }
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -1678,5 +1839,225 @@ mod tests {
             vec![AgentId(0), AgentId(1), AgentId(2)]
         );
         assert_eq!(net.reachable_from(AgentId(2), |_| true), vec![AgentId(2)]);
+    }
+
+    // ── #28: to_directed ─────────────────────────────────────────────────────
+
+    /// Every undirected edge yields at least one arc, and the node set
+    /// (including isolated nodes) is preserved.
+    #[test]
+    fn to_directed_preserves_nodes_and_covers_edges() {
+        let mut und = SocialNetwork::empty();
+        for id in ids(5) {
+            und.add_node(id);
+        }
+        // Node 4 stays isolated.
+        und.add_edge(AgentId(0), AgentId(1));
+        und.add_edge(AgentId(1), AgentId(2));
+        und.add_edge(AgentId(2), AgentId(3));
+
+        let mut rng = SimRng::from_seed(0);
+        let di = und.to_directed(0.5, &mut rng);
+
+        assert!(di.is_directed());
+        assert_eq!(di.node_count(), 5);
+        assert!(di.contains(AgentId(4)));
+
+        // Each undirected edge must produce at least one arc in some direction.
+        for (a, b) in und.edges() {
+            let has_fwd = di.out_neighbors(a).contains(&b);
+            let has_rev = di.out_neighbors(b).contains(&a);
+            assert!(has_fwd || has_rev, "edge {a:?}-{b:?} lost all direction");
+        }
+    }
+
+    /// With `p_mutual = 1.0` every undirected edge becomes bidirectional.
+    #[test]
+    fn to_directed_p_mutual_one_is_bidirectional() {
+        let mut und = SocialNetwork::empty();
+        for id in ids(4) {
+            und.add_node(id);
+        }
+        und.add_edge(AgentId(0), AgentId(1));
+        und.add_edge(AgentId(1), AgentId(2));
+        und.add_edge(AgentId(2), AgentId(3));
+
+        let mut rng = SimRng::from_seed(1);
+        let di = und.to_directed(1.0, &mut rng);
+
+        // One undirected edge ⇒ two arcs.
+        assert_eq!(di.edge_count(), 2 * und.edge_count());
+        for (a, b) in und.edges() {
+            assert!(di.out_neighbors(a).contains(&b));
+            assert!(di.in_neighbors(a).contains(&b));
+            assert!(di.out_neighbors(b).contains(&a));
+            assert!(di.in_neighbors(b).contains(&a));
+        }
+    }
+
+    /// With `p_mutual = 0.0` every undirected edge becomes exactly one arc.
+    #[test]
+    fn to_directed_p_mutual_zero_is_single_direction() {
+        let mut und = SocialNetwork::empty();
+        for id in ids(4) {
+            und.add_node(id);
+        }
+        und.add_edge(AgentId(0), AgentId(1));
+        und.add_edge(AgentId(1), AgentId(2));
+        und.add_edge(AgentId(2), AgentId(3));
+
+        let mut rng = SimRng::from_seed(2);
+        let di = und.to_directed(0.0, &mut rng);
+
+        assert_eq!(di.edge_count(), und.edge_count());
+        for (a, b) in und.edges() {
+            let fwd = di.out_neighbors(a).contains(&b);
+            let rev = di.out_neighbors(b).contains(&a);
+            // Exactly one direction is present.
+            assert!(fwd ^ rev, "edge {a:?}-{b:?} must have exactly one arc");
+        }
+    }
+
+    #[test]
+    fn to_directed_deterministic() {
+        let mut rng0 = SimRng::from_seed(99);
+        let ids = ids(30);
+        let und = SocialNetwork::erdos_renyi(&ids, 0.3, &mut rng0);
+
+        let d1 = und.to_directed(0.4, &mut SimRng::from_seed(7));
+        let d2 = und.to_directed(0.4, &mut SimRng::from_seed(7));
+
+        let mut e1: Vec<(AgentId, AgentId)> = d1.edges().collect();
+        let mut e2: Vec<(AgentId, AgentId)> = d2.edges().collect();
+        e1.sort();
+        e2.sort();
+        assert_eq!(e1, e2);
+    }
+
+    // ── #28: erdos_renyi_directed ────────────────────────────────────────────
+
+    #[test]
+    fn erdos_renyi_directed_node_count() {
+        let mut rng = SimRng::from_seed(0);
+        let ids = ids(15);
+        let net = DiSocialNetwork::erdos_renyi_directed(&ids, 0.3, &mut rng);
+        assert_eq!(net.node_count(), 15);
+        assert!(net.is_directed());
+    }
+
+    #[test]
+    fn erdos_renyi_directed_p0_no_arcs() {
+        let mut rng = SimRng::from_seed(0);
+        let ids = ids(10);
+        let net = DiSocialNetwork::erdos_renyi_directed(&ids, 0.0, &mut rng);
+        assert_eq!(net.edge_count(), 0);
+    }
+
+    #[test]
+    fn erdos_renyi_directed_p1_complete_digraph() {
+        let mut rng = SimRng::from_seed(0);
+        let n = 6u64;
+        let ids = ids(n);
+        let net = DiSocialNetwork::erdos_renyi_directed(&ids, 1.0, &mut rng);
+        // Complete digraph: n * (n-1) arcs; every node has out- and in-degree n-1.
+        assert_eq!(net.edge_count(), (n * (n - 1)) as usize);
+        for id in &ids {
+            assert_eq!(net.out_degree(*id), (n - 1) as usize);
+            assert_eq!(net.in_degree(*id), (n - 1) as usize);
+        }
+    }
+
+    #[test]
+    fn erdos_renyi_directed_arc_count_grows_with_p() {
+        let ids = ids(40);
+        let low = DiSocialNetwork::erdos_renyi_directed(&ids, 0.1, &mut SimRng::from_seed(1));
+        let high = DiSocialNetwork::erdos_renyi_directed(&ids, 0.6, &mut SimRng::from_seed(1));
+        assert!(
+            high.edge_count() > low.edge_count(),
+            "expected more arcs at higher p: {} vs {}",
+            high.edge_count(),
+            low.edge_count()
+        );
+    }
+
+    #[test]
+    fn erdos_renyi_directed_deterministic() {
+        let ids = ids(20);
+        let n1 = DiSocialNetwork::erdos_renyi_directed(&ids, 0.4, &mut SimRng::from_seed(42));
+        let n2 = DiSocialNetwork::erdos_renyi_directed(&ids, 0.4, &mut SimRng::from_seed(42));
+        let mut e1: Vec<(AgentId, AgentId)> = n1.edges().collect();
+        let mut e2: Vec<(AgentId, AgentId)> = n2.edges().collect();
+        e1.sort();
+        e2.sort();
+        assert_eq!(e1, e2);
+    }
+
+    #[test]
+    fn erdos_renyi_directed_can_be_asymmetric() {
+        // With independent arc draws, at least one ordered pair should differ
+        // from its reverse (an A→B without B→A, or vice versa).
+        let ids = ids(30);
+        let net = DiSocialNetwork::erdos_renyi_directed(&ids, 0.3, &mut SimRng::from_seed(5));
+        let mut asymmetric = false;
+        for (a, b) in net.edges() {
+            if !net.out_neighbors(b).contains(&a) {
+                asymmetric = true;
+                break;
+            }
+        }
+        assert!(asymmetric, "expected at least one one-directional arc");
+    }
+
+    // ── #28: barabasi_albert_directed ────────────────────────────────────────
+
+    #[test]
+    fn barabasi_albert_directed_node_count() {
+        let mut rng = SimRng::from_seed(0);
+        let ids = ids(30);
+        let net = DiSocialNetwork::barabasi_albert_directed(&ids, 2, &mut rng);
+        assert_eq!(net.node_count(), 30);
+        assert!(net.is_directed());
+    }
+
+    #[test]
+    fn barabasi_albert_directed_out_degree_is_m() {
+        let m = 3usize;
+        let ids = ids(40);
+        let net = DiSocialNetwork::barabasi_albert_directed(&ids, m, &mut SimRng::from_seed(11));
+        // Non-seed nodes each create exactly `m` out-arcs.
+        let seed_n = m + 1;
+        for &id in &ids[seed_n..] {
+            assert_eq!(
+                net.out_degree(id),
+                m,
+                "non-seed node {id:?} should follow exactly m nodes"
+            );
+        }
+    }
+
+    #[test]
+    fn barabasi_albert_directed_in_degree_is_skewed() {
+        let ids = ids(200);
+        let net = DiSocialNetwork::barabasi_albert_directed(&ids, 2, &mut SimRng::from_seed(13));
+        let max_in = ids.iter().map(|&id| net.in_degree(id)).max().unwrap();
+        let total_arcs = net.edge_count();
+        let mean_in = total_arcs as f64 / ids.len() as f64;
+        // A scale-free hub: the most-followed node's in-degree dwarfs the mean.
+        assert!(
+            max_in as f64 > 4.0 * mean_in,
+            "expected a hub (max in-degree {max_in} >> mean {mean_in})"
+        );
+    }
+
+    #[test]
+    fn barabasi_albert_directed_deterministic() {
+        let ids = ids(50);
+        let n1 = DiSocialNetwork::barabasi_albert_directed(&ids, 2, &mut SimRng::from_seed(21));
+        let n2 = DiSocialNetwork::barabasi_albert_directed(&ids, 2, &mut SimRng::from_seed(21));
+        let mut e1: Vec<(AgentId, AgentId)> = n1.edges().collect();
+        let mut e2: Vec<(AgentId, AgentId)> = n2.edges().collect();
+        e1.sort();
+        e2.sort();
+        assert_eq!(e1, e2);
     }
 }
