@@ -57,6 +57,7 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 | [CLIリファレンス](docs/cli.ja.md) | 全サブコマンド，フラグ，JSONL出力形式 |
 | [ユースケース＆レシピ](docs/usecases.ja.md) | 代表的な研究ワークフローのランブック |
 | [ライブラリAPI](docs/library.ja.md) | カスタムメカニズムの実装とライブラリとしての利用 |
+| [Mechanismカタログ](docs/mechanisms.ja.md) | 全11メカニズム：理論，出典，図解，フェーズ上の位置付け，各メカニズムの適用方法 |
 | [アーキテクチャ](docs/architecture.ja.md) | クレート依存グラフ，6フェーズティックループ，キャリブレーション哲学 |
 
 ## ライセンス

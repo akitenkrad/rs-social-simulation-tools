@@ -57,6 +57,7 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 | [CLI reference](docs/cli.md) | Every subcommand, flags, JSONL output format |
 | [Use-cases & recipes](docs/usecases.md) | Runbook for common research workflows |
 | [Library API](docs/library.md) | Implement custom mechanisms and use socsim as a library |
+| [Mechanism catalog](docs/mechanisms.md) | All eleven mechanisms: theory, sources, diagrams, phase positioning, and how to apply each |
 | [Architecture](docs/architecture.md) | Crate dependency graph, 6-phase tick loop, calibration philosophy |
 
 ## License
