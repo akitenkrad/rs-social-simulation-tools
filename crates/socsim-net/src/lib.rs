@@ -413,6 +413,83 @@ where
         })
     }
 
+    /// Iterate over the neighbours of `id` together with a reference to the
+    /// connecting edge's payload: `(neighbour, &weight)`.
+    ///
+    /// This is the per-node analogue of [`weighted_edges`](Self::weighted_edges)
+    /// and the weighted counterpart of [`neighbors_iter`](Self::neighbors_iter):
+    /// with it, weight-filtered traversal is a one-liner
+    /// (`.filter(|(_, w)| pred(w))`).
+    ///
+    /// For an undirected network these are all incident edges; for a directed
+    /// network they are the **outgoing** edges (heads of arcs `id → x`), matching
+    /// [`neighbors`](Self::neighbors) / [`neighbors_iter`](Self::neighbors_iter).
+    /// Use [`weighted_out_neighbors`](Self::weighted_out_neighbors) /
+    /// [`weighted_in_neighbors`](Self::weighted_in_neighbors) on a directed
+    /// network to pick a direction explicitly.
+    ///
+    /// Yields nothing if `id` is not present.  No heap `Vec` is allocated.
+    pub fn weighted_neighbors(&self, id: AgentId) -> impl Iterator<Item = (AgentId, &E)> + '_ {
+        self.index
+            .get(&id)
+            .copied()
+            .into_iter()
+            .flat_map(move |ni| {
+                // `edges` walks the outgoing incidence list; for an undirected
+                // graph that is every incident edge.
+                self.graph.edges(ni)
+            })
+            .map(move |e| (self.graph[e.target()], e.weight()))
+    }
+
+    /// The set of nodes reachable from `seed`, traversing **only** edges whose
+    /// payload satisfies `edge_allowed`.
+    ///
+    /// A BFS over the predicate-filtered subgraph.  The returned `Vec` is sorted
+    /// for determinism and **includes `seed` itself** (a node is reachable from
+    /// itself in zero hops).  Returns an empty `Vec` if `seed` is not present.
+    ///
+    /// For directed graphs the traversal **follows arc direction** (it visits
+    /// successors only), mirroring [`neighbors`](Self::neighbors); the edge
+    /// payload tested is that of each outgoing arc.  For undirected graphs every
+    /// incident edge is considered.
+    ///
+    /// # Example
+    ///
+    /// Strong-only vs. weak-allowing reachability over a tie-strength network
+    /// (Granovetter's "strength of weak ties"): filtering to strong ties stays
+    /// within a cluster, while allowing the weak bridge crosses to the other
+    /// cluster.
+    pub fn reachable_from<F: Fn(&E) -> bool>(
+        &self,
+        seed: AgentId,
+        edge_allowed: F,
+    ) -> Vec<AgentId> {
+        let start = match self.index.get(&seed) {
+            Some(&ni) => ni,
+            None => return Vec::new(),
+        };
+        let mut visited: std::collections::HashSet<NodeIndex> = std::collections::HashSet::new();
+        let mut queue = VecDeque::new();
+        visited.insert(start);
+        queue.push_back(start);
+        while let Some(cur) = queue.pop_front() {
+            // `edges` yields the outgoing incidence list; for undirected graphs
+            // that covers every incident edge.
+            for e in self.graph.edges(cur) {
+                if edge_allowed(e.weight()) {
+                    let nb = e.target();
+                    if visited.insert(nb) {
+                        queue.push_back(nb);
+                    }
+                }
+            }
+        }
+        let mut out: Vec<AgentId> = visited.into_iter().map(|ni| self.graph[ni]).collect();
+        out.sort();
+        out
+    }
+
     /// The degree sequence: every node's [`degree`](Self::degree), sorted
     /// descending.  Node order is deterministic (sorted by `AgentId` before
     /// sorting by degree).
@@ -730,6 +807,55 @@ impl<E> Network<E, Directed> {
                 .count(),
             None => 0,
         }
+    }
+
+    /// Out-neighbours (successors) of `id` paired with the connecting arc's
+    /// payload: `(neighbour, &weight)` for each arc `id → x`.
+    ///
+    /// The directed, payload-carrying analogue of
+    /// [`out_neighbors`](Self::out_neighbors).  Yields nothing if `id` is
+    /// absent.  Equivalent to [`weighted_neighbors`](Self::weighted_neighbors)
+    /// on a directed network, but named explicitly for symmetry with
+    /// [`weighted_in_neighbors`](Self::weighted_in_neighbors).
+    pub fn weighted_out_neighbors(&self, id: AgentId) -> impl Iterator<Item = (AgentId, &E)> + '_ {
+        self.weighted_neighbors_directed(id, Direction::Outgoing)
+    }
+
+    /// In-neighbours (predecessors) of `id` paired with the connecting arc's
+    /// payload: `(neighbour, &weight)` for each arc `x → id`.
+    ///
+    /// The directed, payload-carrying analogue of
+    /// [`in_neighbors`](Self::in_neighbors).  Yields nothing if `id` is absent.
+    pub fn weighted_in_neighbors(&self, id: AgentId) -> impl Iterator<Item = (AgentId, &E)> + '_ {
+        self.weighted_neighbors_directed(id, Direction::Incoming)
+    }
+
+    /// Neighbours of `id` in the given [`Direction`] paired with the connecting
+    /// arc's payload.  The `AgentId` yielded is always the *other* endpoint
+    /// (the predecessor for [`Direction::Incoming`], the successor for
+    /// [`Direction::Outgoing`]).
+    fn weighted_neighbors_directed(
+        &self,
+        id: AgentId,
+        dir: Direction,
+    ) -> impl Iterator<Item = (AgentId, &E)> + '_ {
+        self.index
+            .get(&id)
+            .copied()
+            .into_iter()
+            .flat_map(move |ni| self.graph.edges_directed(ni, dir))
+            .map(move |e| {
+                // For an incoming arc `x → id`, the other endpoint is the
+                // source; for an outgoing arc `id → x` it is the target.
+                let other = if e.target() == e.source() {
+                    e.target()
+                } else if matches!(dir, Direction::Incoming) {
+                    e.source()
+                } else {
+                    e.target()
+                };
+                (self.graph[other], e.weight())
+            })
     }
 }
 
@@ -1400,5 +1526,157 @@ mod tests {
         let es: Vec<(AgentId, AgentId, f64)> =
             net.weighted_edges().map(|(a, b, w)| (a, b, *w)).collect();
         assert_eq!(es, vec![(AgentId(0), AgentId(1), 0.9)]);
+    }
+
+    // ── #24: per-node weighted neighbours + edge-filtered reachability ──────────
+
+    /// Edge label for the Granovetter motivation: strong (within-cluster) vs.
+    /// weak (bridging) ties.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Tie {
+        Strong,
+        Weak,
+    }
+
+    #[test]
+    fn weighted_neighbors_pairs_match_edge_weights() {
+        let mut net: WeightedNetwork<u32> = Network::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge_weighted(AgentId(0), AgentId(1), 10);
+        net.add_edge_weighted(AgentId(0), AgentId(2), 20);
+
+        let mut got: Vec<(AgentId, u32)> = net
+            .weighted_neighbors(AgentId(0))
+            .map(|(nb, w)| (nb, *w))
+            .collect();
+        got.sort();
+        assert_eq!(got, vec![(AgentId(1), 10), (AgentId(2), 20)]);
+
+        // Each pair's weight matches `edge_weight`.
+        for (nb, w) in net.weighted_neighbors(AgentId(0)) {
+            assert_eq!(net.edge_weight(AgentId(0), nb), Some(w));
+        }
+    }
+
+    #[test]
+    fn weighted_neighbors_empty_for_absent_node() {
+        let net: WeightedNetwork<u32> = Network::empty();
+        assert_eq!(net.weighted_neighbors(AgentId(99)).count(), 0);
+    }
+
+    #[test]
+    fn weighted_neighbors_set_matches_neighbors_ignoring_weights() {
+        let mut net: WeightedNetwork<u32> = Network::empty();
+        for id in ids(4) {
+            net.add_node(id);
+        }
+        net.add_edge_weighted(AgentId(1), AgentId(0), 5);
+        net.add_edge_weighted(AgentId(1), AgentId(2), 6);
+        net.add_edge_weighted(AgentId(1), AgentId(3), 7);
+
+        let mut from_weighted: Vec<AgentId> = net
+            .weighted_neighbors(AgentId(1))
+            .map(|(nb, _)| nb)
+            .collect();
+        from_weighted.sort();
+        let mut plain = net.neighbors(AgentId(1));
+        plain.sort();
+        assert_eq!(from_weighted, plain);
+    }
+
+    #[test]
+    fn weighted_out_in_neighbors_directed() {
+        let mut net: DiWeightedNetwork<u32> = Network::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge_weighted(AgentId(0), AgentId(1), 11); // 0 → 1
+        net.add_edge_weighted(AgentId(2), AgentId(1), 22); // 2 → 1
+
+        // Out of 0: just (1, 11).
+        let out0: Vec<(AgentId, u32)> = net
+            .weighted_out_neighbors(AgentId(0))
+            .map(|(nb, w)| (nb, *w))
+            .collect();
+        assert_eq!(out0, vec![(AgentId(1), 11)]);
+        assert_eq!(net.weighted_in_neighbors(AgentId(0)).count(), 0);
+
+        // Into 1: predecessors 0 (w=11) and 2 (w=22).
+        let mut in1: Vec<(AgentId, u32)> = net
+            .weighted_in_neighbors(AgentId(1))
+            .map(|(nb, w)| (nb, *w))
+            .collect();
+        in1.sort();
+        assert_eq!(in1, vec![(AgentId(0), 11), (AgentId(2), 22)]);
+        assert_eq!(net.weighted_out_neighbors(AgentId(1)).count(), 0);
+
+        // `weighted_neighbors` on a directed graph follows the outgoing convention.
+        let n0: Vec<(AgentId, u32)> = net
+            .weighted_neighbors(AgentId(0))
+            .map(|(nb, w)| (nb, *w))
+            .collect();
+        assert_eq!(n0, vec![(AgentId(1), 11)]);
+    }
+
+    #[test]
+    fn reachable_from_includes_seed_and_filters_edges() {
+        // Two strong-tie triangles {0,1,2} and {3,4,5}, bridged by a single
+        // *weak* tie 2–3 (Granovetter's "strength of weak ties").
+        let mut net: WeightedNetwork<Tie> = Network::empty();
+        for id in ids(6) {
+            net.add_node(id);
+        }
+        for (a, b) in [(0, 1), (1, 2), (0, 2), (3, 4), (4, 5), (3, 5)] {
+            net.add_edge_weighted(AgentId(a), AgentId(b), Tie::Strong);
+        }
+        net.add_edge_weighted(AgentId(2), AgentId(3), Tie::Weak); // the bridge
+
+        // Strong-only: stays within the seed's cluster (does NOT cross the bridge).
+        let strong = net.reachable_from(AgentId(0), |t| *t == Tie::Strong);
+        assert_eq!(strong, vec![AgentId(0), AgentId(1), AgentId(2)]);
+
+        // Allowing all ties: the weak bridge connects everything.
+        let all = net.reachable_from(AgentId(0), |_| true);
+        assert_eq!(
+            all,
+            vec![
+                AgentId(0),
+                AgentId(1),
+                AgentId(2),
+                AgentId(3),
+                AgentId(4),
+                AgentId(5)
+            ]
+        );
+
+        // Seed is always included, even with a predicate that admits no edge.
+        let none = net.reachable_from(AgentId(0), |_| false);
+        assert_eq!(none, vec![AgentId(0)]);
+    }
+
+    #[test]
+    fn reachable_from_absent_seed_is_empty() {
+        let net: WeightedNetwork<Tie> = Network::empty();
+        assert!(net.reachable_from(AgentId(42), |_| true).is_empty());
+    }
+
+    #[test]
+    fn reachable_from_directed_follows_arc_direction() {
+        // Chain 0 → 1 → 2, all strong.  From 0 everything is reachable; from 2
+        // only itself (no outgoing arcs).
+        let mut net: DiWeightedNetwork<Tie> = Network::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge_weighted(AgentId(0), AgentId(1), Tie::Strong);
+        net.add_edge_weighted(AgentId(1), AgentId(2), Tie::Strong);
+
+        assert_eq!(
+            net.reachable_from(AgentId(0), |_| true),
+            vec![AgentId(0), AgentId(1), AgentId(2)]
+        );
+        assert_eq!(net.reachable_from(AgentId(2), |_| true), vec![AgentId(2)]);
     }
 }
