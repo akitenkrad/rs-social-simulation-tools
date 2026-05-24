@@ -9,23 +9,23 @@
 
 ## 1. 概要
 
-`knowledge_loss` は，在職期間が再構築されるまで生産性指標に現れない自発的離職の組織コストをモデル化します：従業員が退職すると，チームに蓄積されたノウハウの一部が失われます．このうち暗黙知の成分——コード化に抵抗するルーティン，判断，関係性——は特に代替困難です．
+`knowledge_loss` は，自発的離職がもたらす組織コストのうち，在職期間が再構築されるまで生産性指標には現れないものをモデル化します．従業員が退職すると，チームに蓄積されたノウハウの一部が失われ，なかでも暗黙知の成分——コード化しづらいルーティン，判断，人間関係——は特に補いがたいものです．
 
-このメカニズムは，`turnover` が従業員を削除して `departed_this_step` に追加した後，PostStepフェーズで発火します．各退職について，離職者の能力と在職期間に比例した暗黙知損失を計算し，チームの `knowledge_stock` からそれを差し引きます．また，そのバッファの正規のステップ末クリーンアップとして `departed_this_step` をクリアします．
+このメカニズムは，`turnover` が従業員を削除して `departed_this_step` に追加した後の PostStepフェーズで発火します．各退職について，離職者の能力と在職期間に比例した暗黙知の損失を計算し，その分をチームの `knowledge_stock` から差し引きます．あわせて，このバッファの正規のステップ末クリーンアップとして `departed_this_step` をクリアします．
 
 ## 2. 理論と出典
 
-Nonaka (1994) は，組織知識に2つの不可分な成分があると主張します：明示知（コード化・転送可能）と暗黙知（体化・粘着性）．知識労働者が離職すると，暗黙知の部分は大部分が回収不能です．socsim はこれを在職期間でスケーリングされた損失式で操作化しています：
+Nonaka (1994) は，組織知識が2つの不可分な成分——明示知（コード化・転送可能）と暗黙知（身体化され，粘着的）——から成ると論じています．知識労働者が離職すると，暗黙知の部分は大半が回収不能になります．socsim はこれを，在職期間でスケーリングした損失式として次のように定式化しています．
 
 $$\text{years} = \frac{\text{tenure}}{12}, \qquad \Delta K = -\,\kappa_{\text{loss}} \cdot \varphi_{\text{tacit}} \cdot |\theta| \cdot \text{years}^{\beta}$$
 
 `team.knowledge_stock` $= \max(0,\ \text{team.knowledge\_stock} - |\Delta K|)$
 
-- `Employee.theta`（$\theta$）——退職従業員の能力（正のスケール抽出を扱うため絶対値を使用）．
-- $\text{years} = \text{tenure\_months} / 12$——退職時の在籍月数を年数に変換；損失のスケールが知識単位/ステップで測定されるOCB流入と一致するようにするためです．
-- $\varphi_{\text{tacit}}$（`phi_tacit = 0.85`）——経験的な暗黙知割合（Nonaka 1994）；労働者の知識の85%は暗黙知であり，退職時に失われます．
-- $\kappa_{\text{loss}}$（`kappa_loss = 0.40`）——典型的な離職者の流出量をチームOCB流入の数ヶ月分にサイジングするチューナブルなスケールで，`knowledge_stock` の崩壊を防ぎます．
-- $\beta$（`beta_loss = 1.0`）——チューナブルな指数；デフォルト1.0では損失は $\text{years}$ に線形です．1.0超の値は長期在職者の離職コストを不均衡に大きくし，1.0未満の値は在職期間の効果を圧縮します．
+- `Employee.theta`（$\theta$）——退職従業員の能力（正のスケールで抽出された値を扱うため絶対値をとる）．
+- $\text{years} = \text{tenure\_months} / 12$——退職時の在籍月数を年数に換算したもの．損失のスケールを，知識単位／ステップで測られるOCB流入とそろえるためです．
+- $\varphi_{\text{tacit}}$（`phi_tacit = 0.85`）——経験的に得られた暗黙知の割合（Nonaka 1994）で，労働者の知識の85%が暗黙知にあたり，退職時に失われます．
+- $\kappa_{\text{loss}}$（`kappa_loss = 0.40`）——典型的な離職者による流出量を，チームのOCB流入の数ヶ月分に収まるよう調整するチューナブルなスケール係数で，`knowledge_stock` が崩壊するのを防ぎます．
+- $\beta$（`beta_loss = 1.0`）——チューナブルな指数．デフォルトの1.0では損失は $\text{years}$ に線形になります．1.0を超える値は長期在職者の離職コストを不釣り合いに大きくし，1.0未満の値は在職期間の効果を圧縮します．
 
 ## 3. データフロー
 
@@ -35,9 +35,9 @@ $$\text{years} = \frac{\text{tenure}}{12}, \qquad \Delta K = -\,\kappa_{\text{lo
 
 ## 4. 6フェーズループにおける位置
 
-第6フェーズかつ最終フェーズである **PostStep** で実行されます．この配置は必須です：`departed_this_step` は `turnover`（Decision，フェーズ3）によって生成され，ここで読み取られます；`knowledge_loss` が早いフェーズで実行されるとバッファが空になってしまいます．最後に実行することで，まだリストを必要とする他のメカニズム（`departed_this_step.len()` を読み取るRewardの `org_performance` など）への干渉リスクなしに，`departed_this_step` の正規クリアを行うことができます．
+第6フェーズであり最終フェーズでもある **PostStep** で実行されます．この配置は必須です．`departed_this_step` は `turnover`（Decision，フェーズ3）が生成し，ここで読み取られるため，`knowledge_loss` をより早いフェーズで実行するとバッファがまだ空になってしまいます．最後に実行すれば，このリストをなお必要とする他のメカニズム（`departed_this_step.len()` を読み取るRewardの `org_performance` など）に干渉する恐れなく，`departed_this_step` を正規にクリアできます．
 
-PostStepメカニズムの中では，`knowledge_loss` は `new_hires_this_step` をクリアする `socialization` の**後に**宣言するべきです；両方のPostStepメカニズムは状態を共有しませんが，`knowledge_loss` を最後に宣言することは「クリーンアップは最後に」という慣例を尊重します．
+PostStepのメカニズムの中では，`knowledge_loss` は `new_hires_this_step` をクリアする `socialization` の**後に**宣言するのが望ましいでしょう．両者は状態を共有しないため動作上の差はありませんが，`knowledge_loss` を最後に宣言することで「クリーンアップは最後に」という慣例に沿います．
 
 ## 5. 状態読み書きコントラクト
 
@@ -48,9 +48,9 @@ PostStepメカニズムの中では，`knowledge_loss` は `new_hires_this_step`
 
 ## 6. 依存関係と順序制約
 
-- **上流（同ステップ）：** `turnover`（Decision）が実行済みで `(id, $\theta$, tenure_months, team_idx)` タプルで `departed_this_step` が生成されている必要があります．
-- **上流（同ステップ）：** `org_performance`（Reward）は `turnover_rate` を計算するために `departed_this_step.len()` を読み取るため，`knowledge_loss` がバッファをクリアする**前に**実行する必要があります．フェーズ順序（RewardはPostStepより前）がこれを自動的に保証します．
-- **下流：** PostStep後に `departed_this_step` のクリア済み状態を読み取るものはありません．`ocb`（Interaction）が `knowledge_stock` に加算する対応メカニズムです；OCB流入と退職流出のバランスが長期的なストックレベルを支配します．
+- **上流（同ステップ）** `turnover`（Decision）が実行済みで，`(id, $\theta$, tenure_months, team_idx)` のタプルから成る `departed_this_step` が生成されている必要があります．
+- **上流（同ステップ）** `org_performance`（Reward）は `turnover_rate` を計算するために `departed_this_step.len()` を読み取るため，`knowledge_loss` がバッファをクリアする**前に**実行されなければなりません．フェーズの順序（RewardはPostStepより前）がこれを自動的に保証します．
+- **下流** PostStepの後に `departed_this_step` のクリア済み状態を読み取るものはありません．対になるのは `knowledge_stock` に加算する `ocb`（Interaction）で，OCBによる流入と退職による流出のバランスが，長期的なストックの水準を左右します．
 
 ## 7. パラメータ
 
@@ -95,11 +95,11 @@ sim.run()?;
 
 ## 9. 決定論性とRNG
 
-乱数を**引きません**．計算は `departed_this_step` から導出された事前収集済みの `departed` リストを走査します（各離職者の損失は独立に計算され別のチームスロットに適用されるため，順序非依存）．結果は与えられたワールド状態に対して完全に決定論的です．
+乱数を**引きません**．計算は，`departed_this_step` からあらかじめ収集した `departed` リストを走査するだけです（各離職者の損失は独立に計算され，それぞれ別のチームスロットに適用されるため，処理順序には依存しません）．したがって結果は，与えられたワールド状態に対して完全に決定論的です．
 
 ## 10. 期待される動作
 
-`turnover`，`ocb`，`knowledge_loss` を含むシミュレーションでは，採用と離職が定常状態に近づくと `knowledge_stock` はほぼ安定したレベルに達するはずです．離職の急増（例：Krackhardtカスケードによる）は `knowledge_stock` に目に見えるディップを引き起こし，その後の数ヶ月でOCBがストックを補充し新規採用者が在職期間を積むにつれて回復します．在職期間の長い離職者（$\text{years}$ が大きい）は，特に `beta_loss` が1.0を超えてチューニングされている場合，不均衡に大きなドロップを引き起こします．
+`turnover`，`ocb`，`knowledge_loss` を含むシミュレーションでは，採用と離職が定常状態に近づくにつれて `knowledge_stock` はほぼ安定した水準に達するはずです．離職の急増（例えばKrackhardtカスケードによるもの）は `knowledge_stock` に目に見える落ち込みをもたらしますが，その後の数ヶ月でOCBがストックを補い，新規採用者が在職期間を積むにつれて回復します．在職期間の長い離職者（$\text{years}$ が大きい）は不釣り合いに大きな低下を引き起こし，これは特に `beta_loss` を1.0より大きく調整している場合に顕著です．
 
 ## 11. 参考文献
 

@@ -2,27 +2,27 @@
 
 # ポリシーメカニズム (`policy`)
 
-> 任意の固定ヒューリスティックを学習可能なポリシーで置き換える汎用 Decision フェーズラッパーで，標準のシミュレーションループ内でマルチエージェント強化学習を可能にする．
+> 任意の固定ヒューリスティックを学習可能なポリシーで置き換える汎用の Decision フェーズラッパーで，標準のシミュレーションループの中でマルチエージェント強化学習を可能にする．
 > **フェーズ:** Decision．**出典:** MARL (§14.1)．**種別:** learnable．
 
 [← Mechanism カタログに戻る](../mechanisms.ja.md)
 
 ## 1. 概要
 
-`PolicyMechanism<W, P, E, A>` は `socsim-marl` クレートの汎用 Decision フェーズメカニズムで，共有 `Policy` を `ObsEncoder`（ワールド → 観測）と `ActionApplier`（行動 → ワールド変異）とともにラップする．これは任意の固定 Decision フェーズヒューリスティックへのドロップイン置き換えである：シミュレーションエンジンは他のメカニズムと全く同様に `apply()` を呼び出し，エンジンへの変更は不要である．
+`PolicyMechanism<W, P, E, A>` は `socsim-marl` クレートが提供する汎用の Decision フェーズメカニズムで，共有 `Policy` を `ObsEncoder`（ワールド → 観測）と `ActionApplier`（行動 → ワールドの変異）とともにラップする．任意の固定 Decision フェーズヒューリスティックをそのまま置き換えるドロップイン部品であり，シミュレーションエンジンは他のメカニズムとまったく同じように `apply()` を呼び出すだけで，エンジン側には一切手を入れる必要がない．
 
-2つの動作モードにより，同一の型が推論と学習の両方に使える：
+2つの動作モードを備えており，同一の型を推論と学習の両方に使える．
 
-- **推論モード** — 貪欲な行動選択（`policy.act`），RNG を消費せず，凍結されたポリシーで決定論的．
-- **収集モード** — 確率的サンプリング（`policy.sample`，`ctx.rng` を使用）に加え，`MarlTrainer`（REINFORCE，`DiscretePolicyNet` burn MLP，CPU）へ供給する共有 `TrajectoryBuffer` への軌跡記録．
+- **推論モード** — 貪欲に行動を選択し（`policy.act`），RNG を消費しないため，凍結したポリシーのもとで決定論的に動作する．
+- **収集モード** — 確率的にサンプリングし（`policy.sample`，`ctx.rng` を使用），さらに `MarlTrainer`（REINFORCE，`DiscretePolicyNet` の burn MLP，CPU）へ渡す共有 `TrajectoryBuffer` に軌跡を記録する．
 
-`PolicyMechanism` は**ライブラリ専用**である：`HrLifecyclePack` には登録されておらず，`socsim` バイナリやシナリオ TOML ファイルからは利用できない．Rust コードで構築し `SimulationBuilder` に直接追加する必要がある．`socsim-hr-lifecycle` の `marl` feature フラグの後ろに配置されている．
+`PolicyMechanism` は**ライブラリ専用**である．`HrLifecyclePack` には登録されておらず，`socsim` バイナリやシナリオ TOML ファイルからは利用できないため，Rust コードで構築して `SimulationBuilder` に直接追加する必要がある．`socsim-hr-lifecycle` 側では `marl` feature フラグの後ろに置かれている．
 
 ## 2. 理論と出典
 
-MARL（socsim 設計ドキュメントの §14.1）は各シミュレーションエージェントを強化学習のアクターとして扱う．各 Decision フェーズで，エンコーダーが現在のワールド状態をエージェントごとの観測ベクトルにマッピングし，ポリシーが離散的な行動インデックスを出力し，アプライアーがそのインデックスをワールドの変異に変換する．学習には `DiscretePolicyNet`（`burn` フレームワークで構築した浅い MLP，CPU 上で動作）による REINFORCE を使用する．
+MARL（socsim 設計ドキュメントの §14.1）は，各シミュレーションエージェントを強化学習のアクターとみなす．各 Decision フェーズでは，エンコーダーが現在のワールド状態をエージェントごとの観測ベクトルへ写像し，ポリシーが離散的な行動インデックスを出力し，アプライアーがそのインデックスをワールドの変異へと変換する．学習には，`DiscretePolicyNet`（`burn` フレームワークで構築した浅い MLP で，CPU 上で動作する）による REINFORCE を用いる．
 
-2つのモードは次の通りである：
+2つのモードは次のとおりである．
 
 ```text
 Inference mode:
@@ -37,52 +37,52 @@ Collect mode:
     buffer.begin_decision(agent_id, obs, action)    (record for trainer)
 ```
 
-形式的には，収集モードではポリシー分布から行動をサンプリングし，推論モードでは貪欲な行動を選択する：
+形式的に書けば，収集モードではポリシー分布から行動をサンプリングし，推論モードでは貪欲に行動を選択する．
 
 $$a_t \sim \pi_\theta(\,\cdot \mid o_t) \quad(\text{collect}), \qquad a_t = \arg\max_{a} \pi_\theta(a \mid o_t) \quad(\text{inference})$$
 
-ポリシーはエピソード間でオフラインに REINFORCE 勾配推定で学習する：
+ポリシーは，エピソードとエピソードの合間にオフラインで，REINFORCE による勾配推定を用いて学習する．
 
 $$\nabla_\theta J = \mathbb{E}\!\left[\sum_t \nabla_\theta \log \pi_\theta(a_t \mid o_t)\, G_t\right]$$
 
-ポリシーは `Rc<RefCell<Policy>>` で共有されるため，`MarlTrainer` がエピソード間で重みを更新する一方で，メカニズムは実行中に同じ参照を保持する．
+ポリシーは `Rc<RefCell<Policy>>` として共有されるため，`MarlTrainer` がエピソードの合間に重みを更新する一方で，メカニズムは実行中ずっと同じ参照を保持し続ける．
 
 ## 3. データフロー
 
 ![policy data flow](../assets/mech-policy-mechanism.svg)
 
-読み書きされる状態は，呼び出し元が提供する `ObsEncoder` と `ActionApplier` の実装に完全に依存する．メカニズム自体は特定のワールドフィールドを直接操作しない；すべてのワールドアクセスは汎用のエンコーダー/アプライアーペアを通じて行われる．
+読み書きされる状態は，呼び出し元が与える `ObsEncoder` と `ActionApplier` の実装に完全に依存する．メカニズム自体は特定のワールドフィールドを直接操作することはなく，ワールドへのアクセスはすべて，汎用のエンコーダーとアプライアーの組を介して行われる．
 
 ## 4. 6フェーズループ内での位置
 
-3番目のフェーズである **Decision** で実行される．これにより，HR ライフサイクルパックの `fit`，`turnover`，`hiring` と並置される．Decision 内の宣言順序が実行順序を決定する；`PolicyMechanism` は，その `ActionApplier` が導入する依存関係を尊重するように配置すること（例えば，アプライアーが `satisfaction` を変更する場合，設計意図に応じて `fit` がそのフィールドを更新した後に実行するか前に実行するかを決める）．
+3番目のフェーズである **Decision** で実行され，HR ライフサイクルパックの `fit`，`turnover`，`hiring` と同じフェーズに並ぶ．Decision 内では宣言順序がそのまま実行順序になるため，`PolicyMechanism` は，その `ActionApplier` が持ち込む依存関係に沿うように配置する．たとえばアプライアーが `satisfaction` を変更する場合は，設計の意図に応じて，`fit` がそのフィールドを更新した後に実行するか前に実行するかを決める．
 
 ## 5. 状態読み書きコントラクト
 
-コントラクトは**汎用**である：呼び出し元が指定する具体的な `ObsEncoder<W>` および `ActionApplier<W>` 型に依存する．
+このコントラクトは**汎用**であり，呼び出し元が指定する具体的な `ObsEncoder<W>` 型および `ActionApplier<W>` 型に依存する．
 
 | 操作 | アクター | 備考 |
 |---|---|---|
-| ワールド状態の読み取り | `encoder.encode(world, aid)` | `Option<obs>` を返す；`None` の場合エージェントをスキップ． |
+| ワールド状態の読み取り | `encoder.encode(world, aid)` | `Option<obs>` を返す．`None` の場合はそのエージェントをスキップする． |
 | ワールド状態の書き込み | `applier.apply(world, aid, action, ctx.rng)` | 任意の変異を許可． |
 | 軌跡の書き込み | `buffer.begin_decision(aid, obs, action)` | 収集モードのみ． |
 
-`PolicyMechanism` レベルで固定のフィールドコントラクトはない．コントラクトはエンコーダーとアプライアーの実装でドキュメント化すること．
+`PolicyMechanism` のレベルでは，固定のフィールドコントラクトは存在しない．コントラクトはエンコーダーとアプライアーの実装側で文書化する．
 
 ## 6. 依存関係と順序制約
 
-- **上流:** `ObsEncoder` が読み取るものは最新でなければならない．エンコーダーが `Employee.productivity` を読み取る場合，`learning_curve` と `peer_effect` を先に実行する必要があるが，それらは Environment と Interaction のメカニズムであり Decision より前に発火するため，フェーズの順序付けが自動的にこれを処理する．
-- **下流:** `ActionApplier` が書き込むものは後続のメカニズムが消費する．必要に応じて，Decision フェーズ内でそれらのコンシューマーより前に `PolicyMechanism` を宣言すること．
-- **学習ループ:** 収集モードでは，`MarlTrainer` はステップ後に `buffer.close_step(rewards)` を呼び出し，エピソード間に学習更新を実行しなければならない．完全な学習ループパターンは [library.ja.md#learnable-policies-marl](../library.ja.md#learnable-policies-marl) を参照．
-- **Feature フラグ:** `Cargo.toml` に `socsim-marl`（`marl` feature 付き）を追加すること．
+- **上流** `ObsEncoder` が読み取る値は最新でなければならない．エンコーダーが `Employee.productivity` を読み取る場合，`learning_curve` と `peer_effect` を先に実行しておく必要があるが，これらは Environment フェーズと Interaction フェーズのメカニズムで Decision より前に発火するため，フェーズの順序付けによって自動的に満たされる．
+- **下流** `ActionApplier` が書き込む値は後続のメカニズムが消費する．必要であれば，Decision フェーズ内でそれらの消費側より前に `PolicyMechanism` を宣言する．
+- **学習ループ** 収集モードでは，`MarlTrainer` がステップ後に `buffer.close_step(rewards)` を呼び出し，エピソードの合間に学習更新を実行しなければならない．完全な学習ループのパターンは [library.ja.md#learnable-policies-marl](../library.ja.md#learnable-policies-marl) を参照．
+- **Feature フラグ** `Cargo.toml` に `socsim-marl`（`marl` feature 付き）を追加する．
 
 ## 7. パラメータ
 
-`PolicyMechanism` にはシナリオ TOML パラメータがない．ポリシーの重み，ネットワークアーキテクチャ，学習ハイパーパラメータは `MarlTrainer` と `Policy` 実装が管理し，メカニズムレジストリは関与しない．
+`PolicyMechanism` にはシナリオ TOML 上のパラメータはない．ポリシーの重み，ネットワーク構成，学習のハイパーパラメータは `MarlTrainer` と `Policy` の実装が管理し，メカニズムレジストリは関与しない．
 
 ## 8. 適用方法
 
-`PolicyMechanism` は**ライブラリ専用**である — `[[mechanism]]` TOML ブロックは存在しない．Rust で構築し `SimulationBuilder` に直接追加すること．
+`PolicyMechanism` は**ライブラリ専用**であり，対応する `[[mechanism]]` TOML ブロックは存在しない．Rust で構築して `SimulationBuilder` に直接追加する．
 
 ### ライブラリモード
 
@@ -129,15 +129,15 @@ sim.run()?;
 
 ## 9. 決定論性と RNG
 
-**推論モード:** ランダム性を**引き出さない**（`policy.act` は貪欲で決定論的）．同じワールド状態が与えられれば，凍結されたポリシーによる実行はビット単位で再現可能である．
+**推論モード** 乱数を**引かない**（`policy.act` は貪欲かつ決定論的である）．同じワールド状態を与えれば，凍結したポリシーによる実行はビット単位で再現可能である．
 
-**収集モード:** ステップごと，行動可能なエージェントごとに `policy.sample(obs, ctx.rng)` を通じて `ctx.rng` から1回引き出す．イテレーション順は `ctx.agent_order` に従い，これはシミュレーションスケジューラーによって決定される（通常，メカニズムが発火するより前のステップセットアップで引き出されたランダムな順列）．したがって，収集モードでの再現性には同一シード**および**同一エージェント順スケジュールが必要である．
+**収集モード** ステップごとに，行動可能な各エージェントについて `policy.sample(obs, ctx.rng)` を介して `ctx.rng` から1回ずつ引く．走査順は `ctx.agent_order` に従い，これはシミュレーションスケジューラーが決める（通常は，メカニズムが発火する前のステップ準備段階で引かれたランダムな順列である）．したがって収集モードの再現には，同一のシード**と**同一のエージェント順スケジュールの両方が必要となる．
 
-`ActionApplier` が確率的なワールド変異を必要とする場合も `ctx.rng` を消費する可能性がある；アプライアーの実装でこれをドキュメント化すること．
+`ActionApplier` が確率的なワールド変異を必要とする場合は，`ActionApplier` も `ctx.rng` を消費しうる．その点はアプライアーの実装側で文書化する．
 
 ## 10. 期待される動作
 
-よく学習されたポリシーによる推論モードでは，固定ヒューリスティックのベースラインと比較して，シミュレーションはより高い `org_performance` またはより低い `turnover_rate`（報酬シグナルに依存）を生成し，ポリシーが学習した戦略を反映するはずである．学習初期の収集モードでは動作は本質的にランダムであり，REINFORCE が収束するにつれてポリシーは学習した目標に向かってシフトする．
+十分に学習したポリシーを使った推論モードでは，固定ヒューリスティックのベースラインと比べて，シミュレーションはより高い `org_performance`，あるいはより低い `turnover_rate`（どちらになるかは報酬シグナルによる）を生み出し，ポリシーが学習した戦略を反映するはずである．学習初期の収集モードでは挙動は本質的にランダムだが，REINFORCE が収束するにつれて，ポリシーは学習対象とする目標へと寄っていく．
 
 ## 11. 参考文献
 
