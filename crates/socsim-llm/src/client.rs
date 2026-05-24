@@ -172,6 +172,47 @@ pub trait LlmClient {
     fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError>;
 }
 
+// ── forwarding impls ─────────────────────────────────────────────────────────
+
+/// Forward [`LlmClient`] through a [`Box`], so a **type-erased** client
+/// (`Box<dyn LlmClient>`) is itself an [`LlmClient`].
+///
+/// This lets a downstream user unify several concrete client types — e.g. the
+/// production `FallbackClient<…>` versus a [`mock::ScriptedClient`](crate::mock::ScriptedClient)
+/// — behind one `Box<dyn LlmClient>` and still satisfy bounds like
+/// `CachingClient<C: LlmClient>`, without having to define a local newtype
+/// purely to work around the orphan rule.
+impl<T: LlmClient + ?Sized> LlmClient for Box<T> {
+    fn model(&self) -> &str {
+        (**self).model()
+    }
+
+    fn endpoint(&self) -> &str {
+        (**self).endpoint()
+    }
+
+    fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError> {
+        (**self).complete(prompt, config)
+    }
+}
+
+/// Forward [`LlmClient`] through a shared reference, so `&client` is itself an
+/// [`LlmClient`].  Handy for passing a borrowed client where an owned one is
+/// expected without giving up ownership.
+impl<T: LlmClient + ?Sized> LlmClient for &T {
+    fn model(&self) -> &str {
+        (**self).model()
+    }
+
+    fn endpoint(&self) -> &str {
+        (**self).endpoint()
+    }
+
+    fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError> {
+        (**self).complete(prompt, config)
+    }
+}
+
 // ── caching decorator ────────────────────────────────────────────────────────
 
 /// Wraps any [`LlmClient`] with a prompt-keyed [`PromptCache`], pseudo-determinising
@@ -228,5 +269,50 @@ impl<C: LlmClient> CachingClient<C> {
         let resp = self.inner.complete(prompt, config)?;
         self.cache.insert(key, resp.text.clone());
         Ok(resp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::ScriptedClient;
+    use crate::PromptCache;
+
+    #[test]
+    fn boxed_client_forwards() {
+        let c: Box<dyn LlmClient> =
+            Box::new(ScriptedClient::new("boxed-model", |p| format!("echo:{p}")));
+        assert_eq!(c.model(), "boxed-model");
+        assert_eq!(c.endpoint(), "mock://scripted");
+        let r = c.complete("hi", &LlmConfig::deterministic()).unwrap();
+        assert_eq!(r.text, "echo:hi");
+        assert_eq!(r.metadata.model, "boxed-model");
+        assert!(!r.metadata.cache_hit);
+    }
+
+    #[test]
+    fn caching_client_accepts_boxed_client() {
+        // Proves the `C: LlmClient` bound is satisfied by `Box<dyn LlmClient>`.
+        let c: Box<dyn LlmClient> = Box::new(ScriptedClient::constant("boxed-model", "42"));
+        let mut cached = CachingClient::new(c, PromptCache::in_memory());
+
+        let r1 = cached.complete("q", &LlmConfig::deterministic()).unwrap();
+        assert!(!r1.metadata.cache_hit); // cold miss hits the boxed backend
+        assert_eq!(r1.text, "42");
+
+        let r2 = cached.complete("q", &LlmConfig::deterministic()).unwrap();
+        assert!(r2.metadata.cache_hit); // warm hit served from cache
+        assert_eq!(r2.text, "42");
+    }
+
+    #[test]
+    fn ref_client_forwards() {
+        // Exercise the `impl LlmClient for &T` via an explicit reference binding
+        // so the methods resolve through the forwarding impl (not auto-deref).
+        let scripted = ScriptedClient::new("ref-model", |p| format!("r:{p}"));
+        let by_ref: &dyn LlmClient = &scripted;
+        assert_eq!(LlmClient::model(&by_ref), "ref-model");
+        let r = LlmClient::complete(&by_ref, "hi", &LlmConfig::deterministic()).unwrap();
+        assert_eq!(r.text, "r:hi");
     }
 }
