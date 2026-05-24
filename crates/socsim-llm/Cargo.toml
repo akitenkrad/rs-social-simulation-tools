@@ -1,0 +1,29 @@
+[package]
+name        = "socsim-llm"
+description = "Optional LLM helper layer for socsim: provider abstraction, prompt cache, and run metadata (kept out of the deterministic core)"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+
+# Synchronous HTTP client for the provider backends.  The engine is
+# synchronous, so we deliberately use a blocking client rather than async.
+# Gated behind the `ollama` / `openai` features so the default build pulls in
+# no networking and stays deterministic + dependency-light.
+ureq = { workspace = true, optional = true }
+
+[features]
+default = []
+# Each backend gates its own networking code path.
+ollama = ["dep:ureq"]
+openai = ["dep:ureq"]
+# Convenience: both live backends (used by the FallbackClient end-to-end).
+live = ["ollama", "openai"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
