@@ -16,3 +16,4 @@ socsim-core   = { path = "../socsim-core" }
 socsim-config = { path = "../socsim-config" }
 socsim-grid   = { path = "../socsim-grid" }
 socsim-log    = { path = "../socsim-log" }
+socsim-net    = { path = "../socsim-net" }

@@ -4330,6 +4330,7 @@ dependencies = [
  "socsim-core",
  "socsim-grid",
  "socsim-log",
+ "socsim-net",
 ]
 
 [[package]]

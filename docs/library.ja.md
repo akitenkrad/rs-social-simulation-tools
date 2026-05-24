@@ -415,6 +415,120 @@ println!("org_performance = {}", sim.world().org_performance);
 
 ---
 
+## `socsim-net` によるネットワークモデル
+
+ソーシャルグラフ型のモデル（意見ダイナミクス，影響波及，ネットワーク上の感染，フォロー／アンフォローのダイナミクスなど）のために，`socsim-net` は `AgentId` をキーとするグラフと再現可能なジェネレーターを提供します．Erdős–Rényi／Watts–Strogatz／Barabási–Albert や近傍探索を自分で再実装する必要はありません：
+
+```rust,ignore
+use socsim_net::SocialNetwork;
+use socsim_core::AgentId;
+
+let ids: Vec<AgentId> = (0..200u64).map(AgentId).collect();
+let net = SocialNetwork::watts_strogatz(&ids, 6, 0.1, &mut init_rng); // k=6, beta=0.1
+
+let nbrs = net.neighbors(AgentId(0));          // 所有権付き Vec
+let deg  = net.degree(AgentId(0));
+let comps = net.connected_components();
+```
+
+| 項目 | 用途 |
+|---|---|
+| `SocialNetwork::erdos_renyi / watts_strogatz / barabasi_albert / empty` | 再現可能なジェネレーター（いずれも `&mut SimRng` を受け取る） |
+| `add_node` / `add_edge` / `remove_node` / `remove_edge` | 動的グラフの変更 |
+| `neighbors` / `neighbors_into(&mut buf)` / `neighbors_iter` | 近傍アクセス（割り当てあり／ゼロ割り当て／イテレーター） |
+| `degree` / `node_count` / `edge_count` / `contains` | 基本クエリ |
+| `edges` / `degree_sequence` / `degree_distribution` | エクスポートと次数分析 |
+| `average_path_length` / `average_clustering_coefficient` / `local_bridges` | ネットワーク指標（Granovetter，スモールワールド） |
+| `connected_components` / `component_membership` / `largest_component_size` | 連結性 |
+| `Network<E, Ty>` + `DiSocialNetwork` / `WeightedNetwork<E>` | 辺ペイロード `E` と有向性 `Ty` に対してジェネリック |
+
+`SocialNetwork` は無向・無重みのデフォルト（`Network<(), Undirected>`）です．有向のフォローグラフには `DiSocialNetwork`（`out_neighbors` / `in_neighbors`）を，重み付きの紐帯には `add_edge_weighted(a, b, w)` + `edge_weight(a, b)` を使います．
+
+### 実例：限定信頼の意見ダイナミクス
+
+ネットワークを `WorldState` に保持し，各エージェントに連続的な意見を持たせ，`Interaction` フェーズで近傍から更新します．これは**限定信頼（bounded-confidence）DeGroot** モデルです：各エージェントは，いまも信頼している近傍（信頼半径 `epsilon` 以内）の平均意見に向かって割合 `mu` だけ移動します．
+
+```rust,ignore
+use socsim_core::{AgentId, Mechanism, Phase, Result, SimClock, SimRng, StepContext, WorldState};
+use socsim_engine::SimulationBuilder;
+use socsim_net::SocialNetwork;
+use rand::Rng;
+
+struct OpinionWorld {
+    clock: SimClock,
+    net: SocialNetwork,
+    opinions: Vec<f64>,          // AgentId.0 as usize でインデックス
+    last_max_delta: f64,
+}
+
+impl OpinionWorld {
+    fn new(n: usize, k: usize, beta: f64, init_rng: &mut SimRng) -> Self {
+        let ids: Vec<AgentId> = (0..n as u64).map(AgentId).collect();
+        let net = SocialNetwork::watts_strogatz(&ids, k, beta, init_rng); // ワールド初期化ストリームから構築
+        let opinions = (0..n).map(|_| init_rng.gen::<f64>()).collect();
+        Self { clock: SimClock::new(u64::MAX), net, opinions, last_max_delta: f64::INFINITY }
+    }
+}
+
+impl WorldState for OpinionWorld {
+    fn agent_ids(&self) -> Vec<AgentId> { (0..self.opinions.len() as u64).map(AgentId).collect() }
+    fn clock(&self) -> &SimClock { &self.clock }
+    fn clock_mut(&mut self) -> &mut SimClock { &mut self.clock }
+}
+
+struct BoundedConfidence { epsilon: f64, mu: f64, tol: f64 }
+
+impl Mechanism<OpinionWorld> for BoundedConfidence {
+    fn name(&self) -> &str { "bounded_confidence" }
+    fn phases(&self) -> &'static [Phase] { &[Phase::Interaction] }
+
+    fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, OpinionWorld>) -> Result<()> {
+        let n = ctx.world.opinions.len();
+        let current = ctx.world.opinions.clone();   // 同期更新：旧値を読み，新値を書く
+        let mut next = current.clone();
+        let mut buf: Vec<AgentId> = Vec::new();      // エージェント間で使い回す — エージェントごとの割り当てなし
+        let mut max_delta = 0.0_f64;
+
+        for i in 0..n {
+            let xi = current[i];
+            let (mut sum, mut count) = (xi, 1usize); // エージェントは常に自分自身を信頼する
+            ctx.world.net.neighbors_into(AgentId(i as u64), &mut buf);  // ゼロ割り当ての近傍読み出し
+            for &AgentId(j) in &buf {
+                let xj = current[j as usize];
+                if (xj - xi).abs() <= self.epsilon { sum += xj; count += 1; }
+            }
+            next[i] = xi + self.mu * (sum / count as f64 - xi);
+            max_delta = max_delta.max((next[i] - xi).abs());
+        }
+
+        ctx.world.opinions = next;
+        ctx.world.last_max_delta = max_delta;
+        if max_delta < self.tol { ctx.request_stop(); }   // 収束：意見の移動が止まった
+        Ok(())
+    }
+}
+
+// RNGストリームの規約：ルートシードは1つ，[0] = ワールド／ネットワーク初期化，[1] = エンジン．
+let root = 7u64;
+let mut init_rng = SimRng::from_seed(socsim_core::derive_seed(root, &[0]));
+let world = OpinionWorld::new(200, 6, 0.1, &mut init_rng);
+
+let mut sim = SimulationBuilder::new(world)
+    .seed(socsim_core::derive_seed(root, &[1]))   // 独立したエンジンストリーム
+    .add_mechanism(Box::new(BoundedConfidence { epsilon: 0.2, mu: 0.5, tol: 1e-4 }))
+    .build();
+
+sim.run()?;     // いくつかの意見クラスタへ収束する
+```
+
+RNGストリームの分離に注目してください：ネットワークと初期意見は `derive_seed(root, &[0])`（ワールド初期化）から引き，エンジン／スケジューラーは独立した `derive_seed(root, &[1])` ストリームを受け取ります — 上記の格子モデルと同じラベリング規約です．ステップごとのクラスタ数／Δの出力と `connected_components` / `average_clustering_coefficient` によるトポロジー要約を含む，実行可能な完全版は `crates/socsim-engine/examples/opinion_dynamics.rs` にあります：
+
+```bash
+cargo run -p socsim-engine --example opinion_dynamics
+```
+
+---
+
 ## `socsim-grid` による空間モデル
 
 格子ベースのモデル（分居，格子上の感染，拡散）のために，`socsim-grid` は既製の2D空間を提供するので，近傍や距離を再実装せずに済みます：
