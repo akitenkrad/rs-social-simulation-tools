@@ -1,21 +1,38 @@
 //! Social network layer for the `socsim` platform.
 //!
-//! Provides [`SocialNetwork`] — a thin, undirected-graph wrapper around
-//! [`petgraph`] whose nodes are keyed by [`AgentId`].  All random generators
-//! accept a `&mut SimRng` for full reproducibility.
+//! Provides [`Network`] — a thin wrapper around [`petgraph`] whose nodes are
+//! keyed by [`AgentId`] and whose backing store is a
+//! [`petgraph::stable_graph::StableGraph`], so node indices stay valid across
+//! removals.  The wrapper is generic over the edge payload `E` (default `()`)
+//! and the directedness `Ty` (default [`Undirected`]), with two ready-made
+//! aliases:
+//!
+//! - [`SocialNetwork`] = `Network<(), Undirected>` — the original undirected,
+//!   unweighted network.  Every method and the `{ nodes, edges }` serde format
+//!   are preserved bit-for-bit, so existing callers are unaffected.
+//! - [`DiSocialNetwork`] = `Network<(), Directed>` — a directed variant with
+//!   `out_neighbors` / `in_neighbors`.
+//!
+//! Edge payloads carry weights or labels: `add_edge_weighted(a, b, w)` plus
+//! [`Network::edge_weight`] / [`Network::edge_weight_mut`].
+//!
+//! All random generators accept a `&mut SimRng` for full reproducibility.
 //!
 //! # Included generators
 //!
 //! | Constructor | Model |
 //! |---|---|
-//! | [`SocialNetwork::erdos_renyi`] | Erdős–Rényi G(n,p) |
-//! | [`SocialNetwork::watts_strogatz`] | Watts–Strogatz small-world |
-//! | [`SocialNetwork::barabasi_albert`] | Barabási–Albert preferential attachment |
-//! | [`SocialNetwork::empty`] | Start from scratch |
+//! | [`Network::erdos_renyi`] | Erdős–Rényi G(n,p) |
+//! | [`Network::watts_strogatz`] | Watts–Strogatz small-world |
+//! | [`Network::barabasi_albert`] | Barabási–Albert preferential attachment |
+//! | [`Network::empty`] | Start from scratch |
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::marker::PhantomData;
 
-use petgraph::graph::{NodeIndex, UnGraph};
+use petgraph::stable_graph::{NodeIndex, StableGraph};
+use petgraph::visit::{EdgeRef, IntoEdgeReferences};
+use petgraph::{Directed, Direction, Undirected};
 use rand::Rng;
 use serde::de::Deserializer;
 use serde::ser::Serializer;
@@ -24,59 +41,102 @@ use socsim_core::AgentId;
 
 // Re-export SimRng so callers need only one dep.
 pub use socsim_core::SimRng;
+// Re-export the directedness markers so callers can name the type parameter.
+pub use petgraph::{Directed as DirectedTy, Undirected as UndirectedTy};
 
-// ── SocialNetwork ─────────────────────────────────────────────────────────────
+// ── Network ─────────────────────────────────────────────────────────────────
 
-/// An undirected social network whose nodes are [`AgentId`]s.
+/// A social network whose nodes are [`AgentId`]s.
 ///
-/// Internally stores a [`petgraph::graph::UnGraph`] and an `AgentId →
-/// NodeIndex` index for O(1) agent lookups.  All edge weights are `()`.
+/// Generic over:
+/// - `E`: the per-edge payload (weight / label).  Defaults to `()` for the
+///   classic unweighted network.
+/// - `Ty`: the directedness, a [`petgraph::EdgeType`] marker — either
+///   [`Undirected`] (default) or [`Directed`].  This is a zero-sized
+///   type-level switch (no runtime branching), so an undirected and a directed
+///   network are distinct types and cannot be mixed by accident.
 ///
-/// Serialises as a plain `{ nodes, edges }` pair of [`AgentId`]s (petgraph's
-/// internal `NodeIndex`es are *not* persisted) and is rebuilt on load, so
-/// snapshots stay stable across petgraph versions.
+/// Internally stores a [`petgraph::stable_graph::StableGraph`] and an `AgentId
+/// → NodeIndex` index for O(1) agent lookups.  Because the backing store is a
+/// `StableGraph`, removing a node does **not** invalidate the indices of other
+/// nodes, so [`Network::remove_node`] is O(degree) rather than O(V).
+///
+/// Serialises as a plain `{ nodes, edges }` structure of [`AgentId`]s
+/// (petgraph's internal `NodeIndex`es are *not* persisted) and is rebuilt on
+/// load, so snapshots stay stable across petgraph versions.  For weighted
+/// networks (`E: Serialize`) each edge additionally carries its payload.
 #[derive(Clone)]
-pub struct SocialNetwork {
-    graph: UnGraph<AgentId, ()>,
+pub struct Network<E = (), Ty = Undirected>
+where
+    Ty: petgraph::EdgeType,
+{
+    graph: StableGraph<AgentId, E, Ty>,
     index: HashMap<AgentId, NodeIndex>,
+    _ty: PhantomData<Ty>,
 }
 
-/// Wire format for [`SocialNetwork`]: node list + undirected edge list.
+/// An **undirected** social network with no edge payload.
+///
+/// This is the original `SocialNetwork`: all existing methods and the
+/// `{ nodes, edges }` serde format are preserved.
+pub type SocialNetwork = Network<(), Undirected>;
+
+/// A **directed** social network with no edge payload.
+///
+/// `add_edge(a, b)` adds the directed arc `a → b`.  Use
+/// [`Network::out_neighbors`] / [`Network::in_neighbors`] to follow arcs in a
+/// given direction; [`Network::neighbors`] returns successors (out-neighbours).
+pub type DiSocialNetwork = Network<(), Directed>;
+
+/// An **undirected, weighted** social network carrying a payload `E` per edge.
+pub type WeightedNetwork<E> = Network<E, Undirected>;
+
+/// A **directed, weighted** social network carrying a payload `E` per edge.
+pub type DiWeightedNetwork<E> = Network<E, Directed>;
+
+// ── serde ─────────────────────────────────────────────────────────────────────
+
+/// Wire format for an **unweighted** [`Network`]: node list + edge list.
+///
+/// This matches the original `SocialNetwork` format exactly, so snapshots
+/// written by earlier versions still deserialise.
 #[derive(Serialize, Deserialize)]
 struct NetData {
     nodes: Vec<AgentId>,
     edges: Vec<(AgentId, AgentId)>,
 }
 
-impl Serialize for SocialNetwork {
+/// Wire format for a **weighted** [`Network`]: node list + `(a, b, weight)`
+/// edge list.
+#[derive(Serialize, Deserialize)]
+struct WeightedNetData<E> {
+    nodes: Vec<AgentId>,
+    edges: Vec<(AgentId, AgentId, E)>,
+}
+
+// Unweighted (`E = ()`) serde keeps the historical `{ nodes, edges }` shape.
+impl<Ty> Serialize for Network<(), Ty>
+where
+    Ty: petgraph::EdgeType,
+{
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        // Sort nodes/edges for a deterministic, diff-friendly representation.
         let mut nodes: Vec<AgentId> = self.index.keys().copied().collect();
         nodes.sort();
 
-        let mut edges: Vec<(AgentId, AgentId)> = self
-            .graph
-            .edge_indices()
-            .filter_map(|e| self.graph.edge_endpoints(e))
-            .map(|(a, b)| {
-                let (ia, ib) = (self.graph[a], self.graph[b]);
-                if ia <= ib {
-                    (ia, ib)
-                } else {
-                    (ib, ia)
-                }
-            })
-            .collect();
+        let mut edges: Vec<(AgentId, AgentId)> = self.canonical_endpoints().collect();
         edges.sort();
 
         NetData { nodes, edges }.serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for SocialNetwork {
+impl<'de, Ty> Deserialize<'de> for Network<(), Ty>
+where
+    Ty: petgraph::EdgeType,
+{
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let data = NetData::deserialize(deserializer)?;
-        let mut net = SocialNetwork::empty();
+        let mut net = Network::empty();
         for id in data.nodes {
             net.add_node(id);
         }
@@ -87,17 +147,343 @@ impl<'de> Deserialize<'de> for SocialNetwork {
     }
 }
 
-impl SocialNetwork {
-    // ── Constructors ──────────────────────────────────────────────────────────
+impl<E, Ty> Network<E, Ty>
+where
+    E: Serialize + Clone,
+    Ty: petgraph::EdgeType,
+{
+    /// Serialise a **weighted** network as `{ nodes, edges: [(a, b, weight)] }`.
+    ///
+    /// `()`-payload networks use the historical `{ nodes, edges }` format via
+    /// the blanket [`Serialize`] impl; this method is for `E != ()` payloads,
+    /// for which a generic serde impl would conflict with that one.
+    pub fn to_weighted_json(&self) -> Result<String, serde_json::Error> {
+        let mut nodes: Vec<AgentId> = self.index.keys().copied().collect();
+        nodes.sort();
 
+        let edges: Vec<(AgentId, AgentId, E)> = self
+            .graph
+            .edge_references()
+            .map(|e| {
+                let a = self.graph[e.source()];
+                let b = self.graph[e.target()];
+                (a, b, e.weight().clone())
+            })
+            .collect();
+
+        serde_json::to_string(&WeightedNetData { nodes, edges })
+    }
+}
+
+impl<E, Ty> Network<E, Ty>
+where
+    E: for<'de> Deserialize<'de>,
+    Ty: petgraph::EdgeType,
+{
+    /// Rebuild a **weighted** network from the `{ nodes, edges }` JSON written
+    /// by [`Network::to_weighted_json`].
+    pub fn from_weighted_json(json: &str) -> Result<Self, serde_json::Error> {
+        let data: WeightedNetData<E> = serde_json::from_str(json)?;
+        let mut net = Network::empty();
+        for id in data.nodes {
+            net.add_node(id);
+        }
+        for (a, b, w) in data.edges {
+            net.add_edge_weighted(a, b, w);
+        }
+        Ok(net)
+    }
+}
+
+// ── construction / mutation (generic over E, Ty) ────────────────────────────
+
+impl<E, Ty> Default for Network<E, Ty>
+where
+    Ty: petgraph::EdgeType,
+{
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl<E, Ty> Network<E, Ty>
+where
+    Ty: petgraph::EdgeType,
+{
     /// Create an empty network with no nodes or edges.
     pub fn empty() -> Self {
         Self {
-            graph: UnGraph::new_undirected(),
+            graph: StableGraph::default(),
             index: HashMap::new(),
+            _ty: PhantomData,
         }
     }
 
+    /// `true` if this network is directed (its `Ty` is [`Directed`]).
+    pub fn is_directed(&self) -> bool {
+        Ty::is_directed()
+    }
+
+    /// Add a node for `id`.  No-op if `id` is already present.
+    pub fn add_node(&mut self, id: AgentId) {
+        self.index
+            .entry(id)
+            .or_insert_with(|| self.graph.add_node(id));
+    }
+
+    /// Add an edge between `a` and `b` carrying the payload `weight`.
+    ///
+    /// For an undirected network the edge is symmetric; for a directed network
+    /// it is the arc `a → b`.  Both nodes must already exist (call
+    /// [`add_node`](Self::add_node) first).  If an edge already exists between
+    /// the two endpoints (in this direction, for directed graphs) its payload
+    /// is **overwritten** with `weight`.
+    pub fn add_edge_weighted(&mut self, a: AgentId, b: AgentId, weight: E) {
+        if let (Some(&na), Some(&nb)) = (self.index.get(&a), self.index.get(&b)) {
+            match self.directed_find_edge(na, nb) {
+                Some(e) => {
+                    self.graph[e] = weight;
+                }
+                None => {
+                    self.graph.add_edge(na, nb, weight);
+                }
+            }
+        }
+    }
+
+    /// Remove a node and all its incident edges from the network.
+    ///
+    /// Returns `true` if the node existed, `false` otherwise.
+    ///
+    /// Because the backing store is a [`StableGraph`], removing a node leaves
+    /// every other node's `NodeIndex` untouched, so this is **O(degree)** (drop
+    /// the node's incident edges + one `HashMap` removal) rather than the
+    /// O(V) full-index rebuild the non-stable graph required.
+    pub fn remove_node(&mut self, id: AgentId) -> bool {
+        if let Some(ni) = self.index.remove(&id) {
+            self.graph.remove_node(ni);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Return the payload of the edge between `a` and `b` (arc `a → b` for
+    /// directed graphs), or `None` if there is no such edge.
+    pub fn edge_weight(&self, a: AgentId, b: AgentId) -> Option<&E> {
+        let (&na, &nb) = (self.index.get(&a)?, self.index.get(&b)?);
+        let e = self.directed_find_edge(na, nb)?;
+        self.graph.edge_weight(e)
+    }
+
+    /// Mutable access to the payload of the edge between `a` and `b` (arc
+    /// `a → b` for directed graphs), or `None` if there is no such edge.
+    pub fn edge_weight_mut(&mut self, a: AgentId, b: AgentId) -> Option<&mut E> {
+        let na = *self.index.get(&a)?;
+        let nb = *self.index.get(&b)?;
+        let e = self.directed_find_edge(na, nb)?;
+        self.graph.edge_weight_mut(e)
+    }
+
+    // ── Queries ─────────────────────────────────────────────────────────────
+
+    /// Return all neighbours of `id`.
+    ///
+    /// For a directed network these are the **successors** (out-neighbours,
+    /// i.e. heads of arcs `id → x`); use [`in_neighbors`](Self::in_neighbors)
+    /// for predecessors.  Returns an empty `Vec` if `id` is not present.
+    ///
+    pub fn neighbors(&self, id: AgentId) -> Vec<AgentId> {
+        match self.index.get(&id) {
+            Some(&ni) => self.graph.neighbors(ni).map(|nb| self.graph[nb]).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Return the degree of `id`.
+    ///
+    /// For a directed network this is the **out-degree** (number of outgoing
+    /// arcs); use [`in_neighbors`](Self::in_neighbors)`.count()` for in-degree.
+    /// Returns `0` if `id` is not present.
+    pub fn degree(&self, id: AgentId) -> usize {
+        match self.index.get(&id) {
+            Some(&ni) => self.graph.neighbors(ni).count(),
+            None => 0,
+        }
+    }
+
+    /// Total number of nodes in the network.
+    pub fn node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    /// Total number of edges in the network.
+    pub fn edge_count(&self) -> usize {
+        self.graph.edge_count()
+    }
+
+    /// Number of connected components.
+    ///
+    /// For directed graphs this counts **weakly** connected components (edge
+    /// direction is ignored).  Computed by labelling every node with
+    /// [`component_membership`](Self::component_membership) (a BFS over the
+    /// undirected view), since the backing [`StableGraph`] does not implement
+    /// petgraph's `NodeCompactIndexable` bound required by
+    /// `algo::connected_components`.
+    pub fn connected_components(&self) -> usize {
+        if self.node_count() == 0 {
+            return 0;
+        }
+        let comp = self.component_membership();
+        let mut labels: Vec<usize> = comp.into_values().collect();
+        labels.sort_unstable();
+        labels.dedup();
+        labels.len()
+    }
+
+    /// Returns `true` if `id` exists in the network.
+    pub fn contains(&self, id: AgentId) -> bool {
+        self.index.contains_key(&id)
+    }
+
+    /// The component id of every node, as an `AgentId → usize` map.
+    ///
+    /// Components are numbered `0..k` in order of their smallest member
+    /// `AgentId`, so the labelling is deterministic.  For directed graphs this
+    /// uses **weak** connectivity (edge direction ignored).
+    pub fn component_membership(&self) -> HashMap<AgentId, usize> {
+        let mut ids: Vec<AgentId> = self.index.keys().copied().collect();
+        ids.sort();
+
+        let mut comp: HashMap<AgentId, usize> = HashMap::new();
+        let mut next = 0usize;
+        for &start in &ids {
+            if comp.contains_key(&start) {
+                continue;
+            }
+            // BFS over the *undirected* view (both in- and out-neighbours).
+            let label = next;
+            next += 1;
+            let mut queue = VecDeque::new();
+            queue.push_back(start);
+            comp.insert(start, label);
+            while let Some(cur) = queue.pop_front() {
+                let cni = self.index[&cur];
+                let it = self
+                    .graph
+                    .neighbors_directed(cni, Direction::Outgoing)
+                    .chain(self.graph.neighbors_directed(cni, Direction::Incoming));
+                for nb in it {
+                    let nid = self.graph[nb];
+                    if let std::collections::hash_map::Entry::Vacant(e) = comp.entry(nid) {
+                        e.insert(label);
+                        queue.push_back(nid);
+                    }
+                }
+            }
+        }
+        comp
+    }
+
+    // ── internal helpers ──────────────────────────────────────────────────────
+
+    /// Find the edge `na → nb`.  For undirected graphs petgraph treats the
+    /// pair symmetrically; for directed graphs this respects orientation.
+    fn directed_find_edge(
+        &self,
+        na: NodeIndex,
+        nb: NodeIndex,
+    ) -> Option<petgraph::stable_graph::EdgeIndex> {
+        self.graph.find_edge(na, nb)
+    }
+
+    /// Iterate edge endpoints as `AgentId` pairs, canonicalised (`a <= b`) for
+    /// undirected graphs and left as `(source, target)` for directed graphs.
+    fn canonical_endpoints(&self) -> impl Iterator<Item = (AgentId, AgentId)> + '_ {
+        self.graph.edge_indices().filter_map(move |e| {
+            let (a, b) = self.graph.edge_endpoints(e)?;
+            let (ia, ib) = (self.graph[a], self.graph[b]);
+            if !Ty::is_directed() && ia > ib {
+                Some((ib, ia))
+            } else {
+                Some((ia, ib))
+            }
+        })
+    }
+}
+
+// ── directed-specific queries ───────────────────────────────────────────────
+
+impl<E> Network<E, Directed> {
+    /// Out-neighbours (successors) of `id`: heads of arcs `id → x`.
+    pub fn out_neighbors(&self, id: AgentId) -> Vec<AgentId> {
+        self.neighbors_directed(id, Direction::Outgoing)
+    }
+
+    /// In-neighbours (predecessors) of `id`: tails of arcs `x → id`.
+    pub fn in_neighbors(&self, id: AgentId) -> Vec<AgentId> {
+        self.neighbors_directed(id, Direction::Incoming)
+    }
+
+    /// Neighbours of `id` in the given [`Direction`].
+    pub fn neighbors_directed(&self, id: AgentId, dir: Direction) -> Vec<AgentId> {
+        match self.index.get(&id) {
+            Some(&ni) => self
+                .graph
+                .neighbors_directed(ni, dir)
+                .map(|nb| self.graph[nb])
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Out-degree of `id` (number of outgoing arcs).
+    pub fn out_degree(&self, id: AgentId) -> usize {
+        match self.index.get(&id) {
+            Some(&ni) => self
+                .graph
+                .neighbors_directed(ni, Direction::Outgoing)
+                .count(),
+            None => 0,
+        }
+    }
+
+    /// In-degree of `id` (number of incoming arcs).
+    pub fn in_degree(&self, id: AgentId) -> usize {
+        match self.index.get(&id) {
+            Some(&ni) => self
+                .graph
+                .neighbors_directed(ni, Direction::Incoming)
+                .count(),
+            None => 0,
+        }
+    }
+}
+
+// ── unweighted convenience (E = ()) ─────────────────────────────────────────
+
+impl<Ty> Network<(), Ty>
+where
+    Ty: petgraph::EdgeType,
+{
+    /// Add an edge between `a` and `b` with no payload.
+    ///
+    /// For undirected networks the edge is symmetric; for directed networks it
+    /// is the arc `a → b`.  Both nodes must exist (call
+    /// [`add_node`](Self::add_node) first).  Duplicate edges are silently
+    /// ignored.
+    pub fn add_edge(&mut self, a: AgentId, b: AgentId) {
+        if let (Some(&na), Some(&nb)) = (self.index.get(&a), self.index.get(&b)) {
+            if self.graph.find_edge(na, nb).is_none() {
+                self.graph.add_edge(na, nb, ());
+            }
+        }
+    }
+}
+
+// ── generators (undirected, unweighted) ─────────────────────────────────────
+
+impl Network<(), Undirected> {
     /// **Erdős–Rényi G(n,p)**: add each possible undirected edge independently
     /// with probability `p`.
     ///
@@ -257,87 +643,6 @@ impl SocialNetwork {
 
         net
     }
-
-    // ── Mutation ──────────────────────────────────────────────────────────────
-
-    /// Add a node for `id`.  No-op if `id` is already present.
-    pub fn add_node(&mut self, id: AgentId) {
-        self.index
-            .entry(id)
-            .or_insert_with(|| self.graph.add_node(id));
-    }
-
-    /// Add an undirected edge between `a` and `b`.
-    ///
-    /// Both nodes must exist (call [`add_node`](Self::add_node) first).
-    /// Duplicate edges are silently ignored.
-    pub fn add_edge(&mut self, a: AgentId, b: AgentId) {
-        if let (Some(&na), Some(&nb)) = (self.index.get(&a), self.index.get(&b)) {
-            if self.graph.find_edge(na, nb).is_none() {
-                self.graph.add_edge(na, nb, ());
-            }
-        }
-    }
-
-    /// Remove a node and all its incident edges from the network.
-    ///
-    /// Returns `true` if the node existed, `false` otherwise.  After removal
-    /// the internal `petgraph` `NodeIndex` values for other nodes may shift;
-    /// the `HashMap<AgentId, NodeIndex>` index is rebuilt to stay consistent.
-    pub fn remove_node(&mut self, id: AgentId) -> bool {
-        if let Some(&ni) = self.index.get(&id) {
-            self.graph.remove_node(ni);
-            // NodeIndex values after the removed node shift down by one in
-            // StableGraph; however, we use the default (non-stable) graph which
-            // swaps the last node into the removed slot.  We must rebuild the
-            // full index.
-            self.index.clear();
-            for idx in self.graph.node_indices() {
-                let agent = self.graph[idx];
-                self.index.insert(agent, idx);
-            }
-            true
-        } else {
-            false
-        }
-    }
-
-    // ── Queries ───────────────────────────────────────────────────────────────
-
-    /// Return all neighbours of `id`.
-    ///
-    /// Returns an empty `Vec` if `id` is not present in the network.
-    pub fn neighbors(&self, id: AgentId) -> Vec<AgentId> {
-        match self.index.get(&id) {
-            Some(&ni) => self.graph.neighbors(ni).map(|nb| self.graph[nb]).collect(),
-            None => Vec::new(),
-        }
-    }
-
-    /// Return the degree (number of incident edges) of `id`.
-    ///
-    /// Returns `0` if `id` is not present.
-    pub fn degree(&self, id: AgentId) -> usize {
-        match self.index.get(&id) {
-            Some(&ni) => self.graph.edges(ni).count(),
-            None => 0,
-        }
-    }
-
-    /// Total number of nodes in the network.
-    pub fn node_count(&self) -> usize {
-        self.graph.node_count()
-    }
-
-    /// Number of connected components (using union-find via [`petgraph`]).
-    pub fn connected_components(&self) -> usize {
-        petgraph::algo::connected_components(&self.graph)
-    }
-
-    /// Returns `true` if `id` exists in the network.
-    pub fn contains(&self, id: AgentId) -> bool {
-        self.index.contains_key(&id)
-    }
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -494,6 +799,23 @@ mod tests {
         assert!(net.neighbors(a).is_empty());
     }
 
+    /// StableGraph keeps surviving indices valid: a node added before a removal
+    /// must still resolve to the right neighbours afterwards.
+    #[test]
+    fn remove_node_keeps_other_indices_valid() {
+        let mut net = SocialNetwork::empty();
+        for id in ids(4) {
+            net.add_node(id);
+        }
+        net.add_edge(AgentId(0), AgentId(3));
+        net.add_edge(AgentId(1), AgentId(3));
+        net.remove_node(AgentId(1));
+        // 0–3 edge must survive, and 3 must still know about 0.
+        assert!(net.neighbors(AgentId(0)).contains(&AgentId(3)));
+        assert!(net.neighbors(AgentId(3)).contains(&AgentId(0)));
+        assert!(!net.neighbors(AgentId(3)).contains(&AgentId(1)));
+    }
+
     // ── connected_components ─────────────────────────────────────────────────
 
     #[test]
@@ -536,5 +858,99 @@ mod tests {
             b.sort();
             assert_eq!(a, b, "neighbours of {id:?} must survive round-trip");
         }
+    }
+
+    #[test]
+    fn serde_format_is_nodes_edges() {
+        // Lock the historical wire shape: a plain { nodes, edges } object.
+        let mut net = SocialNetwork::empty();
+        net.add_node(AgentId(0));
+        net.add_node(AgentId(1));
+        net.add_edge(AgentId(0), AgentId(1));
+        let v: serde_json::Value = serde_json::to_value(&net).unwrap();
+        assert!(v.get("nodes").is_some());
+        assert!(v.get("edges").is_some());
+    }
+
+    // ── #18: directed ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn directed_in_out_neighbors() {
+        let mut net = DiSocialNetwork::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge(AgentId(0), AgentId(1)); // 0 → 1
+        net.add_edge(AgentId(2), AgentId(1)); // 2 → 1
+
+        assert_eq!(net.out_neighbors(AgentId(0)), vec![AgentId(1)]);
+        assert!(net.in_neighbors(AgentId(0)).is_empty());
+
+        let mut inn = net.in_neighbors(AgentId(1));
+        inn.sort();
+        assert_eq!(inn, vec![AgentId(0), AgentId(2)]);
+        assert!(net.out_neighbors(AgentId(1)).is_empty());
+
+        assert_eq!(net.out_degree(AgentId(0)), 1);
+        assert_eq!(net.in_degree(AgentId(1)), 2);
+        assert!(net.is_directed());
+    }
+
+    #[test]
+    fn directed_neighbors_means_outgoing() {
+        let mut net = DiSocialNetwork::empty();
+        net.add_node(AgentId(0));
+        net.add_node(AgentId(1));
+        net.add_edge(AgentId(0), AgentId(1));
+        assert_eq!(net.neighbors(AgentId(0)), vec![AgentId(1)]);
+        assert!(net.neighbors(AgentId(1)).is_empty()); // no arc 1 → 0
+    }
+
+    // ── #18: weighted ────────────────────────────────────────────────────────
+
+    #[test]
+    fn weighted_edge_get_set() {
+        let mut net: WeightedNetwork<f64> = Network::empty();
+        for id in ids(2) {
+            net.add_node(id);
+        }
+        net.add_edge_weighted(AgentId(0), AgentId(1), 0.75);
+        assert_eq!(net.edge_weight(AgentId(0), AgentId(1)), Some(&0.75));
+        // Undirected: weight is visible from the other endpoint too.
+        assert_eq!(net.edge_weight(AgentId(1), AgentId(0)), Some(&0.75));
+
+        *net.edge_weight_mut(AgentId(0), AgentId(1)).unwrap() = 0.25;
+        assert_eq!(net.edge_weight(AgentId(0), AgentId(1)), Some(&0.25));
+
+        // Re-adding overwrites rather than duplicating.
+        net.add_edge_weighted(AgentId(0), AgentId(1), 0.5);
+        assert_eq!(net.edge_count(), 1);
+        assert_eq!(net.edge_weight(AgentId(0), AgentId(1)), Some(&0.5));
+    }
+
+    #[test]
+    fn weighted_directed_asymmetric() {
+        let mut net: DiWeightedNetwork<i32> = Network::empty();
+        for id in ids(2) {
+            net.add_node(id);
+        }
+        net.add_edge_weighted(AgentId(0), AgentId(1), 7);
+        assert_eq!(net.edge_weight(AgentId(0), AgentId(1)), Some(&7));
+        assert_eq!(net.edge_weight(AgentId(1), AgentId(0)), None); // no reverse arc
+    }
+
+    #[test]
+    fn weighted_serde_round_trip() {
+        let mut net: WeightedNetwork<f64> = Network::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge_weighted(AgentId(0), AgentId(1), 1.5);
+        net.add_edge_weighted(AgentId(1), AgentId(2), 2.5);
+        let json = net.to_weighted_json().unwrap();
+        let restored: WeightedNetwork<f64> = Network::from_weighted_json(&json).unwrap();
+        assert_eq!(restored.edge_count(), 2);
+        assert_eq!(restored.edge_weight(AgentId(0), AgentId(1)), Some(&1.5));
+        assert_eq!(restored.edge_weight(AgentId(1), AgentId(2)), Some(&2.5));
     }
 }
