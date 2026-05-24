@@ -4,7 +4,7 @@
 
 > Satisfied, well-fitting employees contribute voluntary knowledge to their team,
 > incrementing the team's knowledge stock each step.
-> **Phase:** Interaction. **Source:** calibration (α_k tunable). **Kind:** tunable.
+> **Phase:** Interaction. **Source:** calibration ($\alpha_k$ tunable). **Kind:** tunable.
 
 [← Back to the mechanism catalog](../mechanisms.md)
 
@@ -20,7 +20,7 @@ nothing; highly satisfied, well-fitting employees can meaningfully accelerate
 the team's collective knowledge growth.
 
 The mechanism is intentionally calibration-based rather than tied to a single
-empirical study: the scaling factor `α_k` is a free parameter used to balance
+empirical study: the scaling factor `$\alpha_k$` is a free parameter used to balance
 knowledge accumulation against the knowledge loss imposed by `knowledge_loss`.
 
 ## 2. Theory & source
@@ -30,15 +30,13 @@ OCB is associated with a broad literature showing that attitudinal outcomes
 (Organ, 1988; Kristof-Brown et al., 2005). socsim's implementation treats this
 contribution as a linear product:
 
-```text
-ΔK_team += α_k · satisfaction · po_fit        (for each employee on that team)
-```
+$$\Delta K_{\text{team}} = \alpha_k \cdot \text{satisfaction} \cdot \text{po\_fit}$$
 
-- `satisfaction` — the employee's current job satisfaction ∈ [0, 1], updated
+- $\text{satisfaction}$ (`Employee.satisfaction`) — the employee's current job satisfaction $\in [0, 1]$, updated
   each step by the `fit` mechanism.
-- `po_fit` — person–organisation fit ∈ [0, 1]; employees who identify with the
+- $\text{po\_fit}$ (`Employee.po_fit`) — person–organisation fit $\in [0, 1]$; employees who identify with the
   organisation's values contribute more.
-- `α_k` (`alpha_k`) — a tunable scaling coefficient (default 0.30); set to
+- $\alpha_k$ (`alpha_k`) — a tunable scaling coefficient (default 0.30); set to
   balance the long-run trajectory of `knowledge_stock` against `knowledge_loss`
   given the modeller's target churn rate.
 

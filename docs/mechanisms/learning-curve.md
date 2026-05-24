@@ -3,7 +3,7 @@
 # Learning curve (`learning_curve`)
 
 > Each employee's productivity rises with tenure through learning-by-doing.
-> **Phase:** Environment. **Source:** Bahk & Gort (1993). **Kind:** empirical (λ).
+> **Phase:** Environment. **Source:** Bahk & Gort (1993). **Kind:** empirical ($\lambda$).
 
 [← Back to the mechanism catalog](../mechanisms.md)
 
@@ -13,7 +13,7 @@
 module. Once per step it ages every employee by one month of tenure and
 recomputes their individual productivity contribution as a concave function of
 that tenure. New hires start near zero productivity and approach their ability
-ceiling `θ` as they accumulate experience — the classic *learning-by-doing*
+ceiling $\theta$ as they accumulate experience — the classic *learning-by-doing*
 effect documented for new manufacturing plants by Bahk & Gort (1993).
 
 It establishes each employee's baseline `productivity`, which downstream
@@ -26,26 +26,23 @@ experience but with diminishing returns, saturating toward a ceiling set by the
 worker's underlying ability. socsim models this with a bounded-exponential
 (modified-exponential) learning curve:
 
-```text
-tenure ← tenure + 1                       (one month per step)
-π = θ · (1 − e^(−λ · tenure))
-```
+$$\text{tenure} \leftarrow \text{tenure} + 1, \qquad \pi = \theta \cdot \left(1 - e^{-\lambda \cdot \text{tenure}}\right)$$
 
-- `θ` (`theta`) — the employee's true ability, the productivity ceiling.
-- `λ` (`lambda_learn`) — the learning rate; larger λ reaches the ceiling faster.
-- `π` (`productivity`) — the effective productivity contribution this step.
+- $\theta$ (`Employee.theta`) — the employee's true ability, the productivity ceiling.
+- $\lambda$ (`lambda_learn`) — the learning rate; larger $\lambda$ reaches the ceiling faster.
+- $\pi$ (`Employee.productivity`) — the effective productivity contribution this step.
 
-At `tenure = 0`, `π = 0`; as `tenure → ∞`, `π → θ`. The marginal gain per month
+At $\text{tenure} = 0$, $\pi = 0$; as $\text{tenure} \to \infty$, $\pi \to \theta$. The marginal gain per month
 shrinks geometrically, reproducing the empirical concave learning curve. Bahk &
 Gort (1993) decompose plant-level learning into capital, labour, and
-organisational components; `λ = 0.15` is set to the midpoint of their reported
+organisational components; $\lambda = 0.15$ is set to the midpoint of their reported
 range as an industry-average default.
 
 ## 3. Data flow
 
 ![learning_curve data flow](../assets/mech-learning-curve.svg)
 
-The mechanism reads `θ` and the (incremented) `tenure` for each employee and
+The mechanism reads $\theta$ and the (incremented) `tenure` for each employee and
 writes back the new `tenure` and `productivity`. No other state is touched.
 
 ## 4. Position in the 6-phase loop
@@ -54,11 +51,11 @@ Runs in **Environment**, the second phase, before any agent decisions or
 interactions. This is deliberate: productivity is part of the "environment" each
 employee acts within during that step, so it must be refreshed first.
 
-- It sets `productivity` to the *individual* baseline `π`.
+- It sets `productivity` to the *individual* baseline $\pi$.
 - Later in the same step, `peer_effect` (Interaction) multiplies that baseline
   by a team factor, and `org_performance` (Reward) sums the result.
 
-Because it only depends on per-employee `θ` and `tenure`, it has no ordering
+Because it only depends on per-employee $\theta$ and `tenure`, it has no ordering
 constraints with other Environment-phase mechanisms.
 
 ## 5. State read/write contract
@@ -67,7 +64,7 @@ constraints with other Environment-phase mechanisms.
 |---|:--:|:--:|---|
 | `Employee.theta` | ✓ | | Productivity ceiling. |
 | `Employee.tenure` | ✓ | ✓ | Incremented by 1 (saturating) each step. |
-| `Employee.productivity` | | ✓ | Overwritten with the individual baseline `π`. |
+| `Employee.productivity` | | ✓ | Overwritten with the individual baseline $\pi$. |
 
 ## 6. Dependencies & ordering constraints
 
@@ -124,7 +121,7 @@ deterministic for a given world state.
 
 `avg_tenure` rises by roughly one month per step (minus churn from `turnover`),
 and each surviving employee's `productivity` climbs along a concave curve toward
-`θ`. In the baseline scenario this is the dominant driver of the early-run
+$\theta$. In the baseline scenario this is the dominant driver of the early-run
 increase in `org_performance` before turnover and hiring reach steady state.
 
 ## 11. References

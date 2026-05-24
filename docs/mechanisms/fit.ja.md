@@ -5,7 +5,7 @@
 > 従業員の職務満足度は，person–job fit と person–organisation fit の
 > 加重ブレンドとして毎ステップ更新され，知覚された適合と態度的成果の間の
 > 経験的なリンクを捉えます．
-> **フェーズ：** Decision．**出典：** Kristof-Brown et al. (2005)．**種別：** empirical（ρ_pj，ρ_po）．
+> **フェーズ：** Decision．**出典：** Kristof-Brown et al. (2005)．**種別：** empirical（$\rho_{\text{pj}}$，$\rho_{\text{po}}$）．
 
 [← Mechanism カタログに戻る](../mechanisms.ja.md)
 
@@ -24,20 +24,19 @@
 ## 2. 理論と出典
 
 Kristof-Brown et al. (2005) は4つのディメンションにわたる適合の結果をメタ分析し，
-職務満足度との相関として ρ ≈ 0.20（person–job）と ρ ≈ 0.07（person–organisation）を報告しています．
+職務満足度との相関として $\rho \approx 0.20$（person–job）と $\rho \approx 0.07$（person–organisation）を報告しています．
 socsim はこれを，実行中の満足度値にブレンドされる線形合成目標として実装しています：
 
-```text
-new_sat      = ρ_pj · pj_fit + ρ_po · po_fit
-satisfaction = clamp(0.5 · satisfaction + 0.5 · new_sat, 0, 1)
-```
+$$\text{sat}_{\text{new}} = \rho_{\text{pj}} \cdot \text{pj\_fit} + \rho_{\text{po}} \cdot \text{po\_fit}$$
 
-- `pj_fit` — person–job fit ∈ [0, 1]；従業員のスキルや興味が職務にどれだけ合っているかを捉える．
-- `po_fit` — person–organisation fit ∈ [0, 1]；文化的・価値観的な整合性を捉える．
-- `ρ_pj`（`rho_pj` = 0.20）— PJ 適合と満足度の経験的相関．
-- `ρ_po`（`rho_po` = 0.07）— PO 適合と満足度の経験的相関．
-- 移動平均の重み 0.5 は固定値；`new_sat` が現在値からずれたとき，半減期は1ステップとなる．
-- 結果は [0, 1] にクランプされる．
+$$\text{satisfaction} \leftarrow \operatorname{clip}_{[0,1]}\!\left(0.5\,\text{satisfaction} + 0.5\,\text{sat}_{\text{new}}\right)$$
+
+- $\text{pj\_fit}$（`Employee.pj_fit`）— person–job fit $\in [0, 1]$；従業員のスキルや興味が職務にどれだけ合っているかを捉える．
+- $\text{po\_fit}$（`Employee.po_fit`）— person–organisation fit $\in [0, 1]$；文化的・価値観的な整合性を捉える．
+- $\rho_{\text{pj}}$（`rho_pj` = 0.20）— PJ 適合と満足度の経験的相関．
+- $\rho_{\text{po}}$（`rho_po` = 0.07）— PO 適合と満足度の経験的相関．
+- 移動平均の重み 0.5 は固定値；$\text{sat}_{\text{new}}$ が現在値からずれたとき，半減期は1ステップとなる．
+- 結果は $[0, 1]$ にクランプされる．
 
 ## 3. データフロー
 
@@ -123,7 +122,7 @@ sim.run()?;
 
 `pj_fit` と `po_fit` が比較的高い分布（例：一様分布 [0.5, 1.0]）から引かれる職場では，
 `satisfaction` は数ステップ以内に安定した水準に収束するはずです．
-`ρ_pj` と `ρ_po` が比較的小さいため，目標 `new_sat` は控えめ（高適合従業員で典型的に 0.07〜0.27），
+$\rho_{\text{pj}}$ と $\rho_{\text{po}}$ が比較的小さいため，目標 $\text{sat}_{\text{new}}$ は控えめ（高適合従業員で典型的に 0.07〜0.27），
 満足度は主に自身の慣性によって駆動されます．
 これは，高い初期満足度で採用された従業員が適合が平凡であっても満足度を維持し，
 逆も同様であることを意味します —

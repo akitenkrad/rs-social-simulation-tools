@@ -4,7 +4,7 @@
 
 > Each employee's productivity is scaled up by the average ability of their team,
 > capturing positive spillovers from high-performing colleagues.
-> **Phase:** Interaction. **Source:** Mas & Moretti (2009). **Kind:** empirical (α_peer).
+> **Phase:** Interaction. **Source:** Mas & Moretti (2009). **Kind:** empirical ($\alpha_{\text{peer}}$).
 
 [← Back to the mechanism catalog](../mechanisms.md)
 
@@ -12,7 +12,7 @@
 
 `peer_effect` models the well-documented phenomenon that workers produce more
 when surrounded by more-able colleagues. After `learning_curve` has established
-each employee's individual baseline productivity `π`, this mechanism applies a
+each employee's individual baseline productivity $\pi$, this mechanism applies a
 multiplicative team-quality factor: an employee on a team whose average ability
 exceeds the organisation-wide mean receives a productivity boost; one on a
 below-average team receives a mild penalty.
@@ -28,22 +28,20 @@ workers who can observe their peer directly. socsim abstracts this to a team-
 level multiplicative factor proportional to the gap between the team's mean
 ability and the organisation-wide baseline:
 
-```text
-π_eff = π · (1 + α_peer · (team_mean_θ / base_mean_θ))
-```
+$$\pi_{\text{eff}} = \pi \cdot \left(1 + \alpha_{\text{peer}} \cdot \frac{\bar\theta_{\text{team}}}{\bar\theta_{\text{base}}}\right)$$
 
-- `π` (`productivity`) — the individual baseline set by `learning_curve`.
-- `team_mean_θ` (`Team.mean_theta`) — the mean ability of the employee's team,
+- $\pi$ (`Employee.productivity`) — the individual baseline set by `learning_curve`.
+- $\bar\theta_{\text{team}}$ (`Team.mean_theta`) — the mean ability of the employee's team,
   recomputed by `org_performance` at the end of the prior step.
-- `base_mean_θ` (`HrWorld.base_mean_theta`) — the organisation-wide ability
+- $\bar\theta_{\text{base}}$ (`HrWorld.base_mean_theta`) — the organisation-wide ability
   baseline set at initialisation; held constant as a reference denominator.
-- `α_peer` (`alpha_peer`) — the empirical peer-effect magnitude (0.17).
+- $\alpha_{\text{peer}}$ (`alpha_peer`) — the empirical peer-effect magnitude (0.17).
 
-When `base_mean_θ ≈ 0` the ratio is treated as 1.0 to avoid division by zero.
+When $\bar\theta_{\text{base}} \approx 0$ the ratio is treated as 1.0 to avoid division by zero.
 
-The ratio `team_mean_θ / base_mean_θ` is near 1.0 for an average team, above
+The ratio $\bar\theta_{\text{team}} / \bar\theta_{\text{base}}$ is near 1.0 for an average team, above
 1.0 for a high-ability team, and below 1.0 for a low-ability one, so the factor
-amplifies or attenuates `π` proportionally.
+amplifies or attenuates $\pi$ proportionally.
 
 ## 3. Data flow
 
@@ -59,7 +57,7 @@ throughout the simulation.
 Runs in **Interaction**, the fourth phase. This placement is deliberate:
 
 - `learning_curve` (Environment, phase 2) must have already set each employee's
-  individual `π` before `peer_effect` can scale it.
+  individual $\pi$ before `peer_effect` can scale it.
 - `org_performance` (Reward, phase 5) then sums the peer-adjusted `productivity`
   values to produce the organisation-level output metric.
 
@@ -80,7 +78,7 @@ step and read here at the start of the next, so the hand-off is cross-step.
 ## 6. Dependencies & ordering constraints
 
 - **Upstream (same step):** `learning_curve` must run first (Environment) to
-  establish the individual baseline `π` that `peer_effect` multiplies.
+  establish the individual baseline $\pi$ that `peer_effect` multiplies.
 - **Upstream (prior step):** `org_performance` must have recomputed
   `Team.mean_theta` for every team at the end of the previous step. If
   `org_performance` is absent, `mean_theta` values may be stale.
@@ -137,7 +135,7 @@ In a simulation that includes `learning_curve`, `peer_effect`, and
 `org_performance`, teams with above-average mean ability should show
 systematically higher aggregate productivity than equal-size low-ability teams.
 The effect scales with the dispersion of `theta` across teams: if `theta` is
-nearly uniform across all employees, the ratio `team_mean_θ / base_mean_θ`
+nearly uniform across all employees, the ratio $\bar\theta_{\text{team}} / \bar\theta_{\text{base}}$
 stays near 1.0 and the mechanism is effectively inert. Positive assortative
 sorting (via selective hiring or turnover) can amplify the peer effect over
 time.

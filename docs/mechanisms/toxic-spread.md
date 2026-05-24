@@ -28,21 +28,18 @@ checked.
 
 Housman & Minor (2015) quantify the cost of toxic workers in a large services
 firm, finding both direct productivity losses and strong peer-contagion effects.
-socsim maps the contagion to a simple network-diffusion model:
+socsim maps the contagion to a simple network-diffusion model: for each toxic
+employee (sorted by `AgentId`), each non-toxic neighbour (sorted by `AgentId`)
+independently becomes toxic with probability $p_{\text{spread}}$:
 
-```text
-for each toxic employee t (sorted by AgentId):
-    for each non-toxic neighbour n of t (sorted by AgentId):
-        if U(0,1) < p_spread:
-            n.is_toxic ← true
-```
+$$P(\text{non-toxic neighbour becomes toxic}) = p_{\text{spread}}$$
 
 Infection decisions are collected first, then applied together, so a newly
 infected employee does not become a source within the same step.
 
-- `p_spread` (`P_SPREAD = 0.46`) — empirical per-edge monthly contagion
+- `p_spread` ($p_{\text{spread}} = 0.46$) — empirical per-edge monthly contagion
   probability (Housman & Minor 2015).
-- The network default is Watts–Strogatz (`k = 4`, `β = 0.1`), giving each
+- The network default is Watts–Strogatz (`k = 4`, $\beta = 0.1$), giving each
   employee roughly four neighbours.
 
 ## 3. Data flow

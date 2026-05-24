@@ -3,7 +3,7 @@
 # Knowledge loss (`knowledge_loss`)
 
 > Departing employees carry away tacit knowledge, permanently reducing their team's knowledge stock.
-> **Phase:** PostStep. **Source:** Nonaka (1994). **Kind:** mixed (φ_tacit empirical; κ, β tunable).
+> **Phase:** PostStep. **Source:** Nonaka (1994). **Kind:** mixed ($\varphi_{\text{tacit}}$ empirical; $\kappa$, $\beta$ tunable).
 
 [← Back to the mechanism catalog](../mechanisms.md)
 
@@ -29,22 +29,20 @@ components: explicit (codifiable, transferable) and tacit (embodied, sticky).
 When a knowledge worker leaves, the tacit fraction is largely irretrievable.
 socsim operationalises this with a tenure-scaled loss formula:
 
-```text
-years = tenure_months / 12
-ΔK    = −κ · φ_tacit · |θ| · years^β
-team.knowledge_stock = max(0,  team.knowledge_stock − |ΔK|)
-```
+$$\text{years} = \frac{\text{tenure}}{12}, \qquad \Delta K = -\,\kappa_{\text{loss}} \cdot \varphi_{\text{tacit}} \cdot |\theta| \cdot \text{years}^{\beta}$$
 
-- `θ` (`Employee.theta`) — the departed employee's ability (absolute value used
+`team.knowledge_stock` $= \max(0,\ \text{team.knowledge\_stock} - |\Delta K|)$
+
+- `Employee.theta` ($\theta$) — the departed employee's ability (absolute value used
   to handle the positive-scale draw).
-- `tenure_months` — months of service at departure; converted to years so the
-  scale of loss matches the OCB inflow measured in knowledge-units per step.
-- `φ_tacit` (`phi_tacit = 0.85`) — empirical tacit-knowledge fraction (Nonaka
+- $\text{years} = \text{tenure\_months} / 12$ — months of service at departure converted to
+  years so the scale of loss matches the OCB inflow measured in knowledge-units per step.
+- $\varphi_{\text{tacit}}$ (`phi_tacit = 0.85`) — empirical tacit-knowledge fraction (Nonaka
   1994); 85 % of a worker's knowledge is tacit and lost on departure.
-- `κ` (`kappa_loss = 0.40`) — tunable scale that sizes the typical leaver's
+- $\kappa_{\text{loss}}$ (`kappa_loss = 0.40`) — tunable scale that sizes the typical leaver's
   drain to a few months of team OCB inflow, preventing `knowledge_stock` collapse.
-- `β` (`beta_loss = 1.0`) — tunable exponent; at the default of 1.0 loss is
-  linear in tenure-years. Values above 1.0 make long-tenured leavers
+- $\beta$ (`beta_loss = 1.0`) — tunable exponent; at the default of 1.0 loss is
+  linear in $\text{years}$. Values above 1.0 make long-tenured leavers
   disproportionately costly; values below 1.0 compress the tenure effect.
 
 ## 3. Data flow
@@ -73,13 +71,13 @@ convention.
 
 | Field | Read | Write | Notes |
 |---|:--:|:--:|---|
-| `HrWorld.departed_this_step` | ✓ | ✓ | Reads `(id, θ, tenure, team)` tuples; cleared at end. |
+| `HrWorld.departed_this_step` | ✓ | ✓ | Reads `(id, $\theta$, tenure, team)` tuples; cleared at end. |
 | `Team.knowledge_stock` | ✓ | ✓ | Decremented per leaver; floored at 0. |
 
 ## 6. Dependencies & ordering constraints
 
 - **Upstream (same step):** `turnover` (Decision) must have run and populated
-  `departed_this_step` with `(id, θ, tenure_months, team_idx)` tuples.
+  `departed_this_step` with `(id, $\theta$, tenure_months, team_idx)` tuples.
 - **Upstream (same step):** `org_performance` (Reward) reads
   `departed_this_step.len()` to compute `turnover_rate` and must therefore run
   **before** `knowledge_loss` clears the buffer. The phase ordering
@@ -143,7 +141,7 @@ should reach a roughly stable level once hiring and turnover approach steady
 state. A burst of turnover (from the Krackhardt cascade, for example) causes a
 visible dip in `knowledge_stock` that recovers over subsequent months as OCB
 replenishes the stock and new hires accumulate tenure. Long-tenured leavers
-(high `years`) cause disproportionately large drops, especially if `beta_loss`
+(high $\text{years}$) cause disproportionately large drops, especially if `beta_loss`
 is tuned above 1.0.
 
 ## 11. References

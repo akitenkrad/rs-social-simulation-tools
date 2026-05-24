@@ -2,7 +2,7 @@
 
 # 組織パフォーマンス (`org_performance`)
 
-> 従業員ごとの生産性と労働力メトリクスを集計し，次ステップのピア効果のためにチームの平均 θ を再計算する．
+> 従業員ごとの生産性と労働力メトリクスを集計し，次ステップのピア効果のためにチームの平均 $\theta$ を再計算する．
 > **フェーズ:** Reward．**出典:** 集計処理．**種別:** n/a．
 
 [← Mechanism カタログに戻る](../mechanisms.ja.md)
@@ -17,12 +17,9 @@
 
 単一の較正出典はない；4つのメトリクスは標準的な HR アナリティクスの集計値である：
 
-```text
-org_performance  = Σ Employee.productivity        (sorted by AgentId)
-turnover_rate    = |departed_this_step| / max(1, headcount_at_step_start)
-avg_tenure       = mean(Employee.tenure)           (over current employees)
-knowledge_stock  = Σ Team.knowledge_stock
-```
+$$\text{org\_performance} = \sum_{i} \pi_i, \qquad \text{turnover\_rate} = \frac{\lvert\text{departed\_this\_step}\rvert}{\max(1,\ \text{headcount\_at\_step\_start})}$$
+
+$$\text{avg\_tenure} = \frac{1}{|E|}\sum_{i \in E} \text{tenure}_i, \qquad \text{knowledge\_stock} = \sum_{k} K_k$$
 
 ソートされた AgentId 順で生産性を合計することで，`BTreeMap` トラバーサルの実装詳細に関わらず f64 の累算が決定論的になる．`headcount_at_step_start` は `turnover` が削除前に捕捉するため，月次離職率の正しい分母が与えられる．
 
@@ -106,7 +103,7 @@ sim.run()?;
 
 ## 10. 期待される動作
 
-`org_performance`（メトリクス）は，平均在職期間の蓄積と `learning_curve` による生産性の `θ` への向上に伴い，最初の 12〜24 ステップで上昇する．その後，採用と離職がバランスすると安定する．離職の急増は一時的な低下を引き起こす（新規採用者の生産性はほぼゼロ）；知識ショックイベントは `knowledge_stock` 系列に現れる．`avg_tenure` 系列は労働力安定性の補完的な視点を提供する．
+`org_performance`（メトリクス）は，平均在職期間の蓄積と `learning_curve` による生産性の $\theta$ への向上に伴い，最初の 12〜24 ステップで上昇する．その後，採用と離職がバランスすると安定する．離職の急増は一時的な低下を引き起こす（新規採用者の生産性はほぼゼロ）；知識ショックイベントは `knowledge_stock` 系列に現れる．`avg_tenure` 系列は労働力安定性の補完的な視点を提供する．
 
 ## 11. 参考文献
 

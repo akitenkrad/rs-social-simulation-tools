@@ -31,17 +31,15 @@ onboarding moves embeddedness by a modest, bounded amount.
 The socialization formula blends two components — intrinsic fit and received
 support — into an integration index:
 
-```text
-support       ~ U[0.4, 1.0)             (random organisational support)
+$$\text{support} \sim \mathcal{U}[0.4, 1.0)$$
 
-socialization  = clamp01(0.5 · po_fit + 0.5 · support)
+$$\text{socialization} = \operatorname{clip}_{[0,1]}\!\left(0.5\,\text{po\_fit} + 0.5\,\text{support}\right)$$
 
-embeddedness   = clamp01(embeddedness + 0.1 · socialization)
-```
+$$\text{embeddedness} \leftarrow \operatorname{clip}_{[0,1]}\!\left(\text{embeddedness} + 0.1\,\text{socialization}\right)$$
 
 - `po_fit` — the new hire's person–organisation fit, assigned at construction
-  and fixed. Employees with higher PO fit integrate faster.
-- `support` — uniform draw in `[0.4, 1.0)`. The lower bound of 0.4 reflects
+  and fixed. Employees with higher $\text{po\_fit}$ integrate faster.
+- $\text{support}$ — uniform draw in $\mathcal{U}[0.4, 1.0)$. The lower bound of 0.4 reflects
   the assumption that organisations always provide at least some baseline
   onboarding; the upper bound below 1.0 means support is never perfect.
 - The equal-weight blend (0.5/0.5) gives the two components symmetric
@@ -49,7 +47,7 @@ embeddedness   = clamp01(embeddedness + 0.1 · socialization)
 - The 0.1 embeddedness increment is a small per-step nudge that accumulates
   over subsequent steps through the natural dynamics of the simulation
   (network growth, tenure, etc.) rather than a single large initialisation.
-- All values are clamped to `[0, 1]` to stay within valid ranges.
+- All values are clamped to $[0, 1]$ to stay within valid ranges.
 
 There is no published citation for this specific functional form; it is a
 calibration choice designed to produce realistic onboarding dynamics when
@@ -173,11 +171,11 @@ same seed in the same sequence.
 In a baseline scenario (with `hiring` and `turnover` active):
 
 - Each new hire starts `socialization` with a `po_fit`-dependent floor and a
-  random support boost. A hire with `po_fit = 0.8` and `support = 0.7` would
-  receive `socialization = clamp01(0.5·0.8 + 0.5·0.7) = 0.75`.
-- The corresponding `embeddedness` bump of `0.1 × 0.75 = 0.075` is small but
+  random support boost. A hire with $\text{po\_fit} = 0.8$ and $\text{support} = 0.7$ would
+  receive $\text{socialization} = \operatorname{clip}_{[0,1]}(0.5 \times 0.8 + 0.5 \times 0.7) = 0.75$.
+- The corresponding `embeddedness` bump of $0.1 \times 0.75 = 0.075$ is small but
   meaningful: it lowers the new hire's quit probability in `turnover` by
-  roughly 0.075 × `quit_embed_sens` logit units in the *next* step, reducing
+  roughly $0.075 \times \text{quit\_embed\_sens}$ logit units in the *next* step, reducing
   the chance of immediate re-attrition.
 - Without `socialization`, new hires begin with `embeddedness = 0` and have
   markedly higher quit probability in month 1, creating unrealistic "day-one

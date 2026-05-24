@@ -3,7 +3,7 @@
 # Turnover (`turnover`)
 
 > Each employee decides whether to quit based on embeddedness, satisfaction, person–organisation fit, and network contagion.
-> **Phase:** Decision. **Source:** Kristof-Brown et al. (2005) + Krackhardt & Porter (1986). **Kind:** mixed (empirical ρ + tunable logit weights).
+> **Phase:** Decision. **Source:** Kristof-Brown et al. (2005) + Krackhardt & Porter (1986). **Kind:** mixed (empirical $\rho$ + tunable logit weights).
 
 [← Back to the mechanism catalog](../mechanisms.md)
 
@@ -32,28 +32,30 @@ well-defined denominator for the turnover rate.
 
 The quit decision follows a standard logistic model:
 
-```text
-logit = BASE_QUIT_LOGIT
-      + QUIT_EMBED_SENS · (1 − embeddedness)
-      + QUIT_SAT_SENS   · (1 − satisfaction)
-      + ρ_po_turn       · po_fit
-      + QUIT_CASCADE_BUMP · recent_quit_neighbors
+$$\begin{aligned}
+\ell = {}& \text{BASE\_QUIT\_LOGIT}
+       + \text{QUIT\_EMBED\_SENS}\,(1-\text{embeddedness}) \\
+     & + \text{QUIT\_SAT\_SENS}\,(1-\text{satisfaction})
+       + \rho_{\text{po\_turn}}\cdot\text{po\_fit}
+       + \text{QUIT\_CASCADE\_BUMP}\cdot n_{\text{quit}}
+\end{aligned}$$
 
-p_quit = logistic(logit) = 1 / (1 + e^(−logit))
+$$p_{\text{quit}} = \sigma(\ell) = \frac{1}{1 + e^{-\ell}}$$
 
-if ctx.rng.gen::<f64>() < p_quit  →  employee quits
-```
+($n_{\text{quit}} = \text{recent\_quit\_neighbors}$.)
+
+If `ctx.rng.gen::<f64>()` $< p_{\text{quit}}$, the employee quits.
 
 - `BASE_QUIT_LOGIT` (−4.82) sets the baseline monthly quit rate of roughly
   0.8 % in isolation — calibrated to industry averages.
 - `QUIT_EMBED_SENS` (1.0) and `QUIT_SAT_SENS` (0.8) are tunable sensitivity
   weights on the two "push" factors. Higher embeddedness and higher satisfaction
-  both lower quit probability.
-- `ρ_po_turn` (−0.35) is the empirical correlation between PO fit and turnover
+  both lower $p_{\text{quit}}$.
+- $\rho_{\text{po\_turn}}$ (−0.35) is the empirical correlation between PO fit and turnover
   intention, drawn from the meta-analysis by Kristof-Brown et al. (2005); its
   negative sign reflects that better fit reduces quitting.
 - `QUIT_CASCADE_BUMP` (0.30) is a tunable contagion weight. Each neighbour who
-  quit last month adds 0.30 to the logit, reproducing the "snowball" pattern
+  quit last month adds 0.30 to $\ell$, reproducing the "snowball" pattern
   documented by Krackhardt & Porter (1986).
 
 **Cascade mechanics (post-quit):**  
@@ -94,7 +96,7 @@ in the same step.
 |---|:--:|:--:|---|
 | `HrWorld.employees` | ✓ | ✓ | Quitters are removed. |
 | `HrWorld.network` | ✓ | ✓ | Nodes and edges for quitters removed. |
-| `HrWorld.departed_this_step` | | ✓ | Populated with `(id, θ, tenure, team)` per quitter; consumed by `knowledge_loss` and `org_performance`. |
+| `HrWorld.departed_this_step` | | ✓ | Populated with `(id, $\theta$, tenure, team)` per quitter; consumed by `knowledge_loss` and `org_performance`. |
 | `HrWorld.headcount_at_step_start` | | ✓ | Set once at the top of `apply`, before any removal. |
 | `Employee.embeddedness` | ✓ | ✓ | Read for quit logit; decremented 0.02 for cascade neighbours. |
 | `Employee.satisfaction` | ✓ | | Read for quit logit. |

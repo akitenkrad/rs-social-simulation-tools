@@ -15,19 +15,14 @@
 
 ## 2. 理論と出典
 
-Housman & Minor (2015) は大規模サービス企業における有害労働者のコストを定量化し，直接的な生産性損失と強いピア感染効果の両方を示した．socsim はこの感染をシンプルなネットワーク拡散モデルに対応付ける：
+Housman & Minor (2015) は大規模サービス企業における有害労働者のコストを定量化し，直接的な生産性損失と強いピア感染効果の両方を示した．socsim はこの感染をシンプルなネットワーク拡散モデルに対応付ける：有害な従業員（`AgentId` でソート）ごとに，非有害な隣接者（`AgentId` でソート）が独立に確率 $p_{\text{spread}}$ で有害になる：
 
-```text
-for each toxic employee t (sorted by AgentId):
-    for each non-toxic neighbour n of t (sorted by AgentId):
-        if U(0,1) < p_spread:
-            n.is_toxic ← true
-```
+$$P(\text{non-toxic neighbour becomes toxic}) = p_{\text{spread}}$$
 
 感染の決定はまとめて収集されてから一括適用されるため，同じステップ内で新たに感染した従業員が感染源になることはない．
 
-- `p_spread`（`P_SPREAD = 0.46`）— 経験的なエッジごとの月次感染確率（Housman & Minor 2015）．
-- ネットワークのデフォルトは Watts–Strogatz（`k = 4`, `β = 0.1`）で，各従業員におよそ4人の隣接者を持たせる．
+- `p_spread`（$p_{\text{spread}} = 0.46$）— 経験的なエッジごとの月次感染確率（Housman & Minor 2015）．
+- ネットワークのデフォルトは Watts–Strogatz（`k = 4`, $\beta = 0.1$）で，各従業員におよそ4人の隣接者を持たせる．
 
 ## 3. データフロー
 

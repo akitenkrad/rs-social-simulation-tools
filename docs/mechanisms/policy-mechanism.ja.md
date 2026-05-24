@@ -37,6 +37,14 @@ Collect mode:
     buffer.begin_decision(agent_id, obs, action)    (record for trainer)
 ```
 
+形式的には，収集モードではポリシー分布から行動をサンプリングし，推論モードでは貪欲な行動を選択する：
+
+$$a_t \sim \pi_\theta(\,\cdot \mid o_t) \quad(\text{collect}), \qquad a_t = \arg\max_{a} \pi_\theta(a \mid o_t) \quad(\text{inference})$$
+
+ポリシーはエピソード間でオフラインに REINFORCE 勾配推定で学習する：
+
+$$\nabla_\theta J = \mathbb{E}\!\left[\sum_t \nabla_\theta \log \pi_\theta(a_t \mid o_t)\, G_t\right]$$
+
 ポリシーは `Rc<RefCell<Policy>>` で共有されるため，`MarlTrainer` がエピソード間で重みを更新する一方で，メカニズムは実行中に同じ参照を保持する．
 
 ## 3. データフロー

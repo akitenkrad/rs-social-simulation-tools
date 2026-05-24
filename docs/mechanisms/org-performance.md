@@ -3,7 +3,7 @@
 # Org performance (`org_performance`)
 
 > Aggregates per-employee productivity and workforce metrics, and recomputes
-> team mean-θ for the next step's peer effect.
+> team mean-$\theta$ for the next step's peer effect.
 > **Phase:** Reward. **Source:** aggregation. **Kind:** n/a.
 
 [← Back to the mechanism catalog](../mechanisms.md)
@@ -26,12 +26,9 @@ becomes stale, which silently breaks `peer_effect`.
 There is no single calibration source; the four metrics are standard HR
 analytics aggregates:
 
-```text
-org_performance  = Σ Employee.productivity        (sorted by AgentId)
-turnover_rate    = |departed_this_step| / max(1, headcount_at_step_start)
-avg_tenure       = mean(Employee.tenure)           (over current employees)
-knowledge_stock  = Σ Team.knowledge_stock
-```
+$$\text{org\_performance} = \sum_{i} \pi_i, \qquad \text{turnover\_rate} = \frac{\lvert\text{departed\_this\_step}\rvert}{\max(1,\ \text{headcount\_at\_step\_start})}$$
+
+$$\text{avg\_tenure} = \frac{1}{|E|}\sum_{i \in E} \text{tenure}_i, \qquad \text{knowledge\_stock} = \sum_{k} K_k$$
 
 Summing productivity in sorted AgentId order makes the f64 accumulation
 deterministic regardless of `BTreeMap` traversal implementation details.
@@ -139,7 +136,7 @@ ensure deterministic f64 accumulation. All other aggregations (`avg_tenure`,
 ## 10. Expected behaviour
 
 `org_performance` (the metric) should rise during the first 12–24 steps as
-average tenure accumulates and `learning_curve` lifts productivity toward `θ`.
+average tenure accumulates and `learning_curve` lifts productivity toward $\theta$.
 It then stabilises when hiring and turnover balance. Turnover spikes cause
 transient dips (new hires have near-zero productivity); knowledge-shock events
 are visible in the `knowledge_stock` series. The `avg_tenure` series provides a

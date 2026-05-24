@@ -3,7 +3,7 @@
 # Hiring (`hiring`)
 
 > Each team is refilled to its target size by sampling new employees whose ability is drawn from a Normal distribution and filtered through a selection signal.
-> **Phase:** Decision. **Source:** Schmidt & Hunter (1998). **Kind:** empirical (ρ_SI).
+> **Phase:** Decision. **Source:** Schmidt & Hunter (1998). **Kind:** empirical ($\rho_{\text{SI}}$).
 
 [← Back to the mechanism catalog](../mechanisms.md)
 
@@ -11,7 +11,7 @@
 
 `hiring` runs once per step, after `turnover` has removed quitters, and
 refills every team that is below its `target_team_size`. For each vacancy it
-draws a candidate's true ability `θ` from a calibrated Normal distribution,
+draws a candidate's true ability $\theta$ from a calibrated Normal distribution,
 constructs a selection signal that blends the standardised ability score with
 measurement noise (modelling an imperfect assessment instrument), and then
 hires unconditionally. The new employee is connected to up to two existing team
@@ -28,21 +28,15 @@ The selection model follows Schmidt & Hunter's (1998) meta-analytic framework
 for the validity of personnel selection. The core idea is that a selection
 instrument captures only a noisy signal of true ability:
 
-```text
-θ ~ N(THETA_MEAN=1.0, THETA_SD=0.2), floored at THETA_FLOOR=0.1
+$$\theta \sim \mathcal{N}(\theta_{\text{mean}}, \theta_{\text{sd}}^2), \qquad \theta \leftarrow \max(\theta, \theta_{\text{floor}})$$
 
-z_θ = (θ − THETA_MEAN) / THETA_SD          (standardise)
+$$\text{signal} = \rho_{\text{SI}}\, z_\theta + \sqrt{1 - \rho_{\text{SI}}^2}\;\varepsilon, \qquad z_\theta = \frac{\theta - \theta_{\text{mean}}}{\theta_{\text{sd}}}, \quad \varepsilon \sim \mathcal{N}(0,1)$$
 
-ε ~ N(0, 1)                                (measurement noise)
-
-signal = ρ_SI · z_θ + √(1 − ρ_SI²) · ε
-```
-
-- `ρ_SI` (0.51) is the empirical selection validity from Schmidt & Hunter
+- $\rho_{\text{SI}}$ (0.51) is the empirical selection validity from Schmidt & Hunter
   (1998) — the correlation between the selection signal and true job
-  performance. A perfect instrument would give `ρ_SI = 1`; a random one
-  would give `ρ_SI = 0`.
-- The construction ensures that `Var(signal) = 1` regardless of `ρ_SI`, so
+  performance. A perfect instrument would give $\rho_{\text{SI}} = 1$; a random one
+  would give $\rho_{\text{SI}} = 0$.
+- The construction ensures that $\operatorname{Var}(\text{signal}) = 1$ regardless of $\rho_{\text{SI}}$, so
   the signal is properly standardised.
 - In the current implementation, hiring is **unconditional**: the signal is
   computed and recorded in the event log but does not yet gate the hire
@@ -60,7 +54,7 @@ team members in the Watts–Strogatz social network.
 
 ![hiring data flow](../assets/mech-hiring.svg)
 
-For each team deficit, `hiring` samples `θ` and `ε` from `ctx.rng`, inserts a
+For each team deficit, `hiring` samples $\theta$ and $\varepsilon$ from `ctx.rng`, inserts a
 new `Employee` record, adds a network node with up to two edges, and appends
 the new agent's ID to `new_hires_this_step`. The `socialization` mechanism
 then consumes that list later in the same step.
@@ -174,8 +168,8 @@ sim.run()?;
 
 ## 9. Determinism & RNG
 
-`hiring` draws from `ctx.rng` for every new hire: one `Normal` sample for `θ`,
-one `Normal` sample for `ε` (the noise term in the selection signal), and one
+`hiring` draws from `ctx.rng` for every new hire: one `Normal` sample for $\theta$,
+one `Normal` sample for $\varepsilon$ (the noise term in the selection signal), and one
 `Bernoulli` draw for `is_toxic`. Network edge targets (up to 2 team members)
 are also sampled from `ctx.rng`. Because the number of hires per step is
 determined by the team-deficit counts — which are themselves deterministic for a
@@ -193,7 +187,7 @@ In a baseline scenario:
   `learning_curve`). The team's mean productivity dips briefly after a wave
   of attrition and refilling, then recovers over the following months as new
   hires climb the learning curve.
-- Raising `rho_si` toward 1.0 concentrates incoming `θ` values toward
+- Raising `rho_si` toward 1.0 concentrates incoming $\theta$ values toward
   higher-ability candidates (the signal tracks ability more accurately),
   which gradually lifts `org_performance` in long runs.
 - `p_toxic = 0.04` means that roughly 1 in 25 new hires is toxic at entry,

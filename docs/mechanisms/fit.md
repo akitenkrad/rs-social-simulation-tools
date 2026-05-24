@@ -5,7 +5,7 @@
 > An employee's job satisfaction is updated each step as a weighted blend of
 > person–job and person–organisation fit, capturing the empirical link between
 > perceived fit and attitudinal outcomes.
-> **Phase:** Decision. **Source:** Kristof-Brown et al. (2005). **Kind:** empirical (ρ_pj, ρ_po).
+> **Phase:** Decision. **Source:** Kristof-Brown et al. (2005). **Kind:** empirical ($\rho_{\text{pj}}$, $\rho_{\text{po}}$).
 
 [← Back to the mechanism catalog](../mechanisms.md)
 
@@ -26,24 +26,23 @@ as the central attitudinal gateway in the HR lifecycle module.
 ## 2. Theory & source
 
 Kristof-Brown et al. (2005) meta-analysed the consequences of fit across four
-dimensions; they report correlations of ρ ≈ 0.20 (person–job) and ρ ≈ 0.07
+dimensions; they report correlations of $\rho \approx 0.20$ (person–job) and $\rho \approx 0.07$
 (person–organisation) with job satisfaction. socsim implements this as a linear
 composite target that is blended into the running satisfaction value:
 
-```text
-new_sat      = ρ_pj · pj_fit + ρ_po · po_fit
-satisfaction = clamp(0.5 · satisfaction + 0.5 · new_sat, 0, 1)
-```
+$$\text{sat}_{\text{new}} = \rho_{\text{pj}} \cdot \text{pj\_fit} + \rho_{\text{po}} \cdot \text{po\_fit}$$
 
-- `pj_fit` — person–job fit ∈ [0, 1]; captures how well the employee's skills
+$$\text{satisfaction} \leftarrow \operatorname{clip}_{[0,1]}\!\left(0.5\,\text{satisfaction} + 0.5\,\text{sat}_{\text{new}}\right)$$
+
+- $\text{pj\_fit}$ (`Employee.pj_fit`) — person–job fit $\in [0, 1]$; captures how well the employee's skills
   and interests match their role.
-- `po_fit` — person–organisation fit ∈ [0, 1]; captures cultural and values
+- $\text{po\_fit}$ (`Employee.po_fit`) — person–organisation fit $\in [0, 1]$; captures cultural and values
   alignment.
-- `ρ_pj` (`rho_pj` = 0.20) — empirical correlation of PJ fit with satisfaction.
-- `ρ_po` (`rho_po` = 0.07) — empirical correlation of PO fit with satisfaction.
+- $\rho_{\text{pj}}$ (`rho_pj` = 0.20) — empirical correlation of PJ fit with satisfaction.
+- $\rho_{\text{po}}$ (`rho_po` = 0.07) — empirical correlation of PO fit with satisfaction.
 - The moving-average weight 0.5 is fixed; it produces a half-life of one step
-  when `new_sat` deviates from the current value.
-- The result is clamped to [0, 1].
+  when $\text{sat}_{\text{new}}$ deviates from the current value.
+- The result is clamped to $[0, 1]$.
 
 ## 3. Data flow
 
@@ -133,8 +132,8 @@ fully deterministic for a given world state.
 
 In a workforce where `pj_fit` and `po_fit` are drawn from reasonably high
 distributions (e.g., uniform [0.5, 1.0]), `satisfaction` should converge
-towards a stable level within a handful of steps. Because `ρ_pj` and `ρ_po`
-are relatively small, the target `new_sat` is modest (typically 0.07–0.27 for
+towards a stable level within a handful of steps. Because $\rho_{\text{pj}}$ and $\rho_{\text{po}}$
+are relatively small, the target $\text{sat}_{\text{new}}$ is modest (typically 0.07–0.27 for
 high-fit employees), and satisfaction is primarily driven by its own inertia.
 This means that employees hired with high initial satisfaction retain it even
 when fit is mediocre, and vice versa — matching the empirical finding that

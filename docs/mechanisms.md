@@ -108,8 +108,8 @@ documentation** so this catalog stays in sync with what is implemented. Use the
 template, and complete this checklist:
 
 1. **English page** — `docs/mechanisms/<slug>.md`, canonical, following the
-   eleven-section structure above (Overview; Theory & source with plain-text
-   math in ` ```text ` blocks; Data flow; Position in the 6-phase loop; State
+   eleven-section structure above (Overview; Theory & source with LaTeX math —
+   `$$...$$` blocks and inline `$...$`; Data flow; Position in the 6-phase loop; State
    read/write contract; Dependencies & ordering; Parameters — distinguishing
    empirical ρ from tunable scales; How to apply with TOML + library mode;
    Determinism & RNG; Expected behaviour; References). First line is the

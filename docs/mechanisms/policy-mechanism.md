@@ -55,6 +55,16 @@ Collect mode:
     buffer.begin_decision(agent_id, obs, action)    (record for trainer)
 ```
 
+Formally, in collect mode the action is drawn from the policy distribution; in
+inference mode the greedy action is taken:
+
+$$a_t \sim \pi_\theta(\,\cdot \mid o_t) \quad(\text{collect}), \qquad a_t = \arg\max_{a} \pi_\theta(a \mid o_t) \quad(\text{inference})$$
+
+The policy is trained offline between episodes with the REINFORCE gradient
+estimate:
+
+$$\nabla_\theta J = \mathbb{E}\!\left[\sum_t \nabla_\theta \log \pi_\theta(a_t \mid o_t)\, G_t\right]$$
+
 The policy is shared via `Rc<RefCell<Policy>>` so the `MarlTrainer` can update
 weights between episodes while the mechanism holds the same reference during a
 run.
