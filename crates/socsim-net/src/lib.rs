@@ -251,6 +251,18 @@ where
         }
     }
 
+    /// Remove the edge between `a` and `b` (the arc `a → b` for directed
+    /// graphs).  Returns `true` if an edge was removed.
+    pub fn remove_edge(&mut self, a: AgentId, b: AgentId) -> bool {
+        if let (Some(&na), Some(&nb)) = (self.index.get(&a), self.index.get(&b)) {
+            if let Some(e) = self.directed_find_edge(na, nb) {
+                self.graph.remove_edge(e);
+                return true;
+            }
+        }
+        false
+    }
+
     /// Remove a node and all its incident edges from the network.
     ///
     /// Returns `true` if the node existed, `false` otherwise.
@@ -293,11 +305,39 @@ where
     /// i.e. heads of arcs `id → x`); use [`in_neighbors`](Self::in_neighbors)
     /// for predecessors.  Returns an empty `Vec` if `id` is not present.
     ///
+    /// This allocates a fresh `Vec` per call; for hot loops prefer
+    /// [`neighbors_into`](Self::neighbors_into) (reuse a buffer) or
+    /// [`neighbors_iter`](Self::neighbors_iter) (no heap allocation).
     pub fn neighbors(&self, id: AgentId) -> Vec<AgentId> {
-        match self.index.get(&id) {
-            Some(&ni) => self.graph.neighbors(ni).map(|nb| self.graph[nb]).collect(),
-            None => Vec::new(),
+        let mut out = Vec::new();
+        self.neighbors_into(id, &mut out);
+        out
+    }
+
+    /// Like [`neighbors`](Self::neighbors), but writes into a caller-supplied
+    /// buffer.
+    ///
+    /// `out` is cleared and then filled with the neighbours of `id`.  Reusing a
+    /// single `Vec` across many calls avoids a per-call heap allocation,
+    /// mirroring `socsim-grid`'s `neighbors_into`.
+    pub fn neighbors_into(&self, id: AgentId, out: &mut Vec<AgentId>) {
+        out.clear();
+        if let Some(&ni) = self.index.get(&id) {
+            // For directed graphs, `neighbors` already means "outgoing".
+            out.extend(self.graph.neighbors(ni).map(|nb| self.graph[nb]));
         }
+    }
+
+    /// A non-allocating iterator over the neighbours of `id` (successors for
+    /// directed networks), borrowing from `self`.
+    ///
+    /// Yields nothing if `id` is not present.  No heap `Vec` is allocated.
+    pub fn neighbors_iter(&self, id: AgentId) -> impl Iterator<Item = AgentId> + '_ {
+        self.index
+            .get(&id)
+            .copied()
+            .into_iter()
+            .flat_map(move |ni| self.graph.neighbors(ni).map(move |nb| self.graph[nb]))
     }
 
     /// Return the degree of `id`.
@@ -952,5 +992,66 @@ mod tests {
         assert_eq!(restored.edge_count(), 2);
         assert_eq!(restored.edge_weight(AgentId(0), AgentId(1)), Some(&1.5));
         assert_eq!(restored.edge_weight(AgentId(1), AgentId(2)), Some(&2.5));
+    }
+
+    // ── #19: zero-alloc / remove_edge ──────────────────────────────────────────
+
+    #[test]
+    fn neighbors_into_matches_neighbors() {
+        let mut rng = SimRng::from_seed(5);
+        let ids = ids(12);
+        let net = SocialNetwork::erdos_renyi(&ids, 0.4, &mut rng);
+        let mut buf = Vec::new();
+        for &id in &ids {
+            net.neighbors_into(id, &mut buf);
+            let mut a = buf.clone();
+            let mut b = net.neighbors(id);
+            a.sort();
+            b.sort();
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn neighbors_iter_matches_neighbors() {
+        let mut rng = SimRng::from_seed(6);
+        let ids = ids(12);
+        let net = SocialNetwork::erdos_renyi(&ids, 0.4, &mut rng);
+        for &id in &ids {
+            let mut a: Vec<AgentId> = net.neighbors_iter(id).collect();
+            let mut b = net.neighbors(id);
+            a.sort();
+            b.sort();
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn remove_edge_works() {
+        let mut net = SocialNetwork::empty();
+        for id in ids(3) {
+            net.add_node(id);
+        }
+        net.add_edge(AgentId(0), AgentId(1));
+        net.add_edge(AgentId(1), AgentId(2));
+        assert!(net.remove_edge(AgentId(0), AgentId(1)));
+        assert!(!net.neighbors(AgentId(0)).contains(&AgentId(1)));
+        assert!(!net.neighbors(AgentId(1)).contains(&AgentId(0)));
+        // 1–2 untouched.
+        assert!(net.neighbors(AgentId(1)).contains(&AgentId(2)));
+        // Removing a missing edge returns false.
+        assert!(!net.remove_edge(AgentId(0), AgentId(2)));
+    }
+
+    #[test]
+    fn remove_edge_directed_respects_orientation() {
+        let mut net = DiSocialNetwork::empty();
+        net.add_node(AgentId(0));
+        net.add_node(AgentId(1));
+        net.add_edge(AgentId(0), AgentId(1)); // 0 → 1
+                                              // Removing the reverse arc fails; the forward arc remains.
+        assert!(!net.remove_edge(AgentId(1), AgentId(0)));
+        assert!(net.remove_edge(AgentId(0), AgentId(1)));
+        assert_eq!(net.edge_count(), 0);
     }
 }
