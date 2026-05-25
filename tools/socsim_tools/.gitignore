@@ -1,0 +1,12 @@
+# Python build/venv artifacts
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# uv lockfile (library package — consumers resolve their own)
+uv.lock
