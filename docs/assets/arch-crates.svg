@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>socsim crate workspace dependency graph</title>
-<desc>The thirteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-hr-lifecycle use the green accent, while the library-only crates with no socsim dependencies — socsim-marl (burn), socsim-llm and socsim-results — are drawn with dashed borders.</desc>
+<desc>The fourteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-hr-lifecycle use the green accent, while the library-only crates — socsim-marl (burn), socsim-social-dynamics (depends on socsim-core only), socsim-llm and socsim-results — are drawn with dashed borders.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -24,7 +24,7 @@
 
 <rect x="3" y="3" width="994" height="614" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
 
-<text class="title" x="40" y="48" font-size="24" fill="#2C2C2A">Crate workspace — 13 crates, three layers</text>
+<text class="title" x="40" y="48" font-size="24" fill="#2C2C2A">Crate workspace — 14 crates, three layers</text>
 <text class="body"  x="40" y="74" font-size="13.5" fill="#6B6A64">A binary spine over a dependency-free foundation, beside an orthogonal band of optional / library-only crates.</text>
 
 <!-- ===== binary spine (left) ===== -->
@@ -106,26 +106,32 @@
 <!-- library-only (dashed) -->
 <text class="body" x="638" y="338" font-size="11.5" fill="#534AB7" font-weight="700">Library-only — not in the socsim binary</text>
 
-<rect x="638" y="348" width="306" height="50" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
-<text class="mono" x="654" y="369" font-size="12.5" fill="#332E6E">socsim-marl</text>
-<text class="body" x="654" y="385" font-size="10" fill="#6B6A64">learnable policies (→ engine, core)</text>
-<rect x="858" y="356" width="74" height="20" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.9"/>
-<text class="body" x="895" y="370" font-size="9.5" fill="#534AB7" text-anchor="middle">burn</text>
+<rect x="638" y="346" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text class="mono" x="654" y="364" font-size="12.5" fill="#332E6E">socsim-marl</text>
+<text class="body" x="654" y="379" font-size="10" fill="#6B6A64">learnable policies (→ engine, core)</text>
+<rect x="858" y="352" width="74" height="20" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.9"/>
+<text class="body" x="895" y="366" font-size="9.5" fill="#534AB7" text-anchor="middle">burn</text>
 
-<rect x="638" y="406" width="306" height="50" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
-<text class="mono" x="654" y="427" font-size="12.5" fill="#332E6E">socsim-llm</text>
-<text class="body" x="654" y="443" font-size="10" fill="#6B6A64">LlmClient · build_live_client · optional</text>
-<rect x="828" y="414" width="104" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
-<text class="body" x="880" y="428" font-size="9.5" fill="#3C3B37" text-anchor="middle">no socsim deps</text>
+<rect x="638" y="394" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text class="mono" x="654" y="412" font-size="12.5" fill="#332E6E">socsim-social-dynamics</text>
+<text class="body" x="654" y="427" font-size="10" fill="#6B6A64">opinion dynamics: HK · Deffuant (→ core only)</text>
+<rect x="838" y="400" width="94" height="20" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.9"/>
+<text class="body" x="885" y="414" font-size="9.5" fill="#534AB7" text-anchor="middle">library pack</text>
 
-<rect x="638" y="464" width="306" height="50" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
-<text class="mono" x="654" y="485" font-size="12.5" fill="#332E6E">socsim-results</text>
-<text class="body" x="654" y="501" font-size="10" fill="#6B6A64">leaf · run dirs · CSV/JSON writers</text>
-<rect x="828" y="472" width="104" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
-<text class="body" x="880" y="486" font-size="9.5" fill="#3C3B37" text-anchor="middle">no socsim deps</text>
+<rect x="638" y="442" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text class="mono" x="654" y="460" font-size="12.5" fill="#332E6E">socsim-llm</text>
+<text class="body" x="654" y="475" font-size="10" fill="#6B6A64">LlmClient · build_live_client · optional</text>
+<rect x="828" y="448" width="104" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
+<text class="body" x="880" y="462" font-size="9.5" fill="#3C3B37" text-anchor="middle">no socsim deps</text>
 
-<text class="body" x="791" y="544" font-size="10.5" fill="#9A988F" text-anchor="middle">dashed = library-only · marl &amp; grid attach to core/engine;</text>
-<text class="body" x="791" y="560" font-size="10.5" fill="#9A988F" text-anchor="middle">llm &amp; results pull in zero socsim crates</text>
+<rect x="638" y="490" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text class="mono" x="654" y="508" font-size="12.5" fill="#332E6E">socsim-results</text>
+<text class="body" x="654" y="523" font-size="10" fill="#6B6A64">leaf · run dirs · CSV/JSON writers</text>
+<rect x="828" y="496" width="104" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
+<text class="body" x="880" y="510" font-size="9.5" fill="#3C3B37" text-anchor="middle">no socsim deps</text>
+
+<text class="body" x="791" y="552" font-size="10.5" fill="#9A988F" text-anchor="middle">dashed = library-only · marl &amp; grid attach to core/engine;</text>
+<text class="body" x="791" y="567" font-size="10.5" fill="#9A988F" text-anchor="middle">social-dynamics → core only · llm &amp; results pull in zero socsim crates</text>
 
 <!-- hr-lifecycle -> net (green dep), grid -> spine (core) -->
 <g stroke="#0F6E56" stroke-width="1.3" fill="none">

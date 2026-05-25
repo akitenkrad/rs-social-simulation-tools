@@ -4495,6 +4495,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "socsim-social-dynamics"
+version = "0.1.0"
+dependencies = [
+ "rand 0.8.6",
+ "socsim-core",
+]
+
+[[package]]
 name = "spin"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

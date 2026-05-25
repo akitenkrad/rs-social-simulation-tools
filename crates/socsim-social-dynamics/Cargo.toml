@@ -1,0 +1,11 @@
+[package]
+name        = "socsim-social-dynamics"
+description = "General opinion-dynamics mechanisms for socsim (bounded confidence: Hegselmann–Krause, Deffuant)"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rand.workspace = true
+socsim-core = { path = "../socsim-core" }

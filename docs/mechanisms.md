@@ -9,9 +9,11 @@ a single `apply` method — and is composed with other mechanisms over the share
 like neural-network layers: each reads and writes the `WorldState`, and the
 engine runs them in a fixed order every step.
 
-This catalog documents the **eleven** mechanisms that ship with socsim: the ten
+This catalog documents the **thirteen** mechanisms that ship with socsim: the ten
 reference [HR lifecycle](usecases.md) mechanisms (calibrated against published
-empirical findings) and the learnable MARL `policy` mechanism.
+empirical findings), the learnable MARL `policy` mechanism, and the two
+opinion-dynamics mechanisms (`hegselmann_krause`, `deffuant`) — the first members
+of the general, non-HR `socsim-social-dynamics` pack.
 
 ## Overview
 
@@ -23,7 +25,7 @@ within a phase, mechanisms fire in scenario/insertion order. The dashed green
 arrows show **shared-state hand-offs** within a single step — e.g. `turnover`
 populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 
-## The eleven mechanisms
+## The thirteen mechanisms
 
 | Mechanism | Phase | Source | Kind | Summary |
 |---|---|---|---|---|
@@ -38,6 +40,13 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`toxic_spread`](mechanisms/toxic-spread.md) | Interaction | Housman & Minor (2015) | empirical | Toxic behaviour spreads along network edges. |
 | [`org_performance`](mechanisms/org-performance.md) | Reward | aggregation | — | Aggregates productivity and records the step metrics. |
 | [`policy`](mechanisms/policy-mechanism.md) | Decision | MARL (§14.1) | learnable | A learned RL policy as a drop-in Decision mechanism (library-only). |
+| [`hegselmann_krause`](mechanisms/hegselmann-krause.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | Synchronous bounded-confidence update toward the chosen mean of opinions within ε (library-only). |
+| [`deffuant`](mechanisms/deffuant.md) | Interaction | Deffuant et al. (2000) | bounded-confidence | Pairwise bounded-confidence update: two agents within ε converge by a rate μ (library-only). |
+
+The last two rows are the first members of the general (non-HR)
+[`socsim-social-dynamics`](architecture.md#crate-workspace) pack — reusable,
+domain-agnostic opinion-dynamics building blocks distinct from the HR-lifecycle pack.
+Both are **library-only** (no `ModulePack` / scenario-TOML registration).
 
 **Kind** distinguishes *empirical* influence strengths (fixed correlations ρ
 from meta-analyses; do not tune) from *tunable* calibration scales that govern
