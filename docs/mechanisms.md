@@ -9,11 +9,12 @@ a single `apply` method — and is composed with other mechanisms over the share
 like neural-network layers: each reads and writes the `WorldState`, and the
 engine runs them in a fixed order every step.
 
-This catalog documents the **thirteen** mechanisms that ship with socsim: the ten
+This catalog documents the **eighteen** mechanisms that ship with socsim: the ten
 reference [HR lifecycle](usecases.md) mechanisms (calibrated against published
-empirical findings), the learnable MARL `policy` mechanism, and the two
-opinion-dynamics mechanisms (`hegselmann_krause`, `deffuant`) — the first members
-of the general, non-HR `socsim-social-dynamics` pack.
+empirical findings), the learnable MARL `policy` mechanism, and the seven
+social-dynamics mechanisms (`hegselmann_krause`, `deffuant`, `social_judgement`,
+`lorenz`, `si_contagion`, `threshold_contagion`, `axelrod`) — the general, non-HR
+`socsim-social-dynamics` pack.
 
 ## Overview
 
@@ -25,7 +26,7 @@ within a phase, mechanisms fire in scenario/insertion order. The dashed green
 arrows show **shared-state hand-offs** within a single step — e.g. `turnover`
 populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 
-## The thirteen mechanisms
+## The eighteen mechanisms
 
 | Mechanism | Phase | Source | Kind | Summary |
 |---|---|---|---|---|
@@ -42,11 +43,17 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`policy`](mechanisms/policy-mechanism.md) | Decision | MARL (§14.1) | learnable | A learned RL policy as a drop-in Decision mechanism (library-only). |
 | [`hegselmann_krause`](mechanisms/hegselmann-krause.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | Synchronous bounded-confidence update toward the chosen mean of opinions within ε (library-only). |
 | [`deffuant`](mechanisms/deffuant.md) | Interaction | Deffuant et al. (2000) | bounded-confidence | Pairwise bounded-confidence update: two agents within ε converge by a rate μ (library-only). |
+| [`social_judgement`](mechanisms/social-judgement.md) | Interaction | Social Judgement Theory | assimilation–contrast | Assimilate messages inside ε, repel those in the rejection region — drives polarisation (library-only). |
+| [`lorenz`](mechanisms/lorenz.md) | Interaction | Lorenz et al. (2021) | assimilation + reinforcement | Assimilation plus a self-reinforcing term that amplifies extreme opinions (library-only). |
+| [`si_contagion`](mechanisms/si-contagion.md) | Interaction | SI epidemic model | network contagion | Each active neighbour infects an inactive agent independently with probability β (library-only). |
+| [`threshold_contagion`](mechanisms/threshold-contagion.md) | Interaction | Granovetter (1978) | network contagion | An inactive agent activates once its fraction of active neighbours reaches θ (library-only). |
+| [`axelrod`](mechanisms/axelrod.md) | Interaction | Axelrod (1997) | cultural dissemination | On each encounter copy one differing feature with probability equal to similarity (library-only). |
 
-The last two rows are the first members of the general (non-HR)
+The last seven rows are the members of the general (non-HR)
 [`socsim-social-dynamics`](architecture.md#crate-workspace) pack — reusable,
-domain-agnostic opinion-dynamics building blocks distinct from the HR-lifecycle pack.
-Both are **library-only** (no `ModulePack` / scenario-TOML registration).
+domain-agnostic social-dynamics building blocks (opinion dynamics, network contagion,
+and cultural dissemination) distinct from the HR-lifecycle pack. All are
+**library-only** (no `ModulePack` / scenario-TOML registration).
 
 **Kind** distinguishes *empirical* influence strengths (fixed correlations ρ
 from meta-analyses; do not tune) from *tunable* calibration scales that govern

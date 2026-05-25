@@ -21,7 +21,7 @@
 ε が広いと集団は単一のコンセンサスに収束し，ε が狭いと複数の安定した意見クラスタに分裂します．
 
 このメカニズムは**ライブラリ専用**です．`socsim-core` の `ScalarOpinions` および
-`OpinionNeighbors` 能力トレイトを実装する任意のワールド上で動作します．これには
+`Neighbors` 能力トレイトを実装する任意のワールド上で動作します．これには
 **`ModulePack` がありません**（シナリオ TOML 登録を一切提供しません）．直接構築して
 `SimulationBuilder` に追加してください．
 
@@ -63,7 +63,7 @@ $$P_{-\infty} = \min \;\le\; H = P_{-1} \;\le\; G = P_0 \;\le\; A = P_1 \;\le\; 
 
 ![hegselmann_krause data flow](../assets/mech-hegselmann-krause.svg)
 
-このメカニズムはステップ開始時のスナップショットから `opinion(i)` と `opinion_neighbors(i)` を読み取り，
+このメカニズムはステップ開始時のスナップショットから `opinion(i)` と `neighbors_of(i)` を読み取り，
 近傍を信頼集合にフィルタし，設定された平均で集計して，新しい意見を `set_opinion` で一括書き戻します．
 他の状態には触れません．
 
@@ -85,12 +85,12 @@ $$P_{-\infty} = \min \;\le\; H = P_{-1} \;\le\; G = P_0 \;\le\; A = P_1 \;\le\; 
 | フィールド | 読み取り | 書き込み | 備考 |
 |---|:--:|:--:|---|
 | `opinion(i)`（`ScalarOpinions`） | ✓ | ✓ | ステップ開始時にスナップショット；信頼集合の平均で上書き． |
-| `opinion_neighbors(i)`（`OpinionNeighbors`） | ✓ | | ε フィルタ前の影響プール；自分自身はメカニズムが追加する． |
+| `neighbors_of(i)`（`Neighbors`） | ✓ | | ε フィルタ前の影響プール；自分自身はメカニズムが追加する． |
 
 ## 6. 依存関係と順序制約
 
-- **上流：** なし．`ScalarOpinions + OpinionNeighbors` を実装するワールドのみを必要とします．
-  トポロジー（完全グラフ・リング・ネットワーク・格子）は `opinion_neighbors` を介したワールド側の関心事です．
+- **上流：** なし．`ScalarOpinions + Neighbors` を実装するワールドのみを必要とします．
+  トポロジー（完全グラフ・リング・ネットワーク・格子）は `neighbors_of` を介したワールド側の関心事です．
 - **下流：** オプションの [`ConvergenceMechanism`]（PostStep）は，`max|Δx| < tol` になった時点で実行を停止できます．
   フリー関数 `max_abs_delta(prev, curr)` はドライバ側ループ向けに同じ判定を公開します．収束検出は
   決定論的な平均（A/G/H/P）に対してのみ意味を持ちます — `Random` 平均は固定点に到達するとは限りません．
@@ -107,11 +107,11 @@ ModulePack がないため，シナリオ TOML のパラメータブロックも
 ## 8. 適用方法
 
 このメカニズムは**ライブラリモード専用**です — シナリオ TOML 登録はありません．
-`ScalarOpinions + OpinionNeighbors` を実装するワールドを用意し，メカニズムを構築して
+`ScalarOpinions + Neighbors` を実装するワールドを用意し，メカニズムを構築して
 `SimulationBuilder` に追加します．
 
 ```rust
-use socsim_core::{AgentId, ScalarOpinions, OpinionNeighbors, WorldState, SimClock};
+use socsim_core::{AgentId, ScalarOpinions, Neighbors, WorldState, SimClock};
 use socsim_social_dynamics::{HegselmannKrauseMechanism, MeanOperator};
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
@@ -129,8 +129,8 @@ impl ScalarOpinions for OpinionWorld {
     fn opinion(&self, id: AgentId) -> f64 { self.opinions[id.0 as usize] }
     fn set_opinion(&mut self, id: AgentId, v: f64) { self.opinions[id.0 as usize] = v; }
 }
-impl OpinionNeighbors for OpinionWorld {
-    fn opinion_neighbors(&self, id: AgentId) -> Vec<AgentId> {
+impl Neighbors for OpinionWorld {
+    fn neighbors_of(&self, id: AgentId) -> Vec<AgentId> {
         self.agent_ids().into_iter().filter(|&j| j != id).collect()
     }
 }

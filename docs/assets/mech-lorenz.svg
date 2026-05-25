@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img">
-<title>hegselmann_krause mechanism data flow</title>
-<desc>Interaction-phase mechanism: reads each agent's opinion and the neighbour opinions within the confidence bound epsilon, then synchronously sets the new opinion to the chosen mean of that confidence set: x_i becomes mean of { x_j : |x_i - x_j| &lt;= epsilon }. Deterministic except for the Random mean operator, which samples ctx.rng.</desc>
+<title>lorenz mechanism data flow</title>
+<desc>Interaction-phase mechanism: for each agent i it assimilates the mean in-region gap (alpha times the mean of diff over neighbours with |diff| &lt; epsilon) and then adds a reinforcement/polarisation term repulsion*sign(x_i)*|x_i| that amplifies extreme opinions; the new opinion x_i + delta is clamped to [-1, 1] and batch-written. Deterministic; the RNG is untouched.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -38,44 +38,39 @@
 <g>
   <rect x="40" y="118" width="158" height="100" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
   <text class="body" x="119" y="110" font-size="13" fill="#0F6E56" text-anchor="middle" font-weight="600">reads</text>
-  <text class="mono" x="58" y="148" font-size="13" fill="#0B5040">opinion(i) = x_i</text>
-  <text class="mono" x="58" y="172" font-size="13" fill="#0B5040">neighbors_of(i)</text>
-  <text class="body" x="58" y="194" font-size="11" fill="#3C7E6C">confidence set within ε:</text>
-  <text class="mono" x="58" y="210" font-size="11.5" fill="#0B5040">{ x_j : |x_i−x_j| ≤ ε }</text>
+  <text class="mono" x="58" y="146" font-size="13" fill="#0B5040">opinion(i) = x_i</text>
+  <text class="mono" x="58" y="170" font-size="12.5" fill="#0B5040">neighbors_of(i)</text>
+  <text class="body" x="58" y="192" font-size="11" fill="#3C7E6C">messages m_j = x_j</text>
+  <text class="mono" x="58" y="210" font-size="11.5" fill="#0B5040">diff = m_j − x_i</text>
 </g>
 
 <!-- mechanism box -->
 <g>
   <rect x="263" y="92" width="234" height="152" rx="14" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.6"/>
-  <text class="title" x="380" y="122" font-size="16.5" fill="#332E6E" text-anchor="middle">hegselmann_krause</text>
-  <text class="body"  x="380" y="144" font-size="12" fill="#6B6A64" text-anchor="middle">bounded confidence · synchronous</text>
-  <line x1="283" y1="158" x2="477" y2="158" stroke="#C7C2E8" stroke-width="1"/>
-  <text class="mono" x="380" y="184" font-size="12.5" fill="#332E6E" text-anchor="middle">I(i) = {i} ∪ {j : |x_i−x_j| ≤ ε}</text>
-  <text class="mono" x="380" y="210" font-size="12.5" fill="#332E6E" text-anchor="middle">x_i ← mean{ x_j : j ∈ I(i) }</text>
-  <text class="body" x="380" y="232" font-size="10.5" fill="#6B6A64" text-anchor="middle">mean ∈ A / G / H / P_p / R</text>
+  <text class="title" x="380" y="120" font-size="17" fill="#332E6E" text-anchor="middle">lorenz</text>
+  <text class="body"  x="380" y="140" font-size="12" fill="#6B6A64" text-anchor="middle">assimilation + polarisation</text>
+  <line x1="283" y1="152" x2="477" y2="152" stroke="#C7C2E8" stroke-width="1"/>
+  <text class="mono" x="380" y="174" font-size="11.5" fill="#332E6E" text-anchor="middle">assim = α·mean_{|diff|&lt;ε} diff</text>
+  <text class="mono" x="380" y="196" font-size="11.5" fill="#332E6E" text-anchor="middle">pol = rep·sign(x_i)·|x_i|</text>
+  <text class="mono" x="380" y="218" font-size="11.5" fill="#332E6E" text-anchor="middle">Δ = assim + pol · clamp[-1,1]</text>
+  <text class="body" x="380" y="236" font-size="10.5" fill="#6B6A64" text-anchor="middle">extreme opinions amplified</text>
 </g>
 
 <!-- output state -->
 <g>
   <rect x="562" y="118" width="158" height="100" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
   <text class="body" x="641" y="110" font-size="13" fill="#0F6E56" text-anchor="middle" font-weight="600">writes</text>
-  <text class="mono" x="580" y="152" font-size="13" fill="#0B5040">set_opinion(i, x_i′)</text>
-  <text class="body" x="580" y="178" font-size="11" fill="#3C7E6C">batch write-back from</text>
-  <text class="body" x="580" y="194" font-size="11" fill="#3C7E6C">start-of-step snapshot</text>
-  <text class="body" x="580" y="210" font-size="11" fill="#3C7E6C">(order-independent)</text>
+  <text class="mono" x="580" y="150" font-size="12" fill="#0B5040">set_opinion(i, x_i+Δ)</text>
+  <text class="body" x="580" y="176" font-size="11" fill="#3C7E6C">batch write-back;</text>
+  <text class="body" x="580" y="192" font-size="11" fill="#3C7E6C">reinforcement pushes</text>
+  <text class="body" x="580" y="208" font-size="11" fill="#3C7E6C">toward own extreme</text>
 </g>
 
 <!-- arrows -->
 <path d="M198 168 H260" stroke="#534AB7" stroke-width="1.6" marker-end="url(#hr)"/>
 <path d="M497 168 H559" stroke="#534AB7" stroke-width="1.6" marker-end="url(#hr)"/>
 
-<!-- ctx.rng tag (only the Random mean operator samples it) -->
-<g>
-  <rect x="320" y="252" width="120" height="22" rx="9" fill="#FBFAF6" stroke="#534AB7" stroke-width="1" stroke-dasharray="4 3"/>
-  <text class="mono" x="380" y="267" font-size="11" fill="#534AB7" text-anchor="middle">ctx.rng (R mean only)</text>
-</g>
-
 <!-- footnote -->
-<text class="body" x="380" y="294" font-size="11.5" fill="#6B6A64" text-anchor="middle">Synchronous update from one snapshot · deterministic for A/G/H/P · large ε → consensus, small ε → fragmentation</text>
+<text class="body" x="380" y="286" font-size="11.5" fill="#6B6A64" text-anchor="middle">Synchronous update from one snapshot · deterministic (no ctx.rng) · assimilation + reinforcement/polarisation</text>
 
 </svg>

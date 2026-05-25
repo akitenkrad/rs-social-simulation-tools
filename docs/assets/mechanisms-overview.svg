@@ -1,6 +1,6 @@
-<svg width="100%" viewBox="0 0 1040 560" xmlns="http://www.w3.org/2000/svg" role="img">
+<svg width="100%" viewBox="0 0 1040 660" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>socsim mechanisms across the 6-phase tick loop</title>
-<desc>The thirteen documented mechanisms placed in the phase(s) they fire in: PreStep, Environment, Decision, Interaction, Reward, PostStep. The Interaction column also holds the two opinion-dynamics mechanisms hegselmann_krause and deffuant from the general socsim-social-dynamics pack. Arrows show the fixed per-step phase order; the curved arrow closes the loop for the next step.</desc>
+<desc>The eighteen documented mechanisms placed in the phase(s) they fire in: PreStep, Environment, Decision, Interaction, Reward, PostStep. The Interaction column also holds the seven social-dynamics mechanisms hegselmann_krause, deffuant, social_judgement, lorenz, si_contagion, threshold_contagion, and axelrod from the general socsim-social-dynamics pack. Arrows show the fixed per-step phase order; the curved arrow closes the loop for the next step.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -15,7 +15,7 @@
   </style>
 </defs>
 
-<rect x="3" y="3" width="1034" height="554" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+<rect x="3" y="3" width="1034" height="654" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
 
 <text class="title" x="40" y="48" font-size="26" fill="#2C2C2A">Mechanisms across the 6-phase tick loop</text>
 <text class="body"  x="40" y="74" font-size="14" fill="#6B6A64">Each mechanism declares the phase(s) it fires in. Within a phase, mechanisms run in scenario/insertion order.</text>
@@ -71,19 +71,29 @@
   <rect x="360" y="304" width="150" height="38" rx="9" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
   <text x="435" y="328" fill="#5B3E9E" text-anchor="middle" font-weight="600">policy  (MARL)</text>
 
-  <!-- Interaction column -->
+  <!-- Interaction column: 3 HR mechanisms, then 7 social-dynamics chips -->
   <rect x="520" y="160" width="150" height="38" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
   <text x="595" y="184" fill="#332E6E" text-anchor="middle" font-weight="600">peer_effect</text>
   <rect x="520" y="208" width="150" height="38" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
   <text x="595" y="232" fill="#332E6E" text-anchor="middle" font-weight="600">ocb</text>
   <rect x="520" y="256" width="150" height="38" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
   <text x="595" y="280" fill="#332E6E" text-anchor="middle" font-weight="600">toxic_spread</text>
-  <rect x="520" y="304" width="150" height="38" rx="9" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
-  <text x="595" y="324" fill="#5B3E9E" text-anchor="middle" font-weight="600" font-size="12">hegselmann_krause</text>
-  <text x="595" y="337" fill="#7A5BC0" text-anchor="middle" font-size="9">social-dynamics</text>
-  <rect x="520" y="352" width="150" height="38" rx="9" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
-  <text x="595" y="372" fill="#5B3E9E" text-anchor="middle" font-weight="600">deffuant</text>
-  <text x="595" y="385" fill="#7A5BC0" text-anchor="middle" font-size="9">social-dynamics</text>
+  <!-- social-dynamics pack (7 chips, compact) -->
+  <rect x="520" y="302" width="150" height="28" rx="8" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="595" y="320" fill="#5B3E9E" text-anchor="middle" font-weight="600" font-size="11.5">hegselmann_krause</text>
+  <rect x="520" y="336" width="150" height="28" rx="8" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="595" y="354" fill="#5B3E9E" text-anchor="middle" font-weight="600" font-size="11.5">deffuant</text>
+  <rect x="520" y="370" width="150" height="28" rx="8" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="595" y="388" fill="#5B3E9E" text-anchor="middle" font-weight="600" font-size="11.5">social_judgement</text>
+  <rect x="520" y="404" width="150" height="28" rx="8" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="595" y="422" fill="#5B3E9E" text-anchor="middle" font-weight="600" font-size="11.5">lorenz</text>
+  <rect x="520" y="438" width="150" height="28" rx="8" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="595" y="456" fill="#5B3E9E" text-anchor="middle" font-weight="600" font-size="11.5">si_contagion</text>
+  <rect x="520" y="472" width="150" height="28" rx="8" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="595" y="490" fill="#5B3E9E" text-anchor="middle" font-weight="600" font-size="11.5">threshold_contagion</text>
+  <rect x="520" y="506" width="150" height="28" rx="8" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="595" y="524" fill="#5B3E9E" text-anchor="middle" font-weight="600" font-size="11.5">axelrod</text>
+  <text x="595" y="548" fill="#7A5BC0" text-anchor="middle" font-size="10">socsim-social-dynamics pack (library-only)</text>
 
   <!-- Reward column -->
   <rect x="680" y="160" width="150" height="38" rx="9" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.2"/>
@@ -96,14 +106,14 @@
   <text x="915" y="232" fill="#3C3B37" text-anchor="middle" font-weight="600">socialization</text>
 </g>
 
-<!-- shared-state hand-offs -->
+<!-- shared-state hand-offs (routed to the right of the Interaction column) -->
 <g font-size="12" class="body" fill="#0F6E56">
   <!-- turnover -> knowledge_loss via departed_this_step -->
-  <path d="M510 227 C 700 380, 760 380, 905 246" fill="none" stroke="#0F6E56" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#hr)"/>
-  <text x="690" y="398" text-anchor="middle">turnover → knowledge_loss  (departed_this_step)</text>
+  <path d="M510 227 C 720 270, 760 270, 905 246" fill="none" stroke="#0F6E56" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#hr)"/>
+  <text x="845" y="588" text-anchor="middle">turnover → knowledge_loss  (departed_this_step)</text>
   <!-- hiring -> socialization via new_hires_this_step -->
-  <path d="M510 275 C 700 450, 770 450, 905 227" fill="none" stroke="#0F6E56" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#hr)"/>
-  <text x="700" y="468" text-anchor="middle">hiring → socialization  (new_hires_this_step)</text>
+  <path d="M510 275 C 730 300, 770 300, 905 227" fill="none" stroke="#0F6E56" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#hr)"/>
+  <text x="845" y="608" text-anchor="middle">hiring → socialization  (new_hires_this_step)</text>
 </g>
 
 <!-- org_performance recompute team means -> next step peer_effect -->
@@ -112,7 +122,7 @@
 </g>
 
 <!-- loop-back arrow PostStep -> PreStep (next step) -->
-<path d="M915 246 C 915 510, 115 510, 115 204" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#hr)"/>
-<text class="body" x="515" y="528" font-size="13" fill="#6B6A64" text-anchor="middle">next step  ·  clock.tick()  ·  recompute_team_means feeds next Interaction</text>
+<path d="M915 246 C 985 615, 75 615, 115 204" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#hr)"/>
+<text class="body" x="300" y="600" font-size="13" fill="#6B6A64" text-anchor="middle">next step  ·  clock.tick()  ·  recompute_team_means feeds next Interaction</text>
 
 </svg>

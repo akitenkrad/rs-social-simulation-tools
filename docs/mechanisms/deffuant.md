@@ -23,7 +23,7 @@ wide ε drives the population to consensus, a narrow ε freezes it into multiple
 clusters — but stochastically and asynchronously rather than in lockstep.
 
 The mechanism is **library-only**: it operates over any world implementing the
-`ScalarOpinions` and `OpinionNeighbors` capability traits from `socsim-core`. There
+`ScalarOpinions` and `Neighbors` capability traits from `socsim-core`. There
 is **no `ModulePack`** for it (no scenario-TOML registration); construct it directly
 and add it to a `SimulationBuilder`.
 
@@ -56,7 +56,7 @@ pairwise (math-identical port).
 
 For each of `pairs_per_step` encounters the mechanism draws `i` (from the scheduler's
 activation order, or the world roster as a fallback) and a random neighbour `j` from
-`opinion_neighbors(i)` (excluding `i`), reads `opinion(i)` and `opinion(j)`, and — if
+`neighbors_of(i)` (excluding `i`), reads `opinion(i)` and `opinion(j)`, and — if
 they are within ε — writes both new opinions via `set_opinion`. No other state is
 touched.
 
@@ -79,13 +79,13 @@ exchange *is* the interaction.
 | Field | Read | Write | Notes |
 |---|:--:|:--:|---|
 | `opinion(i)`, `opinion(j)` (`ScalarOpinions`) | ✓ | ✓ | Read live each encounter; both overwritten iff `|x_i − x_j| ≤ ε`. |
-| `opinion_neighbors(i)` (`OpinionNeighbors`) | ✓ | | Candidate partners for `i` (self excluded). |
+| `neighbors_of(i)` (`Neighbors`) | ✓ | | Candidate partners for `i` (self excluded). |
 
 ## 6. Dependencies & ordering constraints
 
 - **Upstream:** none. It needs only a world implementing `ScalarOpinions +
-  OpinionNeighbors`; the topology (complete graph, ring, network, lattice) is the
-  world's concern via `opinion_neighbors`.
+  Neighbors`; the topology (complete graph, ring, network, lattice) is the
+  world's concern via `neighbors_of`.
 - **Downstream:** the optional [`ConvergenceMechanism`] (PostStep) and the
   `max_abs_delta` helper apply, but note that a stochastic update need not reach an
   exact fixed point, so a convergence test may stop early or never — prefer a step
@@ -105,7 +105,7 @@ are constructor arguments.
 ## 8. How to apply
 
 This mechanism is **library-mode only** — there is no scenario-TOML registration.
-Provide a world implementing `ScalarOpinions + OpinionNeighbors`, construct the
+Provide a world implementing `ScalarOpinions + Neighbors`, construct the
 mechanism, and add it to a `SimulationBuilder`. (The world boilerplate is identical
 to the [Hegselmann–Krause example](hegselmann-krause.md#8-how-to-apply).)
 
@@ -116,7 +116,7 @@ use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
 // ε = 0.2, μ = 0.5, 50 pairwise encounters per step.
 let deffuant = DeffuantMechanism::new(0.2, 0.5, 50);
 
-let mut sim = SimulationBuilder::new(world) // world: ScalarOpinions + OpinionNeighbors
+let mut sim = SimulationBuilder::new(world) // world: ScalarOpinions + Neighbors
     .scheduler(Box::new(RandomActivationScheduler))
     .seed(42)
     .add_mechanism(deffuant)
