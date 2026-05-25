@@ -1,0 +1,16 @@
+[package]
+name        = "socsim-results"
+description = "Output helpers for socsim lightweight library mode (timestamped result dirs, latest symlink, CSV/JSON writers)"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace      = true
+serde_json.workspace = true
+csv.workspace        = true
+chrono.workspace     = true
+
+[dev-dependencies]
+serde.workspace      = true
