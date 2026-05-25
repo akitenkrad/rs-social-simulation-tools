@@ -133,6 +133,31 @@ This lexicographic ordering makes the RNG consumption sequence identical
 regardless of the underlying map iteration order, so the run is reproducible
 given the same seed.
 
+### Relationship to the general `si_contagion` kernel
+
+`toxic_spread` is an SI-variant and conceptually overlaps with the general
+[`si_contagion`](si-contagion.md) mechanism in `socsim-mechanisms`, but it is
+**deliberately not** built on the shared kernel, because the two have
+incompatible RNG-draw structures and unifying them would change this
+empirically calibrated mechanism's seeded trajectory:
+
+- **Iteration pivot.** `toxic_spread` iterates *source-first* (each toxic
+  employee → its neighbours); `si_contagion` iterates *target-first* (each
+  inactive agent → its active neighbours).
+- **Break semantics.** `toxic_spread` draws one Bernoulli per
+  (toxic-source, non-toxic-neighbour) edge and **never breaks** — a neighbour
+  adjacent to *k* toxic sources consumes *k* draws. `si_contagion` **breaks on
+  first success**, so a target consumes at most one draw per active neighbour
+  up to the first hit.
+- **Order basis.** `toxic_spread` orders by sorted `AgentId`; `si_contagion`
+  uses the scheduler's `ctx.agent_order`.
+
+These differences mean a faithful delegation would alter the number and order
+of RNG draws, breaking the deterministic seeded tests. `toxic_spread` therefore
+remains an HR-local mechanism; it is recorded as a *future candidate* should the
+kernel ever grow a source-first, no-break variant. `HrWorld` does not implement
+the `BinaryState` / `Neighbors` capability traits for the same reason.
+
 ## 10. Expected behaviour
 
 With `P_TOXIC = 0.04` and `p_spread = 0.46`, toxic prevalence should rise from

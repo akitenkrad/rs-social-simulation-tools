@@ -4353,13 +4353,17 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "rand 0.8.6",
  "serde_json",
  "socsim-config",
  "socsim-core",
  "socsim-engine",
  "socsim-hr-lifecycle",
  "socsim-log",
+ "socsim-mechanisms",
+ "socsim-net",
  "socsim-runner",
+ "toml 0.8.23",
 ]
 
 [[package]]

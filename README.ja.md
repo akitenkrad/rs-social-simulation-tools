@@ -50,6 +50,23 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 60               35.6250           92.3841           41.8100            0.0000
 ```
 
+`socsim` バイナリは World 多態です：シナリオは **モジュールパック**を名前で選択します（`socsim list packs`）．現在2つのパックを同梱しています — 較正済みの `hr-lifecycle` リファレンスモジュールと，`socsim-mechanisms` の有界信頼メカニズムをソーシャルネットワーク上で実行する汎用 `opinion-dynamics` パックです：
+
+```sh
+socsim run scenarios/opinion_dynamics_baseline.toml
+```
+
+```
+Running 'opinion_dynamics_baseline' (pack=opinion-dynamics, t_max=60, seeds=[42], parallel=false)
+
+t               clusters         max_delta              mean            spread          variance
+10               22.0000            0.1238            0.5092            0.9769            0.0360
+30               15.0000            0.0127            0.5094            0.9769            0.0243
+60               12.0000            0.0010            0.5098            0.9769            0.0232
+```
+
+有界信頼の意見は時間とともにより少ないクラスタへ収束します（コンセンサス）．`epsilon` を大きくすると完全な合意に至ります．
+
 ## ドキュメント
 
 | ドキュメント | 内容 |

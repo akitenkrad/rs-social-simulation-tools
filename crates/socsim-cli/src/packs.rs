@@ -62,6 +62,8 @@ pub fn packs() -> Vec<Box<dyn CliPack>> {
     let mut v: Vec<Box<dyn CliPack>> = Vec::new();
     #[cfg(feature = "pack-hr-lifecycle")]
     v.push(Box::new(HrLifecycleCliPack));
+    #[cfg(feature = "pack-opinion-dynamics")]
+    v.push(Box::new(OpinionDynamicsCliPack));
     v
 }
 
@@ -273,3 +275,192 @@ metrics  = ["org_performance", "avg_tenure", "turnover_rate", "knowledge_stock"]
 
 #[cfg(feature = "pack-hr-lifecycle")]
 pub use hr_lifecycle::HrLifecycleCliPack;
+
+// ── opinion-dynamics pack ──────────────────────────────────────────────────────
+
+#[cfg(feature = "pack-opinion-dynamics")]
+mod opinion_dynamics {
+    use super::*;
+
+    use socsim_config::{Params, Registry};
+    use socsim_mechanisms::{
+        parse_mean, ConvergenceMechanism, DeffuantMechanism, HegselmannKrauseMechanism,
+        LorenzMechanism, MeanOperator, SocialJudgementMechanism,
+    };
+    use socsim_runner::WorldFactory;
+
+    use crate::opinion_world::{OpinionMetricsMechanism, OpinionWorld};
+
+    /// CLI-side wrapper exposing the `opinion-dynamics` pack through [`CliPack`].
+    pub struct OpinionDynamicsCliPack;
+
+    impl OpinionDynamicsCliPack {
+        /// Build the world factory closure for `OpinionWorld`.
+        fn world_factory() -> WorldFactory<OpinionWorld> {
+            Box::new(|params: &Params, seed: u64| Ok(OpinionWorld::new(params, seed)))
+        }
+
+        /// Register all `opinion-dynamics` mechanisms into a registry.
+        ///
+        /// Mechanisms (all generic over `ScalarOpinions + Neighbors`, which
+        /// `OpinionWorld` implements):
+        /// - `hegselmann_krause` — HK bounded confidence (params: `epsilon`,
+        ///   `mean` = `A`/`G`/`H`/`P<p>`/`R`, `p` fallback for bare `P`).
+        /// - `deffuant` — Deffuant pairwise (params: `epsilon`, `mu`,
+        ///   `pairs_per_step`).
+        /// - `social_judgement` — assimilation/repulsion (params: `epsilon`,
+        ///   `alpha`, `rejection`, `repulsion`).
+        /// - `lorenz` — assimilation + polarisation (params: `epsilon`,
+        ///   `alpha`, `repulsion`).
+        /// - `convergence` — `PostStep` stop on `max|Δx| < tol` (param: `tol`).
+        /// - `opinion_metrics` — `PostStep` metrics recorder (param: `tol`).
+        fn register(reg: &mut Registry<OpinionWorld>) {
+            reg.register("hegselmann_krause", |p: &Params| {
+                let epsilon = p.get_f64("epsilon", 0.2);
+                let p_fallback = p.get_f64("p", 1.0);
+                let mean = parse_mean(p.get_str("mean", "A"), p_fallback)
+                    .map_err(socsim_core::SocsimError::Config)?;
+                Ok(Box::new(HegselmannKrauseMechanism::new(epsilon, mean))
+                    as Box<dyn socsim_core::Mechanism<OpinionWorld>>)
+            });
+            reg.register("deffuant", |p: &Params| {
+                let epsilon = p.get_f64("epsilon", 0.2);
+                let mu = p.get_f64("mu", 0.5);
+                let pairs = p.get_u64("pairs_per_step", 1) as usize;
+                Ok(Box::new(DeffuantMechanism::new(epsilon, mu, pairs))
+                    as Box<dyn socsim_core::Mechanism<OpinionWorld>>)
+            });
+            reg.register("social_judgement", |p: &Params| {
+                let epsilon = p.get_f64("epsilon", 0.4);
+                let alpha = p.get_f64("alpha", 0.5);
+                let rejection = p.get_f64("rejection", 0.8);
+                let repulsion = p.get_f64("repulsion", 0.2);
+                Ok(
+                    Box::new(SocialJudgementMechanism::new(
+                        epsilon, alpha, rejection, repulsion,
+                    )) as Box<dyn socsim_core::Mechanism<OpinionWorld>>,
+                )
+            });
+            reg.register("lorenz", |p: &Params| {
+                let epsilon = p.get_f64("epsilon", 0.4);
+                let alpha = p.get_f64("alpha", 0.5);
+                let repulsion = p.get_f64("repulsion", 0.2);
+                Ok(Box::new(LorenzMechanism::new(epsilon, alpha, repulsion))
+                    as Box<dyn socsim_core::Mechanism<OpinionWorld>>)
+            });
+            reg.register("convergence", |p: &Params| {
+                let tol = p.get_f64("tol", 1e-4);
+                Ok(Box::new(ConvergenceMechanism::new(tol))
+                    as Box<dyn socsim_core::Mechanism<OpinionWorld>>)
+            });
+            reg.register("opinion_metrics", |p: &Params| {
+                let tol = p.get_f64("tol", 0.01);
+                Ok(Box::new(OpinionMetricsMechanism::new(tol))
+                    as Box<dyn socsim_core::Mechanism<OpinionWorld>>)
+            });
+            // Silence the unused-import warning when no other path uses it.
+            let _ = MeanOperator::Arithmetic;
+        }
+    }
+
+    impl CliPack for OpinionDynamicsCliPack {
+        fn name(&self) -> &'static str {
+            "opinion-dynamics"
+        }
+
+        fn starter_toml(&self) -> &'static str {
+            OPINION_DYNAMICS_STARTER
+        }
+
+        fn mechanism_names(&self) -> Vec<String> {
+            let mut reg: Registry<OpinionWorld> = Registry::new();
+            Self::register(&mut reg);
+            let mut names: Vec<String> = reg.names().into_iter().map(|s| s.to_owned()).collect();
+            names.sort();
+            names
+        }
+
+        fn run_seeds(
+            &self,
+            scenario: &Scenario,
+            seeds: &[u64],
+            parallel: bool,
+        ) -> Result<Vec<RunResult>> {
+            let factory = Self::world_factory();
+            let results = socsim_runner::run_seeds::<OpinionWorld>(
+                scenario,
+                &factory,
+                &Self::register,
+                seeds.iter().copied(),
+                parallel,
+            )?;
+            Ok(results)
+        }
+
+        fn run_sweep(
+            &self,
+            scenario: &Scenario,
+            axes: &[SweepAxis],
+            seeds: &[u64],
+            parallel: bool,
+        ) -> Result<Vec<SweepPoint>> {
+            let factory = Self::world_factory();
+            let points = socsim_runner::run_sweep::<OpinionWorld>(
+                scenario,
+                axes,
+                &factory,
+                &Self::register,
+                seeds.to_vec(),
+                parallel,
+            )?;
+            Ok(points)
+        }
+    }
+
+    pub(super) const OPINION_DYNAMICS_STARTER: &str = r#"# Opinion Dynamics Scenario — generated by `socsim init`
+# Bounded-confidence consensus (Hegselmann–Krause) on a small-world network.
+# Opinions live in [0, 1]; with ε large enough relative to the spread, agents
+# coalesce into a small number of clusters (consensus). Run with:
+#   socsim run <this-file>
+
+[simulation]
+name        = "opinion_dynamics_baseline"
+module_pack = "opinion-dynamics"
+t_max       = 60
+seed        = 42
+scheduler   = "random_activation"
+
+[world]
+n_agents          = 200
+network_model     = "watts_strogatz"
+network_k         = 6
+network_beta      = 0.1
+init_distribution = "uniform"
+
+[[mechanism]]
+name  = "hegselmann_krause"
+phase = "interaction"
+[mechanism.params]
+epsilon = 0.25
+mean    = "A"
+
+[[mechanism]]
+name  = "opinion_metrics"
+phase = "post_step"
+[mechanism.params]
+tol = 0.01
+
+[[mechanism]]
+name  = "convergence"
+phase = "post_step"
+[mechanism.params]
+tol = 0.0001
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"
+metrics  = ["clusters", "variance", "spread", "mean"]
+"#;
+}
+
+#[cfg(feature = "pack-opinion-dynamics")]
+pub use opinion_dynamics::OpinionDynamicsCliPack;

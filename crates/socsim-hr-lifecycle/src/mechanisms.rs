@@ -3,6 +3,27 @@
 //!
 //! Each struct implements [`Mechanism<HrWorld>`] and is registered under its
 //! canonical string name by [`HrLifecyclePack::register`].
+//!
+//! # Generalizability to `socsim-mechanisms`
+//!
+//! These mechanisms are calibrated against published empirical findings and
+//! have deterministic, seeded tests, so any lift into the general
+//! `socsim-mechanisms` crate must preserve the exact RNG-draw order. Current
+//! status of each candidate:
+//!
+//! - `toxic_spread` — SI variant. **Not lifted.** It overlaps the general
+//!   `si_contagion` kernel conceptually but draws RNG *source-first with no
+//!   break-on-success* over sorted `AgentId`s, whereas `si_contagion` draws
+//!   *target-first with break-on-first-success* over the scheduler order. The
+//!   draw count/order differ, so delegating would change the seeded trajectory.
+//!   `HrWorld` therefore does not impl `BinaryState`/`Neighbors`. Future
+//!   candidate only if the kernel gains a source-first, no-break variant.
+//! - `learning_curve` — temporal (tenure-driven) update. **Candidate** for a
+//!   future shared temporal/decay kernel.
+//! - `peer_effect` / `ocb` — both aggregate per-team state; lifting needs a
+//!   future `GroupAggregates` capability trait in `socsim-core`.
+//! - `knowledge_loss` — keys off employees removed this step; lifting needs a
+//!   removal-event interface in `socsim-core`.
 
 use rand::Rng;
 use rand_distr::{Distribution, Normal};

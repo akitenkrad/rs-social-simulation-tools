@@ -50,6 +50,23 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 60               35.6250           92.3841           41.8100            0.0000
 ```
 
+The `socsim` binary is world-polymorphic: scenarios select a **module pack** by name (`socsim list packs`). Two packs ship today — the calibrated `hr-lifecycle` reference module and a general `opinion-dynamics` pack that runs the bounded-confidence mechanisms from `socsim-mechanisms` on a social network:
+
+```sh
+socsim run scenarios/opinion_dynamics_baseline.toml
+```
+
+```
+Running 'opinion_dynamics_baseline' (pack=opinion-dynamics, t_max=60, seeds=[42], parallel=false)
+
+t               clusters         max_delta              mean            spread          variance
+10               22.0000            0.1238            0.5092            0.9769            0.0360
+30               15.0000            0.0127            0.5094            0.9769            0.0243
+60               12.0000            0.0010            0.5098            0.9769            0.0232
+```
+
+Bounded-confidence opinions coalesce into fewer clusters over time (consensus); a larger `epsilon` drives full consensus.
+
 ## Documentation
 
 | Document | Description |
