@@ -1,15 +1,17 @@
-//! Capability traits for scalar opinion-dynamics worlds.
+//! Capability traits for social-dynamics worlds.
 //!
-//! These two traits let *general* (domain-agnostic) opinion-dynamics
-//! mechanisms — e.g. the bounded-confidence family in `socsim-social-dynamics`
-//! (Hegselmann–Krause, Deffuant) — operate over any [`WorldState`] that can
-//! expose a scalar opinion per agent and name each agent's influence set.
+//! These traits let *general* (domain-agnostic) social-dynamics mechanisms — the
+//! opinion-dynamics family (Hegselmann–Krause, Deffuant, Social Judgement,
+//! Lorenz), the network-contagion family (SI, Granovetter threshold), and the
+//! cultural-dissemination family (Axelrod) in `socsim-social-dynamics` — operate
+//! over any [`WorldState`] that can expose the relevant per-agent state and name
+//! each agent's influence set.
 //!
-//! Both traits are deliberately minimal and dependency-free: a world only has
-//! to answer "what is agent `i`'s opinion?" and "whose opinions does agent `i`
-//! see?".  Concrete worlds decide the representation (a `Vec<f64>`, a column in
-//! a struct-of-arrays, etc.) and the topology (complete graph, lattice,
-//! network, …).
+//! Each trait is deliberately minimal and dependency-free: a world only has to
+//! answer a few "what is agent `i`'s …?" / "whose state does agent `i` see?"
+//! questions.  Concrete worlds decide the representation (a `Vec<f64>`, a column
+//! in a struct-of-arrays, a `BTreeMap`, etc.) and the topology (complete graph,
+//! lattice, network, …).
 
 use crate::{AgentId, WorldState};
 
@@ -29,15 +31,54 @@ pub trait ScalarOpinions: WorldState {
 
 /// A world that can name the *influence set* (neighbours) of an agent.
 ///
-/// The returned set is the pool of agents whose opinions agent `id` may be
-/// influenced by *before* any bounded-confidence (ε) filtering — that filtering
+/// The returned set is the pool of agents whose state agent `id` may be
+/// influenced by *before* any mechanism-specific filtering (e.g. a
+/// bounded-confidence ε test, or a per-edge infection draw) — that filtering
 /// happens inside the mechanism.  Whether `id` itself appears in the set is up
 /// to the world; mechanisms that need self-inclusion (e.g. Hegselmann–Krause)
 /// add it explicitly.
 ///
 /// Complete-graph (non-spatial) worlds return all *other* agents; networked or
-/// lattice worlds delegate to their adjacency structure.
-pub trait OpinionNeighbors: WorldState {
-    /// The agents whose opinions may influence agent `id` this step.
-    fn opinion_neighbors(&self, id: AgentId) -> Vec<AgentId>;
+/// lattice worlds delegate to their adjacency structure.  This single trait
+/// serves every neighbour-based mechanism in the pack (opinion dynamics,
+/// contagion, and culture).
+pub trait Neighbors: WorldState {
+    /// The agents whose state may influence agent `id` this step.
+    fn neighbors_of(&self, id: AgentId) -> Vec<AgentId>;
+}
+
+/// A world whose agents carry a binary *active / informed / infected* flag.
+///
+/// This is the capability the contagion family (SI, Granovetter threshold)
+/// operates on: every agent is in one of two states, and a mechanism flips
+/// inactive agents to active according to its rule.  The flag's meaning
+/// (informed, infected, mobilised, …) is the world's interpretation; the
+/// mechanism only reads it via [`is_active`](BinaryState::is_active) and writes
+/// it via [`set_active`](BinaryState::set_active).
+pub trait BinaryState: WorldState {
+    /// Whether agent `id` is currently active.
+    fn is_active(&self, id: AgentId) -> bool;
+
+    /// Set agent `id`'s active flag to `active`.
+    fn set_active(&mut self, id: AgentId, active: bool);
+}
+
+/// A world whose agents carry a fixed-length categorical *culture vector*.
+///
+/// This is the capability the Axelrod cultural-dissemination model operates on:
+/// each agent holds `n_features` cultural features, each a categorical trait
+/// value (`q` possible traits).  Mechanisms read a feature via
+/// [`feature`](CultureVectors::feature) and overwrite it via
+/// [`set_feature`](CultureVectors::set_feature).  The trait imposes no upper
+/// bound on values; the world chooses the trait alphabet size.
+pub trait CultureVectors: WorldState {
+    /// The number of cultural features `F` each agent carries (the vector
+    /// length).  Assumed equal for every agent.
+    fn n_features(&self) -> usize;
+
+    /// The value of agent `id`'s feature `f` (`0 ≤ f < n_features`).
+    fn feature(&self, id: AgentId, f: usize) -> u32;
+
+    /// Overwrite agent `id`'s feature `f` with `value`.
+    fn set_feature(&mut self, id: AgentId, f: usize, value: u32);
 }

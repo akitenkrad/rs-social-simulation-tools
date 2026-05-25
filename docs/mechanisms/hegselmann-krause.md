@@ -24,7 +24,7 @@ update of the canonical HK model. With a wide ε the population collapses to a s
 consensus; with a narrow ε it fragments into several stable opinion clusters.
 
 The mechanism is **library-only**: it operates over any world that implements the
-`ScalarOpinions` and `OpinionNeighbors` capability traits from `socsim-core`. There
+`ScalarOpinions` and `Neighbors` capability traits from `socsim-core`. There
 is **no `ModulePack`** for it (it ships no scenario-TOML registration); construct it
 directly and add it to a `SimulationBuilder`.
 
@@ -68,7 +68,7 @@ the `hegselmann2005` replication's `means.rs`.
 
 ![hegselmann_krause data flow](../assets/mech-hegselmann-krause.svg)
 
-The mechanism reads `opinion(i)` and `opinion_neighbors(i)` from a start-of-step
+The mechanism reads `opinion(i)` and `neighbors_of(i)` from a start-of-step
 snapshot, filters neighbours to the confidence set, aggregates with the configured
 mean, and batch-writes the new opinions back via `set_opinion`. No other state is
 touched.
@@ -93,13 +93,13 @@ literature HK is normally the *only* opinion updater in a run.
 | Field | Read | Write | Notes |
 |---|:--:|:--:|---|
 | `opinion(i)` (`ScalarOpinions`) | ✓ | ✓ | Snapshotted at step start; overwritten with the confidence-set mean. |
-| `opinion_neighbors(i)` (`OpinionNeighbors`) | ✓ | | Influence pool before ε-filtering; self is added by the mechanism. |
+| `neighbors_of(i)` (`Neighbors`) | ✓ | | Influence pool before ε-filtering; self is added by the mechanism. |
 
 ## 6. Dependencies & ordering constraints
 
 - **Upstream:** none. It needs only a world implementing `ScalarOpinions +
-  OpinionNeighbors`; the topology (complete graph, ring, network, lattice) is the
-  world's concern via `opinion_neighbors`.
+  Neighbors`; the topology (complete graph, ring, network, lattice) is the
+  world's concern via `neighbors_of`.
 - **Downstream:** an optional [`ConvergenceMechanism`] (PostStep) can stop the run
   once `max|Δx| < tol`; the free helper `max_abs_delta(prev, curr)` exposes the same
   test for driver-side loops. Convergence detection is meaningful only for the
@@ -118,11 +118,11 @@ constructor arguments.
 ## 8. How to apply
 
 This mechanism is **library-mode only** — there is no scenario-TOML registration.
-Provide a world implementing `ScalarOpinions + OpinionNeighbors`, construct the
+Provide a world implementing `ScalarOpinions + Neighbors`, construct the
 mechanism, and add it to a `SimulationBuilder`.
 
 ```rust
-use socsim_core::{AgentId, ScalarOpinions, OpinionNeighbors, WorldState, SimClock};
+use socsim_core::{AgentId, ScalarOpinions, Neighbors, WorldState, SimClock};
 use socsim_social_dynamics::{HegselmannKrauseMechanism, MeanOperator};
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
@@ -140,8 +140,8 @@ impl ScalarOpinions for OpinionWorld {
     fn opinion(&self, id: AgentId) -> f64 { self.opinions[id.0 as usize] }
     fn set_opinion(&mut self, id: AgentId, v: f64) { self.opinions[id.0 as usize] = v; }
 }
-impl OpinionNeighbors for OpinionWorld {
-    fn opinion_neighbors(&self, id: AgentId) -> Vec<AgentId> {
+impl Neighbors for OpinionWorld {
+    fn neighbors_of(&self, id: AgentId) -> Vec<AgentId> {
         self.agent_ids().into_iter().filter(|&j| j != id).collect()
     }
 }

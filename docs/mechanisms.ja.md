@@ -8,10 +8,11 @@
 メカニズムはニューラルネットワーク層のように合成され，各メカニズムが `WorldState` を読み書きし，
 エンジンがそれらを毎ステップ固定順序で実行します．
 
-このカタログでは，socsim に同梱されている**13個**のメカニズムを解説します．内訳は，
+このカタログでは，socsim に同梱されている**18個**のメカニズムを解説します．内訳は，
 公表された経験的知見に対してキャリブレーション済みの参照用[HR ライフサイクル](usecases.ja.md)メカニズム10個，
-学習可能な MARL `policy` メカニズム1個，および2個の意見ダイナミクスメカニズム
-（`hegselmann_krause`，`deffuant`）— 汎用の非 HR `socsim-social-dynamics` パックの最初のメンバー — です．
+学習可能な MARL `policy` メカニズム1個，および7個の社会ダイナミクスメカニズム
+（`hegselmann_krause`，`deffuant`，`social_judgement`，`lorenz`，`si_contagion`，`threshold_contagion`，`axelrod`）
+— 汎用の非 HR `socsim-social-dynamics` パック — です．
 
 ## 概要
 
@@ -22,7 +23,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 同一フェーズ内ではシナリオでの宣言順（＝挿入順）に発火します．破線の緑矢印は，1ステップ内での**共有状態の受け渡し**を示します．
 たとえば `turnover` が `departed_this_step` を設定し，PostStep で `knowledge_loss` がそれを読み取ります．
 
-## 13個のメカニズム
+## 18個のメカニズム
 
 | メカニズム | フェーズ | 出典 | 種別 | 概要 |
 |---|---|---|---|---|
@@ -39,10 +40,16 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`policy`](mechanisms/policy-mechanism.ja.md) | Decision | MARL (§14.1) | learnable | 学習済み RL ポリシーをドロップイン型 Decision メカニズムとして利用する（ライブラリ専用）． |
 | [`hegselmann_krause`](mechanisms/hegselmann-krause.ja.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | ε 以内の意見の選択された平均へ向かう同期的な有界信頼更新（ライブラリ専用）． |
 | [`deffuant`](mechanisms/deffuant.ja.md) | Interaction | Deffuant et al. (2000) | bounded-confidence | ペアの有界信頼更新：ε 以内の2エージェントが率 μ で収束する（ライブラリ専用）． |
+| [`social_judgement`](mechanisms/social-judgement.ja.md) | Interaction | Social Judgement Theory | assimilation–contrast | ε 以内のメッセージを同化し，拒否領域のものに反発する — 分極を駆動する（ライブラリ専用）． |
+| [`lorenz`](mechanisms/lorenz.ja.md) | Interaction | Lorenz et al. (2021) | assimilation + reinforcement | 同化に加え，極端な意見を増幅する自己強化項を持つ（ライブラリ専用）． |
+| [`si_contagion`](mechanisms/si-contagion.ja.md) | Interaction | SI 感染症モデル | network contagion | 各アクティブな近傍が独立に確率 β で非アクティブなエージェントを感染させる（ライブラリ専用）． |
+| [`threshold_contagion`](mechanisms/threshold-contagion.ja.md) | Interaction | Granovetter (1978) | network contagion | 非アクティブなエージェントはアクティブ近傍の割合が θ に達すると活性化する（ライブラリ専用）． |
+| [`axelrod`](mechanisms/axelrod.ja.md) | Interaction | Axelrod (1997) | cultural dissemination | 出会いのたびに類似度に等しい確率で異なる特徴を1つコピーする（ライブラリ専用）． |
 
-最後の2行は，汎用の（非 HR）[`socsim-social-dynamics`](architecture.ja.md#クレートワークスペース)パックの
-最初のメンバーであり，HR ライフサイクルパックとは区別される再利用可能でドメイン非依存な意見ダイナミクスの構成要素です．
-どちらも**ライブラリ専用**（`ModulePack` ／シナリオ TOML 登録なし）です．
+最後の7行は，汎用の（非 HR）[`socsim-social-dynamics`](architecture.ja.md#クレートワークスペース)パックの
+メンバーであり，HR ライフサイクルパックとは区別される再利用可能でドメイン非依存な社会ダイナミクスの構成要素
+（意見ダイナミクス，ネットワーク伝播，文化伝播）です．
+すべて**ライブラリ専用**（`ModulePack` ／シナリオ TOML 登録なし）です．
 
 **Kind** は2種類を区別します．*empirical* はメタ分析から得られた固定相関 ρ で，チューニングできません．
 一方の *tunable* は月次ダイナミクスのペースを制御するキャリブレーションスケールです．

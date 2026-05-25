@@ -23,7 +23,7 @@ socsim-cli          ← binary (entry point)
             ├── socsim-marl        ← learnable (MARL) policies: Policy, PolicyMechanism, MarlTrainer (burn; library-only)
             └── socsim-rng         ← SimRng (ChaCha20), derive_seed
 
-socsim-social-dynamics ← general opinion-dynamics pack: HegselmannKrauseMechanism, DeffuantMechanism, MeanOperator (→ socsim-core only; library-only)
+socsim-social-dynamics ← general social-dynamics pack: HegselmannKrauseMechanism, DeffuantMechanism, SocialJudgementMechanism, LorenzMechanism, SiContagionMechanism, ThresholdContagionMechanism, AxelrodMechanism, MeanOperator (→ socsim-core only; library-only)
 socsim-llm      ← optional LLM-agent layer: LlmClient, CachingClient, build_live_client (no socsim deps; feature-gated; library-only)
 socsim-results  ← leaf output helpers: timestamp, create_run_dir, write_csv/json, refresh_latest_symlink (no socsim deps; library-only)
 ```
@@ -39,7 +39,7 @@ Dependency rules:
 - `socsim-marl` (Phase 6) depends on `socsim-engine` and `socsim-core`. It is **library-only** — not part of the `socsim` binary — and pulls in the `burn` neural-network framework, so the hr-lifecycle integration gates it behind a `marl` feature.
 - `socsim-llm` is an **orthogonal, optional** layer beside the engine. It has **no `socsim-*` dependencies** (only `serde`/`serde_json`/`thiserror`, plus `ureq` behind features) and is **library-only**. Its live provider backends are feature-gated (`ollama`, `openai`, and `live` = both); the default build pulls in no networking. It is used by the `Decision` phase of LLM-driven models.
 - `socsim-results` is a **leaf crate** with **no `socsim-*` dependencies** (only `std` plus `serde`/`serde_json`/`csv`/`chrono`). It provides the output boilerplate for the lightweight library mode and never drags in `socsim-log`/`-config`/`-runner`.
-- `socsim-social-dynamics` is an **orthogonal, optional** pack beside the engine. It depends on **`socsim-core` only** (for the `ScalarOpinions` / `OpinionNeighbors` capability traits) and is **library-only** — no `ModulePack`, not wired into the `socsim` binary. It is the **first general (non-HR) mechanism pack**: reusable, domain-agnostic opinion-dynamics building blocks (the bounded-confidence `HegselmannKrauseMechanism` and `DeffuantMechanism`, with the A/G/H/P/R `MeanOperator` family), distinct from the scenario-specific `socsim-hr-lifecycle` pack.
+- `socsim-social-dynamics` is an **orthogonal, optional** pack beside the engine. It depends on **`socsim-core` only** (for the `ScalarOpinions` / `BinaryState` / `CultureVectors` / `Neighbors` capability traits) and is **library-only** — no `ModulePack`, not wired into the `socsim` binary. It is the **first general (non-HR) mechanism pack**: reusable, domain-agnostic social-dynamics building blocks — seven mechanisms across three families: opinion dynamics (the bounded-confidence `HegselmannKrauseMechanism` and `DeffuantMechanism`, the `SocialJudgementMechanism`, and the `LorenzMechanism`, with the A/G/H/P/R `MeanOperator` family), network contagion (`SiContagionMechanism`, `ThresholdContagionMechanism`), and cultural dissemination (`AxelrodMechanism`) — distinct from the scenario-specific `socsim-hr-lifecycle` pack.
 
 ---
 
