@@ -14,7 +14,7 @@ reference [HR lifecycle](usecases.md) mechanisms (calibrated against published
 empirical findings), the learnable MARL `policy` mechanism, and the seven
 social-dynamics mechanisms (`hegselmann_krause`, `deffuant`, `social_judgement`,
 `lorenz`, `si_contagion`, `threshold_contagion`, `axelrod`) — the general, non-HR
-`socsim-social-dynamics` crate.
+`socsim-mechanisms` crate.
 
 ## Overview
 
@@ -50,7 +50,7 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`axelrod`](mechanisms/axelrod.md) | Interaction | Axelrod (1997) | cultural dissemination | On each encounter copy one differing feature with probability equal to similarity (library-only). |
 
 The last seven rows are the members of the general (non-HR)
-[`socsim-social-dynamics`](architecture.md#crate-workspace) crate — reusable,
+[`socsim-mechanisms`](architecture.md#crate-workspace) crate — reusable,
 domain-agnostic social-dynamics building blocks (opinion dynamics, network contagion,
 and cultural dissemination) distinct from the HR-lifecycle crate. All are
 **library-only** (no `ModulePack` / scenario-TOML registration).

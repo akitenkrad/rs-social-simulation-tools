@@ -1,13 +1,17 @@
-//! General social-dynamics mechanisms for `socsim`.
+//! General, reusable mechanism catalog for `socsim`.
 //!
-//! This is `socsim`'s first **general** (non-HR, domain-agnostic) mechanism
-//! pack.  Where crates such as `socsim-hr-lifecycle` model one specific
-//! scenario, this crate provides reusable *building blocks* that operate over
-//! any world implementing the capability traits from `socsim-core`
+//! This is `socsim`'s **general** (domain-agnostic) mechanism catalog.  Where
+//! crates such as `socsim-hr-lifecycle` model one specific scenario, this crate
+//! provides reusable *building blocks* that operate over any world implementing
+//! the capability traits from `socsim-core`
 //! ([`ScalarOpinions`](socsim_core::ScalarOpinions),
 //! [`BinaryState`](socsim_core::BinaryState),
 //! [`CultureVectors`](socsim_core::CultureVectors), each paired with
 //! [`Neighbors`](socsim_core::Neighbors)).
+//!
+//! The catalog is split into three Cargo **feature families** (all on by
+//! default): `opinion-dynamics`, `contagion` and `cultural`.  Disable default
+//! features and opt in to compile only the families you need.
 //!
 //! Three mechanism families ship here:
 //!
@@ -45,23 +49,33 @@
 //!
 //! # Usage (library mode)
 //! ```ignore
-//! use socsim_social_dynamics::{HegselmannKrauseMechanism, MeanOperator};
+//! use socsim_mechanisms::{HegselmannKrauseMechanism, MeanOperator};
 //! let hk = HegselmannKrauseMechanism::new(0.2, MeanOperator::Arithmetic);
 //! // register `hk` with the engine for a world: ScalarOpinions + Neighbors
 //! ```
 
+#[cfg(feature = "contagion")]
 pub mod contagion;
+#[cfg(feature = "cultural")]
 pub mod culture;
+#[cfg(feature = "opinion-dynamics")]
 pub mod means;
+#[cfg(feature = "opinion-dynamics")]
 pub mod opinion;
+#[cfg(feature = "opinion-dynamics")]
 pub mod updates;
 
+#[cfg(feature = "contagion")]
 pub use contagion::{SiContagionMechanism, ThresholdContagionMechanism};
+#[cfg(feature = "cultural")]
 pub use culture::{axelrod_event, is_absorbing, AxelrodMechanism};
+#[cfg(feature = "opinion-dynamics")]
 pub use means::{apply_mean, parse_mean, MeanOperator};
+#[cfg(feature = "opinion-dynamics")]
 pub use opinion::{
     DeffuantMechanism, HegselmannKrauseMechanism, LorenzMechanism, SocialJudgementMechanism,
 };
+#[cfg(feature = "opinion-dynamics")]
 pub use updates::{
     bounded_confidence_update, clamp_attitude, f_message, hk_update, lorenz_update,
     social_judgement_update,

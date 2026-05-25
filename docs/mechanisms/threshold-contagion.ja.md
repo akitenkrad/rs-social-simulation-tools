@@ -9,7 +9,7 @@
 
 ## 1. 概要
 
-`threshold_contagion` は，汎用の `socsim-social-dynamics` クレートにおけるネットワーク伝播ファミリーの
+`threshold_contagion` は，汎用の `socsim-mechanisms` クレートにおけるネットワーク伝播ファミリーの
 **決定論的閾値**メンバーです．各エージェントは二値の*アクティブ*フラグを持ちます．
 1ステップに1回，**同期ラウンド**を実行します．まずステップ開始時にアクティブ集合をスナップショットし，
 非アクティブなエージェントは，その近傍のうちアクティブなものの割合が閾値 θ に達したときのみ活性化します．
@@ -91,7 +91,7 @@ ModulePack がないため，シナリオ TOML のパラメータブロックも
 [SI 伝播の例](si-contagion.ja.md#8-適用方法)と同一です．）
 
 ```rust
-use socsim_social_dynamics::ThresholdContagionMechanism;
+use socsim_mechanisms::ThresholdContagionMechanism;
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
 // θ = 0.3：近傍の30%がアクティブになったら活性化．

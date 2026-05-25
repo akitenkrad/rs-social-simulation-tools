@@ -4450,6 +4450,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "socsim-mechanisms"
+version = "0.1.0"
+dependencies = [
+ "rand 0.8.6",
+ "socsim-core",
+]
+
+[[package]]
 name = "socsim-net"
 version = "0.1.0"
 dependencies = [
@@ -4492,14 +4500,6 @@ dependencies = [
  "socsim-engine",
  "socsim-hr-lifecycle",
  "socsim-log",
-]
-
-[[package]]
-name = "socsim-social-dynamics"
-version = "0.1.0"
-dependencies = [
- "rand 0.8.6",
- "socsim-core",
 ]
 
 [[package]]

@@ -12,7 +12,7 @@
 ## 1. Overview
 
 `si_contagion` is the per-edge **SI (Susceptible–Infected)** member of the
-network-contagion family in the general `socsim-social-dynamics` crate. Each agent
+network-contagion family in the general `socsim-mechanisms` crate. Each agent
 carries a binary *active / infected* flag. Once per step the mechanism performs a
 **synchronous round**: it snapshots the active set at the start of the step, and for
 every inactive agent it draws one independent Bernoulli(β) trial per *active*
@@ -105,7 +105,7 @@ add it to a `SimulationBuilder`.
 
 ```rust
 use socsim_core::{AgentId, BinaryState, Neighbors, WorldState, SimClock};
-use socsim_social_dynamics::SiContagionMechanism;
+use socsim_mechanisms::SiContagionMechanism;
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
 // A world carrying one active/infected flag per agent (e.g. over a network).

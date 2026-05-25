@@ -12,7 +12,7 @@
 ## 1. Overview
 
 `axelrod` is the **cultural-dissemination** member of the general
-`socsim-social-dynamics` crate. Each agent holds a fixed-length categorical *culture
+`socsim-mechanisms` crate. Each agent holds a fixed-length categorical *culture
 vector* of `F` features. The mechanism is **event-driven**: each step it runs
 `events_per_step` micro-events. In each event it draws a site `s` uniformly and a
 random neighbour `nb`, computes their similarity `sim = (#matching features) / F`,
@@ -110,7 +110,7 @@ and add it to a `SimulationBuilder`.
 
 ```rust
 use socsim_core::{AgentId, CultureVectors, Neighbors, WorldState, SimClock};
-use socsim_social_dynamics::{AxelrodMechanism, is_absorbing};
+use socsim_mechanisms::{AxelrodMechanism, is_absorbing};
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
 // A world carrying an F-feature culture vector per agent (e.g. over a lattice).

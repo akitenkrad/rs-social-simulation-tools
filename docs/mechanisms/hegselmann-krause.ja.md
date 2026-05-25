@@ -9,7 +9,7 @@
 
 ## 1. 概要
 
-`hegselmann_krause`（HK）は，汎用の `socsim-social-dynamics` クレートが提供する2つの
+`hegselmann_krause`（HK）は，汎用の `socsim-mechanisms` クレートが提供する2つの
 **有界信頼（bounded confidence, BC）** 意見ダイナミクスメカニズムの1つです．
 1ステップに1回，**同期的**な更新を行います．まず全エージェントのスカラー意見をスナップショットし，
 各エージェント `i` について，その意見を `x_i` から対称な許容幅 ε 以内にある意見 — その*信頼集合* —
@@ -112,7 +112,7 @@ ModulePack がないため，シナリオ TOML のパラメータブロックも
 
 ```rust
 use socsim_core::{AgentId, ScalarOpinions, Neighbors, WorldState, SimClock};
-use socsim_social_dynamics::{HegselmannKrauseMechanism, MeanOperator};
+use socsim_mechanisms::{HegselmannKrauseMechanism, MeanOperator};
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
 // エージェントごとに1つのスカラー意見を持つワールド（例：完全グラフ上）．

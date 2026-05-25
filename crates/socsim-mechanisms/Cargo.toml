@@ -1,0 +1,17 @@
+[package]
+name        = "socsim-mechanisms"
+description = "General, reusable mechanism catalog for socsim: opinion dynamics (bounded confidence, social judgement, Lorenz), network contagion (SI, threshold) and cultural dissemination (Axelrod)"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = ["opinion-dynamics", "contagion", "cultural"]
+opinion-dynamics = []   # HegselmannKrause, Deffuant, SocialJudgement, Lorenz, MeanOperator
+contagion = []          # SiContagion, ThresholdContagion
+cultural = []           # Axelrod
+
+[dependencies]
+rand.workspace = true
+socsim-core = { path = "../socsim-core" }

@@ -3,7 +3,7 @@
 //! These traits let *general* (domain-agnostic) social-dynamics mechanisms — the
 //! opinion-dynamics family (Hegselmann–Krause, Deffuant, Social Judgement,
 //! Lorenz), the network-contagion family (SI, Granovetter threshold), and the
-//! cultural-dissemination family (Axelrod) in `socsim-social-dynamics` — operate
+//! cultural-dissemination family (Axelrod) in `socsim-mechanisms` — operate
 //! over any [`WorldState`] that can expose the relevant per-agent state and name
 //! each agent's influence set.
 //!

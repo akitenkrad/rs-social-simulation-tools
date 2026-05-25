@@ -9,7 +9,7 @@
 
 ## 1. 概要
 
-`axelrod` は，汎用の `socsim-social-dynamics` クレートにおける**文化伝播**メンバーです．
+`axelrod` は，汎用の `socsim-mechanisms` クレートにおける**文化伝播**メンバーです．
 各エージェントは `F` 個の特徴からなる固定長のカテゴリカルな*文化ベクトル*を持ちます．
 メカニズムは**イベント駆動**です．各ステップで `events_per_step` 回のマイクロイベントを実行します．
 各イベントではサイト `s` を一様に，ランダムな近傍 `nb` を引き，その類似度
@@ -96,7 +96,7 @@ ModulePack がないため，シナリオ TOML のパラメータブロックも
 
 ```rust
 use socsim_core::{AgentId, CultureVectors, Neighbors, WorldState, SimClock};
-use socsim_social_dynamics::{AxelrodMechanism, is_absorbing};
+use socsim_mechanisms::{AxelrodMechanism, is_absorbing};
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
 // エージェントごとに F 特徴の文化ベクトルを持つワールド（例：格子上）．

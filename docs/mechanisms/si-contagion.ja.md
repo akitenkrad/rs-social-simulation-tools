@@ -9,7 +9,7 @@
 
 ## 1. 概要
 
-`si_contagion` は，汎用の `socsim-social-dynamics` クレートにおけるネットワーク伝播ファミリーの
+`si_contagion` は，汎用の `socsim-mechanisms` クレートにおけるネットワーク伝播ファミリーの
 **エッジ単位の SI（Susceptible–Infected）** メンバーです．各エージェントは二値の
 *アクティブ／感染*フラグを持ちます．1ステップに1回，**同期ラウンド**を実行します．
 まずステップ開始時にアクティブ集合をスナップショットし，各非アクティブなエージェントについて，
@@ -96,7 +96,7 @@ ModulePack がないため，シナリオ TOML のパラメータブロックも
 
 ```rust
 use socsim_core::{AgentId, BinaryState, Neighbors, WorldState, SimClock};
-use socsim_social_dynamics::SiContagionMechanism;
+use socsim_mechanisms::SiContagionMechanism;
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
 // エージェントごとに1つのアクティブ／感染フラグを持つワールド（例：ネットワーク上）．

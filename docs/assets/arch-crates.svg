@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>socsim crate workspace dependency graph</title>
-<desc>The fourteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-hr-lifecycle use the green accent, while the library-only crates — socsim-marl (burn), socsim-social-dynamics (depends on socsim-core only), socsim-llm and socsim-results — are drawn with dashed borders.</desc>
+<desc>The fourteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-hr-lifecycle use the green accent, while the library-only crates — socsim-marl (burn), socsim-mechanisms (depends on socsim-core only), socsim-llm and socsim-results — are drawn with dashed borders.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -113,7 +113,7 @@
 <text class="body" x="895" y="366" font-size="9.5" fill="#534AB7" text-anchor="middle">burn</text>
 
 <rect x="638" y="394" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
-<text class="mono" x="654" y="412" font-size="12.5" fill="#332E6E">socsim-social-dynamics</text>
+<text class="mono" x="654" y="412" font-size="12.5" fill="#332E6E">socsim-mechanisms</text>
 <text class="body" x="654" y="427" font-size="10" fill="#6B6A64">opinion dynamics: HK · Deffuant (→ core only)</text>
 <rect x="838" y="400" width="94" height="20" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.9"/>
 <text class="body" x="885" y="414" font-size="9.5" fill="#534AB7" text-anchor="middle">library pack</text>

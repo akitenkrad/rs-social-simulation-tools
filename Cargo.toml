@@ -7,7 +7,7 @@ members = [
     "crates/socsim-engine",
     "crates/socsim-config",
     "crates/socsim-net",
-    "crates/socsim-social-dynamics",
+    "crates/socsim-mechanisms",
     "crates/socsim-grid",
     "crates/socsim-llm",
     "crates/socsim-hr-lifecycle",

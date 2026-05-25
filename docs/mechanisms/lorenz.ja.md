@@ -9,7 +9,7 @@
 
 ## 1. 概要
 
-`lorenz` は，汎用の `socsim-social-dynamics` クレートにおける意見ダイナミクスファミリーの
+`lorenz` は，汎用の `socsim-mechanisms` クレートにおける意見ダイナミクスファミリーの
 **同化＋分極**メンバーです．各エージェントは `[-1, 1]` のスカラー意見を持ちます．
 1ステップに1回，**同期的**な更新を行います．まず全エージェントの意見をスナップショットし，
 各エージェント `i` について2つの項を組み合わせます．
@@ -102,7 +102,7 @@ $$
 [Hegselmann–Krause の例](hegselmann-krause.ja.md#8-適用方法)と同一です．）
 
 ```rust
-use socsim_social_dynamics::LorenzMechanism;
+use socsim_mechanisms::LorenzMechanism;
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
 // ε = 0.4 受容，α = 0.5 同化，repulsion = 0.2 分極．

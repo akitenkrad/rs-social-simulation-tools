@@ -12,7 +12,7 @@
 ## 1. Overview
 
 `threshold_contagion` is the **deterministic threshold** member of the
-network-contagion family in the general `socsim-social-dynamics` crate. Each agent
+network-contagion family in the general `socsim-mechanisms` crate. Each agent
 carries a binary *active* flag. Once per step the mechanism performs a **synchronous
 round**: it snapshots the active set at the start of the step, and an inactive agent
 activates iff the fraction of its neighbours that are active reaches the threshold θ.
@@ -105,7 +105,7 @@ add it to a `SimulationBuilder`. (The world boilerplate is identical to the
 [SI contagion example](si-contagion.md#8-how-to-apply).)
 
 ```rust
-use socsim_social_dynamics::ThresholdContagionMechanism;
+use socsim_mechanisms::ThresholdContagionMechanism;
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
 // θ = 0.3: activate once 30% of neighbours are active.

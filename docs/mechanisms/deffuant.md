@@ -11,7 +11,7 @@
 ## 1. Overview
 
 `deffuant` is the **pairwise / event-based** member of the bounded-confidence (BC)
-family in the general `socsim-social-dynamics` crate. Where Hegselmann–Krause updates
+family in the general `socsim-mechanisms` crate. Where Hegselmann–Krause updates
 *every* agent simultaneously against its whole confidence set, Deffuant updates *two*
 agents at a time: each step it performs `pairs_per_step` random encounters, drawing an
 agent `i` and a random neighbour `j`. If their opinions lie within a symmetric
@@ -110,7 +110,7 @@ mechanism, and add it to a `SimulationBuilder`. (The world boilerplate is identi
 to the [Hegselmann–Krause example](hegselmann-krause.md#8-how-to-apply).)
 
 ```rust
-use socsim_social_dynamics::DeffuantMechanism;
+use socsim_mechanisms::DeffuantMechanism;
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
 
 // ε = 0.2, μ = 0.5, 50 pairwise encounters per step.

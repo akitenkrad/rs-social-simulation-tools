@@ -11,7 +11,7 @@
 ## 1. Overview
 
 `hegselmann_krause` (HK) is one of the two **bounded-confidence (BC)** opinion-dynamics
-mechanisms shipped by the general `socsim-social-dynamics` crate. Once per step it
+mechanisms shipped by the general `socsim-mechanisms` crate. Once per step it
 performs a **synchronous** update: it snapshots every agent's scalar opinion, and
 for each agent `i` it recomputes that opinion as the (chosen) *mean* of the opinions
 that lie within a symmetric tolerance ε of `x_i` — its *confidence set*. Opinions
@@ -123,7 +123,7 @@ mechanism, and add it to a `SimulationBuilder`.
 
 ```rust
 use socsim_core::{AgentId, ScalarOpinions, Neighbors, WorldState, SimClock};
-use socsim_social_dynamics::{HegselmannKrauseMechanism, MeanOperator};
+use socsim_mechanisms::{HegselmannKrauseMechanism, MeanOperator};
 use socsim_engine::{SequentialScheduler, SimulationBuilder};
 
 // A world carrying one scalar opinion per agent (e.g. over a complete graph).

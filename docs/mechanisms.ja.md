@@ -12,7 +12,7 @@
 公表された経験的知見に対してキャリブレーション済みの参照用[HR ライフサイクル](usecases.ja.md)メカニズム10個，
 学習可能な MARL `policy` メカニズム1個，および7個の社会ダイナミクスメカニズム
 （`hegselmann_krause`，`deffuant`，`social_judgement`，`lorenz`，`si_contagion`，`threshold_contagion`，`axelrod`）
-— 汎用の非 HR `socsim-social-dynamics` クレート — です．
+— 汎用の非 HR `socsim-mechanisms` クレート — です．
 
 ## 概要
 
@@ -46,7 +46,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`threshold_contagion`](mechanisms/threshold-contagion.ja.md) | Interaction | Granovetter (1978) | network contagion | 非アクティブなエージェントはアクティブ近傍の割合が θ に達すると活性化する（ライブラリ専用）． |
 | [`axelrod`](mechanisms/axelrod.ja.md) | Interaction | Axelrod (1997) | cultural dissemination | 出会いのたびに類似度に等しい確率で異なる特徴を1つコピーする（ライブラリ専用）． |
 
-最後の7行は，汎用の（非 HR）[`socsim-social-dynamics`](architecture.ja.md#クレートワークスペース)クレートの
+最後の7行は，汎用の（非 HR）[`socsim-mechanisms`](architecture.ja.md#クレートワークスペース)クレートの
 メンバーであり，HR ライフサイクルクレートとは区別される再利用可能でドメイン非依存な社会ダイナミクスの構成要素
 （意見ダイナミクス，ネットワーク伝播，文化伝播）です．
 すべて**ライブラリ専用**（`ModulePack` ／シナリオ TOML 登録なし）です．
