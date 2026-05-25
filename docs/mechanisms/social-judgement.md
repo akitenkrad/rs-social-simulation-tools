@@ -11,7 +11,7 @@
 ## 1. Overview
 
 `social_judgement` is the **assimilation–contrast** member of the opinion-dynamics
-family in the general `socsim-social-dynamics` pack. Each agent carries a scalar
+family in the general `socsim-social-dynamics` crate. Each agent carries a scalar
 opinion in `[-1, 1]`. Once per step it performs a **synchronous** update: it snapshots
 every agent's opinion, and for each agent `i` it classifies every neighbour message
 `m_j = x_j` by the signed gap `diff = m_j − x_i` into three regions:
