@@ -1,33 +1,117 @@
-//! Module-pack dispatch table.
+//! World-polymorphic module-pack registry for the `socsim` CLI.
 //!
-//! Add new packs here by:
-//! 1. Implementing a world factory closure.
-//! 2. Implementing a register closure.
-//! 3. Adding a `"pack-name"` arm to [`dispatch`] and the starter TOML to
-//!    [`starter_toml`].
-//! 4. Adding the name to [`known_packs`].
+//! The CLI is no longer monomorphized over a single concrete world type.
+//! Each module pack is exposed through the object-safe [`CliPack`] trait,
+//! which erases the concrete world `W` behind world-agnostic runner types
+//! ([`RunResult`], [`SweepPoint`], …).  A pack implementation builds its own
+//! `WorldFactory<W>` + register closure internally and calls the generic
+//! [`socsim_runner::run_seeds`] / [`socsim_runner::run_sweep`] specialized to
+//! its concrete world.
+//!
+//! Add new packs by:
+//! 1. Implementing a `struct FooCliPack;` that `impl CliPack`.
+//! 2. Adding a Cargo feature `pack-foo = ["dep:socsim-foo"]`.
+//! 3. Gating the impl + registry entry behind `#[cfg(feature = "pack-foo")]`.
+//! 4. Pushing an entry into [`packs`].
 
 use anyhow::{bail, Result};
 
-use socsim_config::{ModulePack, Params, Registry};
-use socsim_core::SimRng;
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
-use socsim_runner::WorldFactory;
+use socsim_config::Scenario;
+use socsim_runner::{RunResult, SweepAxis, SweepPoint};
 
-// ── Dispatch ──────────────────────────────────────────────────────────────────
+// ── CliPack trait ──────────────────────────────────────────────────────────────
 
-/// Boxed register closure (erased concrete pack type).
-pub type RegisterFn<W> = Box<dyn Fn(&mut Registry<W>) + Send + Sync>;
+/// An object-safe, world-erased module pack for the CLI.
+///
+/// Implementations own a concrete world type internally but never expose it in
+/// any signature, so `Box<dyn CliPack>` is object-safe and the CLI binary is
+/// not generic over any one domain model.
+pub trait CliPack: Send + Sync {
+    /// Stable pack name as used in `[simulation] module_pack = "..."`.
+    fn name(&self) -> &'static str;
 
-/// Return the world factory and register function for the named pack.
+    /// Starter scenario TOML emitted by `socsim init --module-pack <name>`.
+    fn starter_toml(&self) -> &'static str;
+
+    /// Sorted names of all mechanisms this pack registers.
+    fn mechanism_names(&self) -> Vec<String>;
+
+    /// Run the scenario over the given seeds, returning per-seed results.
+    fn run_seeds(
+        &self,
+        scenario: &Scenario,
+        seeds: &[u64],
+        parallel: bool,
+    ) -> Result<Vec<RunResult>>;
+
+    /// Run a grid parameter sweep over the given axes and seeds.
+    fn run_sweep(
+        &self,
+        scenario: &Scenario,
+        axes: &[SweepAxis],
+        seeds: &[u64],
+        parallel: bool,
+    ) -> Result<Vec<SweepPoint>>;
+}
+
+// ── Registry / dispatch ─────────────────────────────────────────────────────────
+
+/// Return every pack compiled into this build (gated by Cargo features).
+pub fn packs() -> Vec<Box<dyn CliPack>> {
+    #[allow(unused_mut)]
+    let mut v: Vec<Box<dyn CliPack>> = Vec::new();
+    #[cfg(feature = "pack-hr-lifecycle")]
+    v.push(Box::new(HrLifecycleCliPack));
+    v
+}
+
+/// Return the names of all known module packs.
+pub fn known_packs() -> Vec<&'static str> {
+    packs().iter().map(|p| p.name()).collect()
+}
+
+/// Look up a pack by name.
 ///
 /// # Errors
 ///
-/// Returns `Err` when `pack_name` is not recognised.
-pub fn dispatch(pack_name: &str) -> Result<(WorldFactory<HrWorld>, RegisterFn<HrWorld>)> {
-    match pack_name {
-        "hr-lifecycle" => {
-            let factory: WorldFactory<HrWorld> = Box::new(|params: &Params, seed: u64| {
+/// Returns `Err` when `name` is not a known (compiled-in) pack.
+pub fn dispatch(name: &str) -> Result<Box<dyn CliPack>> {
+    if let Some(p) = packs().into_iter().find(|p| p.name() == name) {
+        return Ok(p);
+    }
+    bail!(
+        "unknown module pack '{name}'; known packs: {}",
+        known_packs().join(", ")
+    )
+}
+
+/// Return a starter scenario TOML for the named pack.
+///
+/// # Errors
+///
+/// Returns `Err` when the pack is unknown.
+pub fn starter_toml(name: &str) -> Result<&'static str> {
+    Ok(dispatch(name)?.starter_toml())
+}
+
+// ── hr-lifecycle pack ────────────────────────────────────────────────────────────
+
+#[cfg(feature = "pack-hr-lifecycle")]
+mod hr_lifecycle {
+    use super::*;
+
+    use socsim_config::{ModulePack, Params, Registry};
+    use socsim_core::SimRng;
+    use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+    use socsim_runner::WorldFactory;
+
+    /// CLI-side wrapper exposing the `hr-lifecycle` pack through [`CliPack`].
+    pub struct HrLifecycleCliPack;
+
+    impl HrLifecycleCliPack {
+        /// Build the world factory closure for `HrWorld`.
+        fn world_factory() -> WorldFactory<HrWorld> {
+            Box::new(|params: &Params, seed: u64| {
                 let n_teams = params.get_u64("n_teams", 5) as usize;
                 let team_size = params.get_u64("team_size_initial", 8) as usize;
                 let ws_k = params.get_u64("network_k", 4) as usize;
@@ -35,50 +119,70 @@ pub fn dispatch(pack_name: &str) -> Result<(WorldFactory<HrWorld>, RegisterFn<Hr
                 let mut rng = SimRng::from_seed(seed);
                 let world = HrWorld::new(n_teams, team_size, ws_k, ws_beta, &mut rng);
                 Ok(world)
-            });
-
-            let register: RegisterFn<HrWorld> = Box::new(|reg| {
-                HrLifecyclePack.register(reg);
-            });
-
-            Ok((factory, register))
+            })
         }
-        other => bail!(
-            "unknown module pack '{other}'; known packs: {}",
-            known_packs().join(", ")
-        ),
+
+        /// Register all `hr-lifecycle` mechanisms into a registry.
+        fn register(reg: &mut Registry<HrWorld>) {
+            HrLifecyclePack.register(reg);
+        }
     }
-}
 
-/// Return the sorted names of mechanisms registered by `register`.
-pub fn mechanism_names(_pack_name: &str, register: &dyn Fn(&mut Registry<HrWorld>)) -> Vec<String> {
-    let mut reg: Registry<HrWorld> = Registry::new();
-    register(&mut reg);
-    let mut names: Vec<String> = reg.names().into_iter().map(|s| s.to_owned()).collect();
-    names.sort();
-    names
-}
+    impl CliPack for HrLifecycleCliPack {
+        fn name(&self) -> &'static str {
+            "hr-lifecycle"
+        }
 
-/// Return the names of all known module packs.
-pub fn known_packs() -> &'static [&'static str] {
-    &["hr-lifecycle"]
-}
+        fn starter_toml(&self) -> &'static str {
+            HR_LIFECYCLE_STARTER
+        }
 
-// ── Starter TOMLs ─────────────────────────────────────────────────────────────
+        fn mechanism_names(&self) -> Vec<String> {
+            let mut reg: Registry<HrWorld> = Registry::new();
+            Self::register(&mut reg);
+            let mut names: Vec<String> = reg.names().into_iter().map(|s| s.to_owned()).collect();
+            names.sort();
+            names
+        }
 
-/// Return a starter scenario TOML string for the named pack, or an error if
-/// the pack is unknown.
-pub fn starter_toml(pack_name: &str) -> Result<&'static str> {
-    match pack_name {
-        "hr-lifecycle" => Ok(HR_LIFECYCLE_STARTER),
-        other => bail!(
-            "unknown module pack '{other}'; known packs: {}",
-            known_packs().join(", ")
-        ),
+        fn run_seeds(
+            &self,
+            scenario: &Scenario,
+            seeds: &[u64],
+            parallel: bool,
+        ) -> Result<Vec<RunResult>> {
+            let factory = Self::world_factory();
+            let results = socsim_runner::run_seeds::<HrWorld>(
+                scenario,
+                &factory,
+                &Self::register,
+                seeds.iter().copied(),
+                parallel,
+            )?;
+            Ok(results)
+        }
+
+        fn run_sweep(
+            &self,
+            scenario: &Scenario,
+            axes: &[SweepAxis],
+            seeds: &[u64],
+            parallel: bool,
+        ) -> Result<Vec<SweepPoint>> {
+            let factory = Self::world_factory();
+            let points = socsim_runner::run_sweep::<HrWorld>(
+                scenario,
+                axes,
+                &factory,
+                &Self::register,
+                seeds.to_vec(),
+                parallel,
+            )?;
+            Ok(points)
+        }
     }
-}
 
-const HR_LIFECYCLE_STARTER: &str = r#"# HR Lifecycle Scenario — generated by `socsim init`
+    pub(super) const HR_LIFECYCLE_STARTER: &str = r#"# HR Lifecycle Scenario — generated by `socsim init`
 # Edit parameters as needed, then run with:
 #   socsim run <this-file>
 
@@ -165,3 +269,7 @@ phase = "reward"
 log_path = "runs/{name}_{seed}.jsonl"
 metrics  = ["org_performance", "avg_tenure", "turnover_rate", "knowledge_stock"]
 "#;
+}
+
+#[cfg(feature = "pack-hr-lifecycle")]
+pub use hr_lifecycle::HrLifecycleCliPack;

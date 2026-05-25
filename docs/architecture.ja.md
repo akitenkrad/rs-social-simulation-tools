@@ -17,7 +17,7 @@ socsim-cli          ← バイナリ（エントリーポイント）
             │       └── socsim-log         ← InMemoryRecorder, JsonlRecorder, CsvRecorder
             ├── socsim-config      ← Params, Registry, ModulePack, Scenarioローダー
             │       └── socsim-core        ← トレイト (Mechanism, WorldState, …), AgentId, Phase, Blackboard
-            ├── socsim-hr-lifecycle ← リファレンスモジュール（10メカニズム）
+            ├── socsim-hr-lifecycle ← リファレンスモジュール（10メカニズム）；`pack-hr-lifecycle`（既定で有効）の背後にある CliPack
             │       └── socsim-net         ← SocialNetwork（ER, WS, BAジェネレーター）
             ├── socsim-grid        ← Grid, GridIndex, 近傍, 距離（空間モデル）
             ├── socsim-marl        ← 学習ポリシー(MARL): Policy, PolicyMechanism, MarlTrainer（burn; ライブラリ専用）
@@ -34,7 +34,7 @@ socsim-results  ← リーフの出力ヘルパ: timestamp, create_run_dir, writ
 - `socsim-config` は `socsim-core` に依存しますが，循環を避けるため `socsim-engine` には**依存しません**．
 - `socsim-engine` は `socsim-core`，`socsim-log`，`socsim-config` に依存します．
 - `socsim-runner` は上記すべてに依存し，並列処理のために `rayon` を追加します．
-- `socsim-cli` はすべてを `socsim` バイナリとして結合します．
+- `socsim-cli` はすべてを `socsim` バイナリとして結合します．これは **World 多態**です：各コマンドハンドラは，オブジェクトセーフで World を消去した `CliPack` トレイト（`name` / `starter_toml` / `mechanism_names` / `run_seeds` / `run_sweep`，いずれも World 非依存の `RunResult` / `SweepPoint` を返す）を介して動作し，登録された各 pack が自身の World 型に対して汎用の `socsim-runner` 関数を内部で monomorphize します．したがってバイナリは具体的な World 型を**一切名指しせず**，pack はレジストリから名前で引かれます．`socsim-hr-lifecycle` は今や**そうした pack の一つ**にすぎず，既定で有効な `pack-hr-lifecycle` feature（`optional` 依存）でゲートされます — CLI 全体が generic に従属する特権的な World ではありません．追加の pack は run/sweep/validate/list パイプラインに手を入れずにその隣へ差し込めます．
 - `socsim-hr-lifecycle`，`socsim-net`，`socsim-grid` はエンジン層の隣に位置し，直交しています；`socsim-grid` は `socsim-core` にのみ依存します．
 - `socsim-marl`（Phase 6）は `socsim-engine` と `socsim-core` に依存します．**ライブラリ専用**（`socsim` バイナリには含まれません）で，ニューラルネットフレームワーク `burn` を取り込むため，hr-lifecycle 連携は `marl` feature でゲートしています．
 - `socsim-llm` はエンジン層の隣に位置する**直交した，オプションの**層です．**`socsim-*` 依存はなく**（`serde`/`serde_json`/`thiserror` のみ，加えて feature 越しの `ureq`），**ライブラリ専用**です．ライブのプロバイダバックエンドは feature ゲート（`ollama`，`openai`，および両者をまとめた `live`）されており，デフォルトビルドはネットワーク依存を一切取り込みません．LLM 駆動モデルの `Decision` フェーズで使用します．

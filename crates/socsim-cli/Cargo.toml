@@ -16,7 +16,11 @@ socsim-config       = { path = "../socsim-config" }
 socsim-engine       = { path = "../socsim-engine" }
 socsim-log          = { path = "../socsim-log" }
 socsim-runner       = { path = "../socsim-runner" }
-socsim-hr-lifecycle = { path = "../socsim-hr-lifecycle" }
+socsim-hr-lifecycle = { path = "../socsim-hr-lifecycle", optional = true }
 clap.workspace      = true
 serde_json.workspace = true
 anyhow.workspace    = true
+
+[features]
+default = ["pack-hr-lifecycle"]
+pack-hr-lifecycle = ["dep:socsim-hr-lifecycle"]

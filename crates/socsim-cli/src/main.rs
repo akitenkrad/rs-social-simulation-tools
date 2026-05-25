@@ -29,7 +29,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use socsim_config::Scenario;
-use socsim_runner::{run_seeds, run_sweep, summarize, SweepAxis};
+use socsim_runner::{summarize, SweepAxis};
 
 // ── CLI top level ─────────────────────────────────────────────────────────────
 
@@ -170,7 +170,7 @@ fn cmd_run(scenario_path: &Path, seeds_arg: Option<&str>, parallel: bool) -> Res
         vec![scenario.simulation.seed]
     };
 
-    let (world_factory, register) = packs::dispatch(&scenario.simulation.module_pack)
+    let pack = packs::dispatch(&scenario.simulation.module_pack)
         .with_context(|| format!("unknown module pack '{}'", scenario.simulation.module_pack))?;
 
     println!(
@@ -182,14 +182,9 @@ fn cmd_run(scenario_path: &Path, seeds_arg: Option<&str>, parallel: bool) -> Res
         parallel
     );
 
-    let results = run_seeds(
-        &scenario,
-        &world_factory,
-        register.as_ref(),
-        seeds,
-        parallel,
-    )
-    .context("simulation run failed")?;
+    let results = pack
+        .run_seeds(&scenario, &seeds, parallel)
+        .context("simulation run failed")?;
 
     if results.len() == 1 {
         // Single-seed: print metric time series (condensed).
@@ -217,11 +212,10 @@ fn cmd_validate(scenario_path: &Path) -> Result<()> {
     let scenario = Scenario::from_path(scenario_path)
         .with_context(|| format!("failed to load '{}'", scenario_path.display()))?;
 
-    let (_, register) = packs::dispatch(&scenario.simulation.module_pack)
+    let pack = packs::dispatch(&scenario.simulation.module_pack)
         .with_context(|| format!("unknown module pack '{}'", scenario.simulation.module_pack))?;
 
-    // Build a temporary registry to collect mechanism names.
-    let names = packs::mechanism_names(&scenario.simulation.module_pack, register.as_ref());
+    let names = pack.mechanism_names();
 
     let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
     scenario
@@ -238,19 +232,16 @@ fn cmd_list(what: &str) -> Result<()> {
     match what {
         "packs" => {
             println!("Available module packs:");
-            for pack in packs::known_packs() {
-                println!("  {pack}");
+            for name in packs::known_packs() {
+                println!("  {name}");
             }
         }
         "mechanisms" => {
             println!("Mechanisms by pack:");
-            for pack in packs::known_packs() {
-                if let Ok((_, register)) = packs::dispatch(pack) {
-                    let names = packs::mechanism_names(pack, register.as_ref());
-                    println!("  [{pack}]");
-                    for name in &names {
-                        println!("    {name}");
-                    }
+            for pack in packs::packs() {
+                println!("  [{}]", pack.name());
+                for name in pack.mechanism_names() {
+                    println!("    {name}");
                 }
             }
         }
@@ -280,7 +271,7 @@ fn cmd_sweep(
         .map(|s| parse_sweep_axis(s))
         .collect::<Result<_>>()?;
 
-    let (world_factory, register) = packs::dispatch(&scenario.simulation.module_pack)
+    let pack = packs::dispatch(&scenario.simulation.module_pack)
         .with_context(|| format!("unknown module pack '{}'", scenario.simulation.module_pack))?;
 
     println!(
@@ -293,15 +284,9 @@ fn cmd_sweep(
         println!("  {} = {:?}", axis.param_key, axis.values);
     }
 
-    let points = run_sweep(
-        &scenario,
-        &axes,
-        &world_factory,
-        register.as_ref(),
-        seeds,
-        parallel,
-    )
-    .context("sweep failed")?;
+    let points = pack
+        .run_sweep(&scenario, &axes, &seeds, parallel)
+        .context("sweep failed")?;
 
     std::fs::create_dir_all(out_dir)
         .with_context(|| format!("failed to create output dir '{}'", out_dir.display()))?;

@@ -17,7 +17,7 @@ socsim-cli          ← binary (entry point)
             │       └── socsim-log         ← InMemoryRecorder, JsonlRecorder, CsvRecorder
             ├── socsim-config      ← Params, Registry, ModulePack, Scenario loader
             │       └── socsim-core        ← traits (Mechanism, WorldState, …), AgentId, Phase, Blackboard
-            ├── socsim-hr-lifecycle ← reference module (10 mechanisms)
+            ├── socsim-hr-lifecycle ← reference module (10 mechanisms); a CliPack behind `pack-hr-lifecycle` (default on)
             │       └── socsim-net         ← SocialNetwork (ER, WS, BA generators)
             ├── socsim-grid        ← Grid, GridIndex, neighbourhoods, distances (spatial models)
             ├── socsim-marl        ← learnable (MARL) policies: Policy, PolicyMechanism, MarlTrainer (burn; library-only)
@@ -34,7 +34,7 @@ Dependency rules:
 - `socsim-config` depends on `socsim-core` but **not** on `socsim-engine` (avoiding a cycle).
 - `socsim-engine` depends on `socsim-core`, `socsim-log`, and `socsim-config`.
 - `socsim-runner` depends on all of the above and adds `rayon` for parallelism.
-- `socsim-cli` wires everything together into the `socsim` binary.
+- `socsim-cli` wires everything together into the `socsim` binary. It is **world-polymorphic**: command handlers operate through an object-safe, world-erased `CliPack` trait (`name` / `starter_toml` / `mechanism_names` / `run_seeds` / `run_sweep`, all returning the world-agnostic `RunResult` / `SweepPoint`), and each registered pack monomorphizes the generic `socsim-runner` functions for its own world type internally. The binary therefore names **no** concrete world type, and packs are looked up by name via a registry. `socsim-hr-lifecycle` is now just **one such pack**, gated behind the default-on `pack-hr-lifecycle` feature (an `optional` dependency), not a privileged world the whole CLI is generic over — additional packs slot in beside it without touching the run/sweep/validate/list pipeline.
 - `socsim-hr-lifecycle`, `socsim-net`, and `socsim-grid` sit beside the engine layer and are orthogonal to it; `socsim-grid` depends only on `socsim-core`.
 - `socsim-marl` (Phase 6) depends on `socsim-engine` and `socsim-core`. It is **library-only** — not part of the `socsim` binary — and pulls in the `burn` neural-network framework, so the hr-lifecycle integration gates it behind a `marl` feature.
 - `socsim-llm` is an **orthogonal, optional** layer beside the engine. It has **no `socsim-*` dependencies** (only `serde`/`serde_json`/`thiserror`, plus `ureq` behind features) and is **library-only**. Its live provider backends are feature-gated (`ollama`, `openai`, and `live` = both); the default build pulls in no networking. It is used by the `Decision` phase of LLM-driven models.
