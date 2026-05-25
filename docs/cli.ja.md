@@ -17,6 +17,8 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 ```
 
+![CLI workflow](assets/cli-workflow.svg)
+
 ---
 
 ## init
