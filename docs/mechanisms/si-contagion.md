@@ -147,7 +147,9 @@ more stochastic cascade; raise it toward 1 for near-deterministic flooding.
 **Stochastic**: each per-edge transmission is a Bernoulli(β) trial drawn from
 `ctx.rng`, so the trajectory depends on the RNG stream. Because all randomness flows
 through `ctx.rng`, a fixed seed yields a fully reproducible run. The active set is
-monotone, so the run always reaches saturation in finite steps.
+monotone, so the run always reaches saturation in finite steps. Inactive agents are
+visited in the scheduler's activation order (`ctx.agent_order`), so the mechanism
+reproduces a `RandomActivationScheduler`-driven run exactly.
 
 ## 10. Expected behaviour
 

@@ -27,6 +27,15 @@
 //!   - [`AxelrodMechanism`] — Axelrod (1997) feature copying; math from
 //!     `wang2025`.
 //!
+//! For hybrid models (e.g. `mou2024`, an LLM core + ABM periphery) the bare
+//! message-set **Δ-form** opinion updates ([`updates`] module —
+//! [`bounded_confidence_update`], [`hk_update`], [`social_judgement_update`],
+//! [`lorenz_update`]) are exposed directly: they take a `messages: &[f64]` set
+//! and return a delta `Δa` the caller clamps onto `a_i`.  These are ported
+//! byte-for-byte from `mou2024` and are distinct from the standalone mechanisms
+//! above (the SJ / Lorenz mechanisms route through them as the single source of
+//! truth).
+//!
 //! Convergence for the opinion family is decided by the **driver / world**,
 //! matching the `hegselmann2005` reference; this crate offers the free helper
 //! [`max_abs_delta`] and an optional [`ConvergenceMechanism`] (a `PostStep`
@@ -45,12 +54,17 @@ pub mod contagion;
 pub mod culture;
 pub mod means;
 pub mod opinion;
+pub mod updates;
 
 pub use contagion::{SiContagionMechanism, ThresholdContagionMechanism};
 pub use culture::{axelrod_event, is_absorbing, AxelrodMechanism};
 pub use means::{apply_mean, parse_mean, MeanOperator};
 pub use opinion::{
     DeffuantMechanism, HegselmannKrauseMechanism, LorenzMechanism, SocialJudgementMechanism,
+};
+pub use updates::{
+    bounded_confidence_update, clamp_attitude, f_message, hk_update, lorenz_update,
+    social_judgement_update,
 };
 
 use socsim_core::{Mechanism, Phase, Result, ScalarOpinions, StepContext};

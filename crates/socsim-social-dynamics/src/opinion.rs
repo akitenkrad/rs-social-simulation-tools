@@ -24,20 +24,15 @@ use socsim_core::{AgentId, Mechanism, Neighbors, Phase, Result, ScalarOpinions, 
 use rand::Rng;
 
 use crate::means::{apply_mean, MeanOperator};
+use crate::updates::{clamp_attitude, lorenz_update, social_judgement_update};
 
 /// Opinion range `A = [-1, 1]` used by the polarising (SJ / Lorenz) variants.
 ///
 /// Matches the `mou2024` reference's attitude range; the bounded-confidence
 /// mechanisms (HK / Deffuant) impose no range of their own.
-pub const ATTITUDE_MIN: f64 = -1.0;
+pub const ATTITUDE_MIN: f64 = crate::updates::ATTITUDE_MIN;
 /// Upper bound of the opinion range `A = [-1, 1]`.
-pub const ATTITUDE_MAX: f64 = 1.0;
-
-/// Clamp an opinion to the range `[-1, 1]` (the `mou2024` `clamp_attitude`).
-#[inline]
-fn clamp_attitude(a: f64) -> f64 {
-    a.clamp(ATTITUDE_MIN, ATTITUDE_MAX)
-}
+pub const ATTITUDE_MAX: f64 = crate::updates::ATTITUDE_MAX;
 
 // ── HegselmannKrauseMechanism ───────────────────────────────────────────────
 
@@ -98,19 +93,28 @@ impl<W: ScalarOpinions + Neighbors> Mechanism<W> for HegselmannKrauseMechanism {
 
         // Reusable buffers to avoid per-agent heap churn.
         let mut conf_set: Vec<f64> = Vec::with_capacity(ids.len());
+        let mut conf_ids: Vec<AgentId> = Vec::with_capacity(ids.len());
         let mut new_opinions: Vec<f64> = Vec::with_capacity(ids.len());
 
         for (idx, &id) in ids.iter().enumerate() {
             let xi = prev[idx];
             conf_set.clear();
-            // Self is always in its own confidence set.
-            conf_set.push(xi);
-            // Neighbours within ε of x_i, read from the snapshot.
-            for nb in ctx.world.neighbors_of(id) {
-                if nb == id {
-                    continue; // self already added; avoid double-counting.
-                }
-                let xj = ctx.world.opinion(nb);
+            // Build the confidence set in **agent-id order** with `x_i` at its
+            // natural position: collect the agent's own id together with its
+            // neighbour ids, deduplicate, sort, then include each opinion within
+            // ε of `x_i` in that order.  This makes `apply_mean`'s floating-point
+            // summation order bit-identical to an id-ordered implementation
+            // (e.g. the `hegselmann2005` reference); the mean is mathematically
+            // the same, this only fixes ulp-level summation order.
+            conf_ids.clear();
+            conf_ids.push(id);
+            conf_ids.extend(ctx.world.neighbors_of(id));
+            conf_ids.sort_unstable();
+            conf_ids.dedup();
+            for &cid in &conf_ids {
+                // `x_i` itself is always within ε of itself, so it is included
+                // at its natural id-ordered position.
+                let xj = ctx.world.opinion(cid);
                 if (xi - xj).abs() <= self.epsilon {
                     conf_set.push(xj);
                 }
@@ -277,41 +281,6 @@ impl Default for SocialJudgementMechanism {
     }
 }
 
-/// Compute the Social Judgement attitude delta for `a_i` given neighbour
-/// messages (ported verbatim from `mou2024::abm::sj_update`).
-fn sj_delta(
-    a_i: f64,
-    messages: &[f64],
-    epsilon: f64,
-    alpha: f64,
-    rejection: f64,
-    repulsion: f64,
-) -> f64 {
-    if messages.is_empty() {
-        return 0.0;
-    }
-    let mut delta = 0.0;
-    let mut count = 0usize;
-    for &m_j in messages {
-        let diff = m_j - a_i;
-        if diff.abs() < epsilon {
-            // Acceptance region: assimilate.
-            delta += alpha * diff;
-            count += 1;
-        } else if diff.abs() > rejection {
-            // Rejection region: repel (move away from the message).
-            delta -= repulsion * diff.signum();
-            count += 1;
-        }
-        // Non-commitment region (ε <= |diff| <= rejection): no contribution.
-    }
-    if count == 0 {
-        0.0
-    } else {
-        delta / count as f64
-    }
-}
-
 impl<W: ScalarOpinions + Neighbors> Mechanism<W> for SocialJudgementMechanism {
     fn name(&self) -> &str {
         "social_judgement"
@@ -337,7 +306,7 @@ impl<W: ScalarOpinions + Neighbors> Mechanism<W> for SocialJudgementMechanism {
                 }
                 messages.push(ctx.world.opinion(nb)); // f_message(a_j) = a_j
             }
-            let delta = sj_delta(
+            let delta = social_judgement_update(
                 xi,
                 &messages,
                 self.epsilon,
@@ -398,34 +367,6 @@ impl Default for LorenzMechanism {
     }
 }
 
-/// Compute the Lorenz attitude delta for `a_i` (ported verbatim from
-/// `mou2024::abm::lorenz_update`).
-fn lorenz_delta(a_i: f64, messages: &[f64], epsilon: f64, alpha: f64, repulsion: f64) -> f64 {
-    if messages.is_empty() {
-        // The reference returns 0.0 for an empty message set before the
-        // polarisation term is reached.
-        return 0.0;
-    }
-    let mut assimilation = 0.0;
-    let mut count = 0usize;
-    for &m_j in messages {
-        let diff = m_j - a_i;
-        if diff.abs() < epsilon {
-            assimilation += alpha * diff;
-            count += 1;
-        }
-    }
-    let assimilation = if count == 0 {
-        0.0
-    } else {
-        assimilation / count as f64
-    };
-    // Reinforcement + polarisation: push toward the current sign, scaled by
-    // |a_i| (the more extreme, the stronger).
-    let polarization = repulsion * a_i.signum() * a_i.abs();
-    assimilation + polarization
-}
-
 impl<W: ScalarOpinions + Neighbors> Mechanism<W> for LorenzMechanism {
     fn name(&self) -> &str {
         "lorenz"
@@ -451,7 +392,7 @@ impl<W: ScalarOpinions + Neighbors> Mechanism<W> for LorenzMechanism {
                 }
                 messages.push(ctx.world.opinion(nb));
             }
-            let delta = lorenz_delta(xi, &messages, self.epsilon, self.alpha, self.repulsion);
+            let delta = lorenz_update(xi, &messages, self.epsilon, self.alpha, self.repulsion);
             new_opinions.push(clamp_attitude(xi + delta));
         }
 
