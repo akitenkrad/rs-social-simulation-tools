@@ -1,0 +1,141 @@
+<svg width="100%" viewBox="0 0 1040 640" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>socsim-llm: two-layer determinism</title>
+<desc>The deterministic socsim core is seed-driven: SimRng (seeded ChaCha20) drives world init, the scheduler and mechanisms, giving a bit-reproducible run. Beside it, only in the Decision phase, the LLM layer runs: Mechanism::apply calls CachingClient.complete(prompt); on a cache hit the cached response is returned, on a miss the call goes through FallbackClient to the Ollama primary and, on failure, the OpenAI fallback, and the response is stored in PromptCache. A MetadataCollector taps each call into RunMetadata. build_live_client assembles the CachingClient over the FallbackClient. With temperature 0 and a warm prompt-to-response cache, reruns are pseudo-deterministic; the LLM layer sits outside SimRng bit-reproducibility.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="gr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#0F6E56" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="mr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#5F5E5A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="1034" height="634" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<text class="title" x="40" y="46" font-size="24" fill="#2C2C2A">LLM layer — two-layer determinism</text>
+<text class="body"  x="40" y="72" font-size="13" fill="#6B6A64">Seed-deterministic core; the LLM layer is made cache-pseudo-deterministic on top, and only in the Decision phase.</text>
+
+<!-- ===== left: deterministic core ===== -->
+<rect x="38" y="92" width="312" height="512" rx="16" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.4"/>
+<text class="title" x="58" y="120" font-size="14.5" fill="#534AB7">Deterministic socsim core</text>
+<text class="body"  x="58" y="139" font-size="11" fill="#6B6A64">bit-reproducible from a seed</text>
+
+<rect x="62" y="158" width="264" height="58" rx="11" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.5"/>
+<text class="mono" x="194" y="184" font-size="13.5" fill="#0B5040" text-anchor="middle" font-weight="700">SimRng</text>
+<text class="body" x="194" y="202" font-size="10.5" fill="#3C7E6C" text-anchor="middle">seeded ChaCha20</text>
+
+<rect x="62" y="240" width="264" height="40" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
+<text class="body" x="194" y="265" font-size="12" fill="#332E6E" text-anchor="middle">world init</text>
+<rect x="62" y="292" width="264" height="40" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
+<text class="body" x="194" y="317" font-size="12" fill="#332E6E" text-anchor="middle">scheduler</text>
+<rect x="62" y="344" width="264" height="40" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
+<text class="body" x="194" y="369" font-size="12" fill="#332E6E" text-anchor="middle">mechanisms</text>
+
+<g stroke="#534AB7" stroke-width="1.3" fill="none">
+  <path d="M194 216 V240" marker-end="url(#hr)"/>
+  <path d="M194 280 V292" marker-end="url(#hr)"/>
+  <path d="M194 332 V344" marker-end="url(#hr)"/>
+</g>
+
+<rect x="62" y="412" width="264" height="50" rx="11" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+<text class="body" x="194" y="434" font-size="12" fill="#0B5040" text-anchor="middle" font-weight="600">bit-reproducible run</text>
+<text class="body" x="194" y="451" font-size="10.5" fill="#3C7E6C" text-anchor="middle">same seed → same trajectory</text>
+<path d="M194 384 V410" stroke="#0F6E56" stroke-width="1.4" fill="none" marker-end="url(#gr)"/>
+
+<!-- 6-phase strip with Decision highlighted -->
+<text class="body" x="58" y="496" font-size="10.5" fill="#444441" font-weight="600">LLM calls live in one phase only:</text>
+<g class="body" font-size="9">
+  <rect x="62"  y="506" width="42" height="24" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/><text x="83" y="522" text-anchor="middle" fill="#3C3B37">Pre</text>
+  <rect x="108" y="506" width="42" height="24" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/><text x="129" y="522" text-anchor="middle" fill="#3C3B37">Env</text>
+  <rect x="154" y="506" width="48" height="24" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.4"/><text x="178" y="522" text-anchor="middle" fill="#534AB7" font-weight="700">Decision</text>
+  <rect x="206" y="506" width="42" height="24" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/><text x="227" y="522" text-anchor="middle" fill="#3C3B37">Inter</text>
+  <rect x="252" y="506" width="42" height="24" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/><text x="273" y="522" text-anchor="middle" fill="#3C3B37">Rew</text>
+  <rect x="298" y="506" width="28" height="24" rx="6" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/><text x="312" y="522" text-anchor="middle" fill="#3C3B37">Post</text>
+</g>
+<path d="M178 530 C 178 552, 540 552, 540 196" fill="none" stroke="#5F5E5A" stroke-width="1.1" stroke-dasharray="3 4" marker-end="url(#mr)" opacity="0.7"/>
+<text class="body" x="58" y="556" font-size="10" fill="#9A988F">the LLM layer sits OUTSIDE SimRng bit-reproducibility</text>
+
+<!-- ===== right: LLM layer (Decision) ===== -->
+<rect x="384" y="92" width="624" height="512" rx="16" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.4"/>
+<text class="title" x="404" y="120" font-size="14.5" fill="#534AB7">LLM layer  ·  Decision phase</text>
+<rect x="848" y="102" width="142" height="24" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
+<text class="body" x="919" y="118" font-size="10.5" fill="#534AB7" text-anchor="middle">temperature 0 + cache</text>
+
+<!-- Mechanism::apply -->
+<rect x="404" y="140" width="240" height="44" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="524" y="166" font-size="12.5" fill="#332E6E" text-anchor="middle">Mechanism::apply</text>
+
+<!-- build_live_client assembly bracket -->
+<rect x="396" y="200" width="468" height="300" rx="14" fill="#FFFFFF" stroke="#9B98C9" stroke-width="1.2" stroke-dasharray="6 4"/>
+<text class="mono" x="412" y="222" font-size="11.5" fill="#3A357A" font-weight="700">build_live_client(cache_path)</text>
+
+<!-- CachingClient -->
+<rect x="416" y="234" width="280" height="48" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="556" y="255" font-size="12.5" fill="#332E6E" text-anchor="middle" font-weight="700">CachingClient.complete(prompt)</text>
+<text class="body" x="556" y="272" font-size="10" fill="#6B6A64" text-anchor="middle">key = hash(prompt + model)</text>
+
+<!-- cache-hit diamond -->
+<path d="M556 300 L612 332 L556 364 L500 332 Z" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+<text class="body" x="556" y="330" font-size="11" fill="#3C3B37" text-anchor="middle">cache</text>
+<text class="body" x="556" y="344" font-size="11" fill="#3C3B37" text-anchor="middle">hit?</text>
+
+<!-- hit branch -> cached response (right) -->
+<path d="M612 332 H700" stroke="#0F6E56" stroke-width="1.4" fill="none" marker-end="url(#gr)"/>
+<text class="body" x="656" y="324" font-size="10" fill="#0F6E56" text-anchor="middle">hit</text>
+<rect x="700" y="308" width="148" height="48" rx="11" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+<text class="body" x="774" y="329" font-size="11" fill="#0B5040" text-anchor="middle" font-weight="600">cached response</text>
+<text class="body" x="774" y="346" font-size="10" fill="#3C7E6C" text-anchor="middle">cache_hit = true</text>
+
+<!-- miss branch -> FallbackClient (down) -->
+<path d="M556 364 V392" stroke="#534AB7" stroke-width="1.4" fill="none" marker-end="url(#hr)"/>
+<text class="body" x="574" y="382" font-size="10" fill="#534AB7">miss</text>
+
+<rect x="416" y="392" width="280" height="40" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="556" y="417" font-size="12" fill="#332E6E" text-anchor="middle" font-weight="700">FallbackClient</text>
+
+<!-- Ollama primary -->
+<rect x="416" y="444" width="280" height="40" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text class="mono" x="436" y="463" font-size="11.5" fill="#3C3B37">OllamaClient</text>
+<text class="body" x="436" y="477" font-size="9.5" fill="#6B6A64">primary · OLLAMA_HOST / OLLAMA_MODEL</text>
+<path d="M556 432 V444" stroke="#534AB7" stroke-width="1.3" fill="none" marker-end="url(#hr)"/>
+
+<!-- OpenAI fallback (further right, on failure) -->
+<rect x="718" y="444" width="270" height="40" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text class="mono" x="738" y="463" font-size="11.5" fill="#3C3B37">OpenAiClient</text>
+<text class="body" x="738" y="477" font-size="9.5" fill="#6B6A64">fallback · OPENAI_API_KEY / OPENAI_MODEL</text>
+<path d="M696 464 H716" stroke="#5F5E5A" stroke-width="1.3" fill="none" marker-end="url(#mr)"/>
+<text class="body" x="706" y="438" font-size="9.5" fill="#6B6A64" text-anchor="middle">on failure</text>
+
+<!-- response stored back into PromptCache -->
+<rect x="718" y="234" width="270" height="48" rx="11" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+<text class="mono" x="853" y="255" font-size="12" fill="#0B5040" text-anchor="middle" font-weight="700">PromptCache</text>
+<text class="body" x="853" y="272" font-size="9.5" fill="#3C7E6C" text-anchor="middle">in-memory or JSON-file (atomic save)</text>
+<path d="M853 444 C 940 410, 940 320, 900 284" fill="none" stroke="#0F6E56" stroke-width="1.4" marker-end="url(#gr)"/>
+<text class="body" x="958" y="370" font-size="9.5" fill="#0F6E56" text-anchor="middle">store</text>
+<path d="M718 258 H698" stroke="#0F6E56" stroke-width="1.2" fill="none" marker-end="url(#gr)"/>
+
+<!-- apply -> CachingClient -->
+<path d="M524 184 C 524 208, 540 214, 552 232" stroke="#534AB7" stroke-width="1.3" fill="none" marker-end="url(#hr)"/>
+
+<!-- metadata tap -->
+<rect x="416" y="510" width="572" height="56" rx="12" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+<text class="title" x="436" y="532" font-size="12.5" fill="#3C3B37">MetadataCollector  →  RunMetadata</text>
+<text class="body" x="436" y="551" font-size="10.5" fill="#6B6A64">taps each call: model · endpoint · temperature · seed · cache_hit  →  cache-hit rate (e.g. llm_meta.json)</text>
+<path d="M556 484 C 556 496, 540 500, 520 508" stroke="#5F5E5A" stroke-width="1.1" fill="none" marker-end="url(#mr)" opacity="0.85"/>
+
+<!-- bottom caption -->
+<text class="body" x="524" y="592" font-size="11" fill="#9A988F" text-anchor="middle">temperature 0 + prompt→response cache  ⇒  reruns are pseudo-deterministic</text>
+
+</svg>

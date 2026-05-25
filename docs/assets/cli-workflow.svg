@@ -1,0 +1,124 @@
+<svg width="100%" viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>socsim CLI workflow</title>
+<desc>The socsim CLI as a left-to-right pipeline. init scaffolds a scenario .toml; validate checks it against the pack registry and reports OK or errors; run executes the scenario and emits JSONL events plus a metric table. The batch path below uses sweep to expand a parameter grid into many multi-seed runs and then aggregates per-combo summaries, while summarize fans many JSONL logs back into summary stats as CSV or JSON. list is a side helper that prints available module packs and mechanisms.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="gr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#0F6E56" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="mr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#5F5E5A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="994" height="554" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<text class="title" x="40" y="48" font-size="23" fill="#2C2C2A">socsim CLI workflow</text>
+<text class="body"  x="40" y="73" font-size="13" fill="#6B6A64">A left-to-right pipeline of subcommands; sweep and summarize form the batch path.</text>
+
+<!-- ===== Main pipeline: init -> validate -> run ===== -->
+<g class="mono" font-size="13">
+  <rect x="40"  y="104" width="190" height="58" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+  <text x="135" y="130" fill="#332E6E" text-anchor="middle" font-weight="700">socsim init</text>
+  <text class="body" x="135" y="150" font-size="10.5" fill="#6B6A64" text-anchor="middle">scaffold scenario</text>
+
+  <rect x="300" y="104" width="190" height="58" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+  <text x="395" y="130" fill="#332E6E" text-anchor="middle" font-weight="700">socsim validate</text>
+  <text class="body" x="395" y="150" font-size="10.5" fill="#6B6A64" text-anchor="middle">OK / errors</text>
+
+  <rect x="560" y="104" width="190" height="58" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.4"/>
+  <text x="655" y="130" fill="#332E6E" text-anchor="middle" font-weight="700">socsim run</text>
+  <text class="body" x="655" y="150" font-size="10.5" fill="#6B6A64" text-anchor="middle">single / multi-seed</text>
+</g>
+
+<!-- scenario .toml artifact between init and validate -->
+<text class="mono" x="265" y="96" font-size="10.5" fill="#9A988F" text-anchor="middle">scenario .toml</text>
+
+<g stroke="#534AB7" stroke-width="1.4" fill="none">
+  <path d="M230 133 H298" marker-end="url(#hr)"/>
+  <path d="M490 133 H558" marker-end="url(#hr)"/>
+</g>
+
+<!-- run output: JSONL events + metric table -->
+<rect x="820" y="100" width="142" height="66" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.5"/>
+<text class="title" x="891" y="124" font-size="12.5" fill="#0B5040" text-anchor="middle">run output</text>
+<text class="body"  x="891" y="142" font-size="10" fill="#0B5040" text-anchor="middle">JSONL events</text>
+<text class="body"  x="891" y="156" font-size="10" fill="#3C7E6C" text-anchor="middle">+ metric table</text>
+<path d="M750 133 H818" stroke="#0F6E56" stroke-width="1.4" fill="none" marker-end="url(#gr)"/>
+
+<!-- ===== list: side helper ===== -->
+<rect x="40" y="196" width="190" height="56" rx="12" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text class="mono" x="135" y="220" font-size="13" fill="#3C3B37" text-anchor="middle" font-weight="700">socsim list</text>
+<text class="body" x="135" y="240" font-size="10.5" fill="#6B6A64" text-anchor="middle">packs · mechanisms</text>
+<path d="M135 196 V164" stroke="#5F5E5A" stroke-width="1.2" fill="none" stroke-dasharray="2 4" marker-end="url(#mr)"/>
+<text class="body" x="150" y="184" font-size="10" fill="#9A988F" text-anchor="start">side reference</text>
+
+<!-- ===== Batch path container ===== -->
+<rect x="38" y="292" width="924" height="240" rx="14" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.4"/>
+<text class="title" x="58" y="318" font-size="14" fill="#534AB7">Batch path — sweep &amp; summarize</text>
+<text class="body" x="58" y="336" font-size="10.5" fill="#6B6A64">explore a parameter grid, then aggregate run logs into summary stats</text>
+
+<!-- sweep: fan-out grid -> many runs -> aggregate -->
+<rect x="58" y="356" width="180" height="58" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="148" y="382" font-size="13" fill="#332E6E" text-anchor="middle" font-weight="700">socsim sweep</text>
+<text class="body" x="148" y="402" font-size="10.5" fill="#6B6A64" text-anchor="middle">expand param grid</text>
+
+<!-- grid cells fan-out -->
+<g class="body" font-size="10">
+  <rect x="318" y="346" width="110" height="26" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.1"/><text x="373" y="363" text-anchor="middle" fill="#332E6E">combo 0 · seeds</text>
+  <rect x="318" y="384" width="110" height="26" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.1"/><text x="373" y="401" text-anchor="middle" fill="#332E6E">combo 1 · seeds</text>
+  <rect x="318" y="422" width="110" height="26" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.1"/><text x="373" y="439" text-anchor="middle" fill="#332E6E">combo N · seeds</text>
+</g>
+<g stroke="#534AB7" stroke-width="1.3" fill="none">
+  <path d="M238 385 C 278 385, 280 359, 316 359" marker-end="url(#hr)"/>
+  <path d="M238 385 H316" marker-end="url(#hr)"/>
+  <path d="M238 385 C 278 385, 280 435, 316 435" marker-end="url(#hr)"/>
+</g>
+<text class="body" x="278" y="338" font-size="10" fill="#9A988F" text-anchor="middle">fan-out</text>
+
+<!-- aggregate per-combo CSV -->
+<rect x="498" y="356" width="180" height="58" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+<text class="title" x="588" y="380" font-size="12.5" fill="#0B5040" text-anchor="middle">per-combo summary</text>
+<text class="body" x="588" y="399" font-size="10" fill="#3C7E6C" text-anchor="middle">CSV: key,mean,std,min,max,n</text>
+<g stroke="#0F6E56" stroke-width="1.3" fill="none">
+  <path d="M428 359 C 466 359, 460 385, 496 385" marker-end="url(#gr)"/>
+  <path d="M428 397 H496" marker-end="url(#gr)"/>
+  <path d="M428 435 C 466 435, 460 385, 496 385" marker-end="url(#gr)"/>
+</g>
+<text class="body" x="462" y="338" font-size="10" fill="#9A988F" text-anchor="middle">aggregate</text>
+
+<!-- summarize: fan-in from JSONL logs -->
+<rect x="58" y="448" width="180" height="58" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="148" y="474" font-size="13" fill="#332E6E" text-anchor="middle" font-weight="700">socsim summarize</text>
+<text class="body" x="148" y="494" font-size="10.5" fill="#6B6A64" text-anchor="middle">re-aggregate logs</text>
+
+<rect x="318" y="462" width="180" height="44" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text class="mono" x="408" y="482" font-size="11" fill="#3C3B37" text-anchor="middle">*.jsonl run logs</text>
+<text class="body" x="408" y="497" font-size="9.5" fill="#6B6A64" text-anchor="middle">file or directory</text>
+
+<rect x="568" y="448" width="180" height="58" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+<text class="title" x="658" y="472" font-size="12.5" fill="#0B5040" text-anchor="middle">summary stats</text>
+<text class="body" x="658" y="491" font-size="10" fill="#3C7E6C" text-anchor="middle">CSV / JSON</text>
+
+<g stroke="#5F5E5A" stroke-width="1.3" fill="none">
+  <path d="M238 477 H316" marker-end="url(#mr)"/>
+</g>
+<path d="M498 484 C 530 484, 536 477, 566 477" stroke="#0F6E56" stroke-width="1.3" fill="none" marker-end="url(#gr)"/>
+<text class="body" x="278" y="455" font-size="10" fill="#9A988F" text-anchor="middle">fan-in</text>
+
+<!-- link run output feeds summarize -->
+<path d="M891 166 C 891 270, 408 300, 408 460" stroke="#0F6E56" stroke-width="1.2" fill="none" stroke-dasharray="2 4" marker-end="url(#gr)"/>
+<text class="body" x="600" y="285" font-size="10" fill="#9A988F" text-anchor="middle">run logs feed summarize</text>
+
+</svg>

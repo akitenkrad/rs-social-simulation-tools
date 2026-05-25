@@ -1,0 +1,139 @@
+<svg width="100%" viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>socsim crate workspace dependency graph</title>
+<desc>The thirteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-hr-lifecycle use the green accent, while the library-only crates with no socsim dependencies — socsim-marl (burn), socsim-llm and socsim-results — are drawn with dashed borders.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="gr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#0F6E56" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="mr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#5F5E5A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="994" height="614" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<text class="title" x="40" y="48" font-size="24" fill="#2C2C2A">Crate workspace — 13 crates, three layers</text>
+<text class="body"  x="40" y="74" font-size="13.5" fill="#6B6A64">A binary spine over a dependency-free foundation, beside an orthogonal band of optional / library-only crates.</text>
+
+<!-- ===== binary spine (left) ===== -->
+<rect x="38" y="96" width="560" height="492" rx="16" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.4"/>
+<text class="title" x="58" y="124" font-size="14" fill="#534AB7">Binary spine — composed into the socsim binary</text>
+
+<!-- cli -->
+<rect x="200" y="138" width="236" height="46" rx="11" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="318" y="160" font-size="13.5" fill="#332E6E" text-anchor="middle" font-weight="700">socsim-cli</text>
+<text class="body" x="318" y="177" font-size="10.5" fill="#6B6A64" text-anchor="middle">binary · entry point</text>
+
+<!-- runner -->
+<rect x="200" y="204" width="236" height="46" rx="11" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="318" y="226" font-size="13.5" fill="#332E6E" text-anchor="middle" font-weight="700">socsim-runner</text>
+<text class="body" x="318" y="243" font-size="10.5" fill="#6B6A64" text-anchor="middle">multi-seed runs · sweeps (+ rayon)</text>
+
+<!-- engine -->
+<rect x="200" y="270" width="236" height="46" rx="11" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="318" y="292" font-size="13.5" fill="#332E6E" text-anchor="middle" font-weight="700">socsim-engine</text>
+<text class="body" x="318" y="309" font-size="10.5" fill="#6B6A64" text-anchor="middle">Simulation · Builder · schedulers</text>
+
+<!-- log + config row -->
+<rect x="68" y="346" width="220" height="46" rx="11" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text class="mono" x="178" y="368" font-size="12.5" fill="#3C3B37" text-anchor="middle" font-weight="600">socsim-log</text>
+<text class="body" x="178" y="384" font-size="10.5" fill="#6B6A64" text-anchor="middle">recorders: JSONL · CSV · memory</text>
+
+<rect x="348" y="346" width="220" height="46" rx="11" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text class="mono" x="458" y="368" font-size="12.5" fill="#3C3B37" text-anchor="middle" font-weight="600">socsim-config</text>
+<text class="body" x="458" y="384" font-size="10.5" fill="#6B6A64" text-anchor="middle">Params · Registry · Scenario</text>
+
+<!-- foundation -->
+<text class="body" x="58" y="430" font-size="12" fill="#0F6E56" font-weight="700">Foundation — no internal dependencies</text>
+<rect x="68" y="440" width="220" height="64" rx="11" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.5"/>
+<text class="mono" x="178" y="466" font-size="13" fill="#0B5040" text-anchor="middle" font-weight="700">socsim-core</text>
+<text class="body" x="178" y="484" font-size="10.5" fill="#3C7E6C" text-anchor="middle">traits · AgentId · Phase</text>
+<text class="body" x="178" y="498" font-size="10.5" fill="#3C7E6C" text-anchor="middle">Blackboard</text>
+
+<rect x="348" y="440" width="220" height="64" rx="11" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.5"/>
+<text class="mono" x="458" y="466" font-size="13" fill="#0B5040" text-anchor="middle" font-weight="700">socsim-rng</text>
+<text class="body" x="458" y="484" font-size="10.5" fill="#3C7E6C" text-anchor="middle">SimRng (ChaCha20)</text>
+<text class="body" x="458" y="498" font-size="10.5" fill="#3C7E6C" text-anchor="middle">derive_seed</text>
+
+<text class="body" x="318" y="546" font-size="11.5" fill="#6B6A64" text-anchor="middle">arrows = "depends on"</text>
+<text class="body" x="318" y="566" font-size="11" fill="#9A988F" text-anchor="middle">socsim-config depends on socsim-core, not socsim-engine (no cycle)</text>
+
+<!-- spine dependency arrows -->
+<g stroke="#534AB7" stroke-width="1.4" fill="none">
+  <path d="M318 184 V204" marker-end="url(#hr)"/>
+  <path d="M318 250 V270" marker-end="url(#hr)"/>
+  <path d="M260 316 C 220 326, 200 336, 186 344" marker-end="url(#hr)"/>
+  <path d="M376 316 C 416 326, 440 336, 452 344" marker-end="url(#hr)"/>
+</g>
+<!-- engine -> core, config -> core, runner uses log... -->
+<g stroke="#534AB7" stroke-width="1.3" fill="none">
+  <path d="M178 392 V438" marker-end="url(#hr)"/>
+  <path d="M458 392 C 360 414, 300 420, 230 442" marker-end="url(#hr)"/>
+</g>
+<text class="body" x="150" y="420" font-size="9.5" fill="#534AB7">config→core</text>
+
+<!-- ===== orthogonal / optional band (right) ===== -->
+<rect x="618" y="96" width="346" height="492" rx="16" fill="#FBFAF6" stroke="#5F5E5A" stroke-width="1.2" stroke-dasharray="2 4"/>
+<text class="title" x="638" y="124" font-size="13.5" fill="#3C3B37">Orthogonal / optional band</text>
+
+<!-- spatial + net (green) -->
+<text class="body" x="638" y="152" font-size="11.5" fill="#0F6E56" font-weight="700">Spatial &amp; network — beside the engine</text>
+
+<rect x="638" y="162" width="306" height="44" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+<text class="mono" x="654" y="183" font-size="12.5" fill="#0B5040">socsim-grid</text>
+<text class="body" x="654" y="199" font-size="10" fill="#3C7E6C">Grid · neighbourhoods · distances (→ core)</text>
+
+<rect x="638" y="214" width="306" height="44" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+<text class="mono" x="654" y="235" font-size="12.5" fill="#0B5040">socsim-net</text>
+<text class="body" x="654" y="251" font-size="10" fill="#3C7E6C">SocialNetwork · ER / WS / BA generators</text>
+
+<rect x="638" y="266" width="306" height="44" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+<text class="mono" x="654" y="287" font-size="12.5" fill="#0B5040">socsim-hr-lifecycle</text>
+<text class="body" x="654" y="303" font-size="10" fill="#3C7E6C">reference module · 10 mechanisms</text>
+
+<!-- library-only (dashed) -->
+<text class="body" x="638" y="338" font-size="11.5" fill="#534AB7" font-weight="700">Library-only — not in the socsim binary</text>
+
+<rect x="638" y="348" width="306" height="50" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text class="mono" x="654" y="369" font-size="12.5" fill="#332E6E">socsim-marl</text>
+<text class="body" x="654" y="385" font-size="10" fill="#6B6A64">learnable policies (→ engine, core)</text>
+<rect x="858" y="356" width="74" height="20" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.9"/>
+<text class="body" x="895" y="370" font-size="9.5" fill="#534AB7" text-anchor="middle">burn</text>
+
+<rect x="638" y="406" width="306" height="50" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text class="mono" x="654" y="427" font-size="12.5" fill="#332E6E">socsim-llm</text>
+<text class="body" x="654" y="443" font-size="10" fill="#6B6A64">LlmClient · build_live_client · optional</text>
+<rect x="828" y="414" width="104" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
+<text class="body" x="880" y="428" font-size="9.5" fill="#3C3B37" text-anchor="middle">no socsim deps</text>
+
+<rect x="638" y="464" width="306" height="50" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text class="mono" x="654" y="485" font-size="12.5" fill="#332E6E">socsim-results</text>
+<text class="body" x="654" y="501" font-size="10" fill="#6B6A64">leaf · run dirs · CSV/JSON writers</text>
+<rect x="828" y="472" width="104" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
+<text class="body" x="880" y="486" font-size="9.5" fill="#3C3B37" text-anchor="middle">no socsim deps</text>
+
+<text class="body" x="791" y="544" font-size="10.5" fill="#9A988F" text-anchor="middle">dashed = library-only · marl &amp; grid attach to core/engine;</text>
+<text class="body" x="791" y="560" font-size="10.5" fill="#9A988F" text-anchor="middle">llm &amp; results pull in zero socsim crates</text>
+
+<!-- hr-lifecycle -> net (green dep), grid -> spine (core) -->
+<g stroke="#0F6E56" stroke-width="1.3" fill="none">
+  <path d="M700 266 V260" marker-end="url(#gr)"/>
+</g>
+
+<!-- marl/grid attach to spine engine/core (muted dashed connectors crossing the gap) -->
+<path d="M638 290 C 612 290, 600 320, 568 360" fill="none" stroke="#5F5E5A" stroke-width="1.1" stroke-dasharray="4 4" marker-end="url(#mr)" opacity="0.8"/>
+<path d="M638 373 C 610 380, 600 350, 568 320" fill="none" stroke="#5F5E5A" stroke-width="1.1" stroke-dasharray="4 4" marker-end="url(#mr)" opacity="0.8"/>
+
+</svg>

@@ -6,7 +6,9 @@
 
 ## Crate workspace
 
-The workspace contains eleven crates organised in three layers:
+The workspace contains thirteen crates organised in three layers:
+
+![Crate dependency graph](assets/arch-crates.svg)
 
 ```
 socsim-cli          ← binary (entry point)
@@ -20,6 +22,9 @@ socsim-cli          ← binary (entry point)
             ├── socsim-grid        ← Grid, GridIndex, neighbourhoods, distances (spatial models)
             ├── socsim-marl        ← learnable (MARL) policies: Policy, PolicyMechanism, MarlTrainer (burn; library-only)
             └── socsim-rng         ← SimRng (ChaCha20), derive_seed
+
+socsim-llm      ← optional LLM-agent layer: LlmClient, CachingClient, build_live_client (no socsim deps; feature-gated; library-only)
+socsim-results  ← leaf output helpers: timestamp, create_run_dir, write_csv/json, refresh_latest_symlink (no socsim deps; library-only)
 ```
 
 Dependency rules:
@@ -31,6 +36,8 @@ Dependency rules:
 - `socsim-cli` wires everything together into the `socsim` binary.
 - `socsim-hr-lifecycle`, `socsim-net`, and `socsim-grid` sit beside the engine layer and are orthogonal to it; `socsim-grid` depends only on `socsim-core`.
 - `socsim-marl` (Phase 6) depends on `socsim-engine` and `socsim-core`. It is **library-only** — not part of the `socsim` binary — and pulls in the `burn` neural-network framework, so the hr-lifecycle integration gates it behind a `marl` feature.
+- `socsim-llm` is an **orthogonal, optional** layer beside the engine. It has **no `socsim-*` dependencies** (only `serde`/`serde_json`/`thiserror`, plus `ureq` behind features) and is **library-only**. Its live provider backends are feature-gated (`ollama`, `openai`, and `live` = both); the default build pulls in no networking. It is used by the `Decision` phase of LLM-driven models.
+- `socsim-results` is a **leaf crate** with **no `socsim-*` dependencies** (only `std` plus `serde`/`serde_json`/`csv`/`chrono`). It provides the output boilerplate for the lightweight library mode and never drags in `socsim-log`/`-config`/`-runner`.
 
 ---
 
@@ -75,6 +82,8 @@ The fixed tick loop does **not** restrict socsim to one-action-per-agent-per-tic
 
 socsim is usable two ways, and **both are first-class**:
 
+![Two usage paths: scenario-CLI vs. library mode](assets/arch-usage-paths.svg)
+
 - **Scenario-TOML / CLI path** — `ModulePack` → `Registry` → scenario `.toml` → `socsim-runner` → `socsim` binary. Best for new projects, reproducible scenario files, and parameter sweeps.
 - **Library mode** — depend on just `socsim-core` / `socsim-engine` (and optionally `socsim-grid`), build the world yourself, add mechanisms directly to `SimulationBuilder`, drive it with `run` / `run_until` / `run_observed`, and bring your own recorder (or none — the default is `NullRecorder`, so the engine forces no `socsim-log` dependency). Best for embedding the engine in an existing tool, custom output schemas, and self-contained lattice/CA models.
 
@@ -109,6 +118,65 @@ Restoring a snapshot into a simulation wired with the **same** mechanisms reprod
 ## Learnable policies (MARL, Phase 6)
 
 `socsim-marl` makes the `Decision` phase learnable: a `PolicyMechanism` wraps a `Policy` (implemented by `DiscretePolicyNet`, a small `burn` MLP trained with REINFORCE) and slots into the same six-phase loop as any other mechanism — the engine needs no changes. `ObsEncoder`/`ActionApplier`/`RewardFn` bridge a concrete world to the flat feature/action space, a `TrajectoryBuffer` collects episodes, and `MarlTrainer` runs the outer learn loop. Weights are seeded from `SimRng` and all tensor math runs on CPU, so a frozen policy stays bit-reproducible. See the [library guide](library.md#learnable-policies-marl) for usage.
+
+---
+
+## LLM layer (socsim-llm)
+
+`socsim-llm` is the optional layer for LLM-driven agents. The socsim core is **deterministic and LLM-free**, so this crate confines all model non-determinism to one place and *pseudo-determinises* it — a deliberate **two-layer determinism** design: the socsim core is seed-deterministic, and the LLM layer is made *cache-pseudo-deterministic* on top. By convention LLM calls are confined to the `Decision` phase of a mechanism (an LLM call is just a synchronous `complete` inline in `Mechanism::apply`).
+
+![LLM layer: two-layer determinism](assets/arch-llm-layer.svg)
+
+Everything is built on one provider-agnostic trait:
+
+```rust,ignore
+pub trait LlmClient {
+    fn model(&self) -> &str;
+    fn endpoint(&self) -> &str;
+    fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError>;
+}
+```
+
+The production stack is assembled in one call behind the `live` feature:
+
+```rust,ignore
+let client: CachingClient<Box<dyn LlmClient>> =
+    socsim_llm::build_live_client(cache_path /* Option<&Path> */)?;
+```
+
+`build_live_client` composes **Ollama-first → OpenAI-fallback → type-erased → caching** from environment variables:
+
+- **Ollama** (primary) via `OLLAMA_HOST` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `llama3.1`).
+- **OpenAI** (best-effort fallback) via `OPENAI_API_KEY` and `OPENAI_MODEL` (default `gpt-4o-mini`); if `OPENAI_API_KEY` is unset a placeholder is built and only errors if Ollama itself fails (so an Ollama-only setup works).
+- The backend is type-erased to `Box<dyn LlmClient>` so the same concrete return type covers both the production stack and an injected mock.
+
+Construction is **lazy** — no network call happens until `CachingClient::complete` is invoked on a cache miss.
+
+Pseudo-determinism comes from two pieces:
+
+- **`PromptCache`** — a `hash(prompt + model)`-keyed (`cache_key`) prompt → response cache, either in-memory (`PromptCache::in_memory`) or JSON-file-backed (`PromptCache::open`, atomic save). `LlmConfig::deterministic()` sets `temperature = 0` and a fixed `seed`; combined with a warm cache, a re-run replays identical responses, turning a noisy model into a reproducible oracle.
+- **`MetadataCollector`** / **`RunMetadata`** — `CallMetadata` records model / endpoint / temperature / seed / `cache_hit` for every call; `MetadataCollector::summary()` rolls these up into a serialisable `RunMetadata` (model, endpoint, generation settings, total calls, cache hits, cache-hit rate) that the replications persist (e.g. `llm_meta.json`).
+
+For deterministic tests there is `mock::ScriptedClient` — a network-free `LlmClient` that answers via a closure — which slots into `CachingClient` exactly like a live backend.
+
+This crate is **library-only** and **not** wired into the `socsim` binary; the lightweight replications depend on it directly via a git dependency.
+
+---
+
+## Result output helpers (socsim-results)
+
+`socsim-results` factors out the output boilerplate the lightweight library-mode replications all hand-roll. Those replications ship their own `main.rs` + clap CLI and write outputs directly (no `Recorder`/`Scenario` machinery), so this crate is a dependency-light **leaf crate** — `std` plus `serde`/`serde_json`/`csv`/`chrono`, and **no `socsim-*` dependency**, so pulling it in never drags in `socsim-log`/`-config`/`-runner`.
+
+![Result output convention](assets/arch-results.svg)
+
+It provides the shared `results/` output convention:
+
+- `timestamp()` — current local time as a `YYYYMMDD_HHMMSS` stamp.
+- `create_run_dir(base)` — make a timestamped run directory `base/<timestamp>`; `ensure_dir(path)` is the idempotent `mkdir -p`.
+- `refresh_latest_symlink(base, target)` — (re)point `base/latest` at the newest run (Unix symlink; best-effort no-op elsewhere).
+- `write_csv(rows, path)` / `write_json(value, path)` — serde-backed CSV/JSON writers (the JSON writer is how the LLM `RunMetadata` from `socsim-llm` is persisted), returning a `WriteError` that wraps the I/O / CSV / JSON failure sources.
+
+It is domain-agnostic by design: it offers only generic serialization primitives, so domain types (such as `socsim-llm`'s `RunMetadata`) live in their owning crates and are written here via `write_json`.
 
 ---
 

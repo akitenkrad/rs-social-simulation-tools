@@ -1,0 +1,71 @@
+<svg width="100%" viewBox="0 0 880 470" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>socsim-results output convention</title>
+<desc>create_run_dir(base) makes a timestamped run directory base/&lt;YYYYMMDD_HHMMSS&gt;/ which holds config.json, metrics.csv and run_metadata.json, written by write_json and write_csv. refresh_latest_symlink(base, ts) points base/latest at that timestamped directory via a symlink. socsim-results is a leaf crate with no socsim dependencies, using only std plus serde, csv and chrono.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="gr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#0F6E56" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="874" height="464" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<text class="title" x="40" y="48" font-size="23" fill="#2C2C2A">Result output convention <tspan class="mono" font-size="17" fill="#0F6E56">(socsim-results)</tspan></text>
+<rect x="572" y="30" width="268" height="24" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text class="body" x="706" y="46" font-size="10.5" fill="#0B5040" text-anchor="middle">leaf crate — no socsim deps; std + serde/csv/chrono</text>
+
+<!-- create_run_dir call -->
+<rect x="40" y="92" width="240" height="48" rx="11" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="160" y="113" font-size="12.5" fill="#332E6E" text-anchor="middle" font-weight="700">create_run_dir(base)</text>
+<text class="body" x="160" y="130" font-size="10" fill="#6B6A64" text-anchor="middle">mkdir -p base/&lt;timestamp&gt;</text>
+
+<!-- run dir folder -->
+<rect x="360" y="84" width="320" height="226" rx="14" fill="#FBFAF6" stroke="#0F6E56" stroke-width="1.5"/>
+<text class="mono" x="380" y="112" font-size="13" fill="#0B5040" font-weight="700">base/&lt;YYYYMMDD_HHMMSS&gt;/</text>
+<text class="body" x="380" y="130" font-size="10.5" fill="#3C7E6C">timestamped run directory</text>
+
+<rect x="384" y="146" width="272" height="44" rx="9" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text class="mono" x="400" y="167" font-size="12" fill="#0B5040">config.json</text>
+<text class="body" x="400" y="182" font-size="9.5" fill="#3C7E6C">write_json</text>
+
+<rect x="384" y="198" width="272" height="44" rx="9" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text class="mono" x="400" y="219" font-size="12" fill="#0B5040">metrics.csv</text>
+<text class="body" x="400" y="234" font-size="9.5" fill="#3C7E6C">write_csv</text>
+
+<rect x="384" y="250" width="272" height="44" rx="9" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+<text class="mono" x="400" y="271" font-size="12" fill="#0B5040">run_metadata.json</text>
+<text class="body" x="400" y="286" font-size="9.5" fill="#3C7E6C">write_json</text>
+
+<path d="M280 116 H358" stroke="#534AB7" stroke-width="1.4" fill="none" marker-end="url(#hr)"/>
+<text class="body" x="320" y="108" font-size="9.5" fill="#534AB7" text-anchor="middle">creates</text>
+
+<!-- refresh_latest_symlink -->
+<rect x="40" y="350" width="280" height="48" rx="11" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="180" y="371" font-size="12" fill="#332E6E" text-anchor="middle" font-weight="700">refresh_latest_symlink(base, ts)</text>
+<text class="body" x="180" y="388" font-size="10" fill="#6B6A64" text-anchor="middle">re-points the latest link (Unix)</text>
+
+<!-- latest symlink -->
+<rect x="400" y="350" width="120" height="48" rx="11" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.1"/>
+<text class="mono" x="460" y="371" font-size="12" fill="#3C3B37" text-anchor="middle">base/latest</text>
+<text class="body" x="460" y="388" font-size="9.5" fill="#6B6A64" text-anchor="middle">symlink</text>
+
+<path d="M320 374 H398" stroke="#534AB7" stroke-width="1.4" fill="none" marker-end="url(#hr)"/>
+
+<!-- latest -> ts/ -->
+<path d="M520 360 C 560 340, 540 318, 520 300" stroke="#0F6E56" stroke-width="1.5" fill="none" marker-end="url(#gr)"/>
+<text class="body" x="588" y="338" font-size="10" fill="#0F6E56" text-anchor="middle">→ &lt;ts&gt;/</text>
+
+<text class="body" x="160" y="430" font-size="10.5" fill="#9A988F" text-anchor="middle">domain-agnostic: domain types serialised here via write_json</text>
+
+</svg>
