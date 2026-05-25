@@ -69,7 +69,7 @@ impl<W: BinaryState + Neighbors> Mechanism<W> for SiContagionMechanism {
     fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, W>) -> Result<()> {
         let ids = ctx.world.agent_ids();
         // Start-of-round active snapshot (the canonical copy for the
-        // synchronous update).
+        // synchronous update), keyed by the world's (sorted) id roster.
         let prev: Vec<bool> = ids.iter().map(|&id| ctx.world.is_active(id)).collect();
         let active_of = |id: AgentId| -> bool {
             ids.iter()
@@ -78,11 +78,24 @@ impl<W: BinaryState + Neighbors> Mechanism<W> for SiContagionMechanism {
                 .unwrap_or(false)
         };
 
+        // Per-agent infection loop visits agents in the **scheduler activation
+        // order** (`ctx.agent_order`), falling back to the world roster when the
+        // engine supplied no order.  SI draws one RNG per inactive-agent ×
+        // active-neighbour with break-on-first-success, so the visit order is
+        // part of the RNG→agent mapping: a faithful Mechanism must respect the
+        // scheduler order rather than the sorted id roster.  Snapshot semantics
+        // are unchanged (active set frozen at start, newly-infected batch-applied).
+        let order: Vec<AgentId> = if ctx.agent_order.is_empty() {
+            ids.clone()
+        } else {
+            ctx.agent_order.to_vec()
+        };
+
         let p = self.beta.clamp(0.0, 1.0);
         let mut newly: Vec<AgentId> = Vec::new();
 
-        for (idx, &id) in ids.iter().enumerate() {
-            if prev[idx] {
+        for &id in &order {
+            if active_of(id) {
                 continue; // already active.
             }
             let mut infected = false;
