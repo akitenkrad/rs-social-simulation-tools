@@ -8,6 +8,8 @@
 
 ワークスペースは3層に整理された13個のクレートで構成されています：
 
+![Crate dependency graph](assets/arch-crates.svg)
+
 ```
 socsim-cli          ← バイナリ（エントリーポイント）
     └── socsim-runner      ← マルチシード実行，スイープ，サマリー
@@ -80,6 +82,8 @@ PreStep → Environment → Decision → Interaction → Reward → PostStep
 
 socsim は2通りの使い方ができ，**どちらもファーストクラス**です：
 
+![Two usage paths: scenario-CLI vs. library mode](assets/arch-usage-paths.svg)
+
 - **シナリオTOML / CLI経路** — `ModulePack` → `Registry` → シナリオ `.toml` → `socsim-runner` → `socsim` バイナリ．新規プロジェクト，再現可能なシナリオファイル，パラメータスイープに最適です．
 - **ライブラリモード** — `socsim-core` / `socsim-engine`（および任意で `socsim-grid`）だけに依存し，ワールドを自分で構築し，メカニズムを `SimulationBuilder` に直接追加し，`run` / `run_until` / `run_observed` で駆動し，独自のレコーダーを持ち込みます（あるいは持ち込まない — デフォルトは `NullRecorder` なので，エンジンは `socsim-log` 依存を強制しません）．既存ツールへのエンジン埋め込み，カスタム出力スキーマ，自己完結型の格子／CAモデルに最適です．
 
@@ -121,6 +125,8 @@ socsim は2通りの使い方ができ，**どちらもファーストクラス*
 
 `socsim-llm` は LLM 駆動エージェント向けのオプション層です．socsim コアは**決定論的で LLM フリー**なので，このクレートはモデルの非決定性を1箇所に閉じ込め，*疑似決定論化*します — これは意図的な**2層決定論**の設計です：socsim コアがシード決定論的であり，その上に LLM 層を*キャッシュ疑似決定論的*に重ねます．規約として LLM 呼び出しはメカニズムの `Decision` フェーズに閉じ込めます（LLM 呼び出しは `Mechanism::apply` 内でインラインに行う同期的な `complete` にすぎません）．
 
+![LLM layer: two-layer determinism](assets/arch-llm-layer.svg)
+
 すべてはプロバイダ非依存の単一トレイトの上に構築されています：
 
 ```rust,ignore
@@ -160,6 +166,8 @@ let client: CachingClient<Box<dyn LlmClient>> =
 ## 結果出力ヘルパ（socsim-results）
 
 `socsim-results` は，軽量ライブラリモードの replication がそろってコピーしていた出力ボイラープレートを切り出したものです．これらの replication は独自の `main.rs` + clap CLI を備え出力を直接書き込む（`Recorder`/`Scenario` 機構を使わない）ため，このクレートは依存の少ない**リーフクレート**です — `std` に加えて `serde`/`serde_json`/`csv`/`chrono` のみで，**`socsim-*` 依存はない**ので，取り込んでも `socsim-log`/`-config`/`-runner` を一切引き込みません．
+
+![Result output convention](assets/arch-results.svg)
 
 共有の `results/` 出力規約を提供します：
 

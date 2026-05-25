@@ -8,6 +8,8 @@
 
 The workspace contains thirteen crates organised in three layers:
 
+![Crate dependency graph](assets/arch-crates.svg)
+
 ```
 socsim-cli          ← binary (entry point)
     └── socsim-runner      ← multi-seed runs, sweeps, summarise
@@ -80,6 +82,8 @@ The fixed tick loop does **not** restrict socsim to one-action-per-agent-per-tic
 
 socsim is usable two ways, and **both are first-class**:
 
+![Two usage paths: scenario-CLI vs. library mode](assets/arch-usage-paths.svg)
+
 - **Scenario-TOML / CLI path** — `ModulePack` → `Registry` → scenario `.toml` → `socsim-runner` → `socsim` binary. Best for new projects, reproducible scenario files, and parameter sweeps.
 - **Library mode** — depend on just `socsim-core` / `socsim-engine` (and optionally `socsim-grid`), build the world yourself, add mechanisms directly to `SimulationBuilder`, drive it with `run` / `run_until` / `run_observed`, and bring your own recorder (or none — the default is `NullRecorder`, so the engine forces no `socsim-log` dependency). Best for embedding the engine in an existing tool, custom output schemas, and self-contained lattice/CA models.
 
@@ -121,6 +125,8 @@ Restoring a snapshot into a simulation wired with the **same** mechanisms reprod
 
 `socsim-llm` is the optional layer for LLM-driven agents. The socsim core is **deterministic and LLM-free**, so this crate confines all model non-determinism to one place and *pseudo-determinises* it — a deliberate **two-layer determinism** design: the socsim core is seed-deterministic, and the LLM layer is made *cache-pseudo-deterministic* on top. By convention LLM calls are confined to the `Decision` phase of a mechanism (an LLM call is just a synchronous `complete` inline in `Mechanism::apply`).
 
+![LLM layer: two-layer determinism](assets/arch-llm-layer.svg)
+
 Everything is built on one provider-agnostic trait:
 
 ```rust,ignore
@@ -160,6 +166,8 @@ This crate is **library-only** and **not** wired into the `socsim` binary; the l
 ## Result output helpers (socsim-results)
 
 `socsim-results` factors out the output boilerplate the lightweight library-mode replications all hand-roll. Those replications ship their own `main.rs` + clap CLI and write outputs directly (no `Recorder`/`Scenario` machinery), so this crate is a dependency-light **leaf crate** — `std` plus `serde`/`serde_json`/`csv`/`chrono`, and **no `socsim-*` dependency**, so pulling it in never drags in `socsim-log`/`-config`/`-runner`.
+
+![Result output convention](assets/arch-results.svg)
 
 It provides the shared `results/` output convention:
 
