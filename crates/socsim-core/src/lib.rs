@@ -15,8 +15,11 @@
 //! `socsim-rng`'s [`SimRng`] is re-exported here so downstream crates only
 //! need to depend on `socsim-core`.
 
-pub use socsim_rng::{derive_seed, SimRng};
 use serde::{Deserialize, Serialize};
+pub use socsim_rng::{derive_seed, SimRng};
+
+pub mod opinion;
+pub use opinion::{OpinionNeighbors, ScalarOpinions};
 
 // ── AgentId ──────────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 1040 560" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>socsim mechanisms across the 6-phase tick loop</title>
-<desc>The eleven documented mechanisms placed in the phase(s) they fire in: PreStep, Environment, Decision, Interaction, Reward, PostStep. Arrows show the fixed per-step phase order; the curved arrow closes the loop for the next step.</desc>
+<desc>The thirteen documented mechanisms placed in the phase(s) they fire in: PreStep, Environment, Decision, Interaction, Reward, PostStep. The Interaction column also holds the two opinion-dynamics mechanisms hegselmann_krause and deffuant from the general socsim-social-dynamics pack. Arrows show the fixed per-step phase order; the curved arrow closes the loop for the next step.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -78,6 +78,12 @@
   <text x="595" y="232" fill="#332E6E" text-anchor="middle" font-weight="600">ocb</text>
   <rect x="520" y="256" width="150" height="38" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.2"/>
   <text x="595" y="280" fill="#332E6E" text-anchor="middle" font-weight="600">toxic_spread</text>
+  <rect x="520" y="304" width="150" height="38" rx="9" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="595" y="324" fill="#5B3E9E" text-anchor="middle" font-weight="600" font-size="12">hegselmann_krause</text>
+  <text x="595" y="337" fill="#7A5BC0" text-anchor="middle" font-size="9">social-dynamics</text>
+  <rect x="520" y="352" width="150" height="38" rx="9" fill="#EFEAFB" stroke="#7A5BC0" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="595" y="372" fill="#5B3E9E" text-anchor="middle" font-weight="600">deffuant</text>
+  <text x="595" y="385" fill="#7A5BC0" text-anchor="middle" font-size="9">social-dynamics</text>
 
   <!-- Reward column -->
   <rect x="680" y="160" width="150" height="38" rx="9" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.2"/>

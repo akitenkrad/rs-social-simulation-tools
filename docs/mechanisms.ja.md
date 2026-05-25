@@ -8,9 +8,10 @@
 メカニズムはニューラルネットワーク層のように合成され，各メカニズムが `WorldState` を読み書きし，
 エンジンがそれらを毎ステップ固定順序で実行します．
 
-このカタログでは，socsim に同梱されている**11個**のメカニズムを解説します．内訳は，
-公表された経験的知見に対してキャリブレーション済みの参照用[HR ライフサイクル](usecases.ja.md)メカニズム10個と，
-学習可能な MARL `policy` メカニズム1個です．
+このカタログでは，socsim に同梱されている**13個**のメカニズムを解説します．内訳は，
+公表された経験的知見に対してキャリブレーション済みの参照用[HR ライフサイクル](usecases.ja.md)メカニズム10個，
+学習可能な MARL `policy` メカニズム1個，および2個の意見ダイナミクスメカニズム
+（`hegselmann_krause`，`deffuant`）— 汎用の非 HR `socsim-social-dynamics` パックの最初のメンバー — です．
 
 ## 概要
 
@@ -21,7 +22,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 同一フェーズ内ではシナリオでの宣言順（＝挿入順）に発火します．破線の緑矢印は，1ステップ内での**共有状態の受け渡し**を示します．
 たとえば `turnover` が `departed_this_step` を設定し，PostStep で `knowledge_loss` がそれを読み取ります．
 
-## 11個のメカニズム
+## 13個のメカニズム
 
 | メカニズム | フェーズ | 出典 | 種別 | 概要 |
 |---|---|---|---|---|
@@ -36,6 +37,12 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`toxic_spread`](mechanisms/toxic-spread.ja.md) | Interaction | Housman & Minor (2015) | empirical | 有害行動がネットワークエッジに沿って伝播する． |
 | [`org_performance`](mechanisms/org-performance.ja.md) | Reward | aggregation | — | 生産性を集計し，ステップメトリクスを記録する． |
 | [`policy`](mechanisms/policy-mechanism.ja.md) | Decision | MARL (§14.1) | learnable | 学習済み RL ポリシーをドロップイン型 Decision メカニズムとして利用する（ライブラリ専用）． |
+| [`hegselmann_krause`](mechanisms/hegselmann-krause.ja.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | ε 以内の意見の選択された平均へ向かう同期的な有界信頼更新（ライブラリ専用）． |
+| [`deffuant`](mechanisms/deffuant.ja.md) | Interaction | Deffuant et al. (2000) | bounded-confidence | ペアの有界信頼更新：ε 以内の2エージェントが率 μ で収束する（ライブラリ専用）． |
+
+最後の2行は，汎用の（非 HR）[`socsim-social-dynamics`](architecture.ja.md#クレートワークスペース)パックの
+最初のメンバーであり，HR ライフサイクルパックとは区別される再利用可能でドメイン非依存な意見ダイナミクスの構成要素です．
+どちらも**ライブラリ専用**（`ModulePack` ／シナリオ TOML 登録なし）です．
 
 **Kind** は2種類を区別します．*empirical* はメタ分析から得られた固定相関 ρ で，チューニングできません．
 一方の *tunable* は月次ダイナミクスのペースを制御するキャリブレーションスケールです．
