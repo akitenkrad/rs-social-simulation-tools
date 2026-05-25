@@ -620,6 +620,61 @@ write_my_csv(sim.world());          // your existing schema, no Recorder require
 | Output | `JsonlRecorder` / runner summaries | whatever you write |
 | Best for | new projects, parameter sweeps, reproducible scenario files | embedding the engine in an existing tool, custom output schemas |
 
+### LLM agents and result output in library mode
+
+Two small leaf crates round out engine-only library mode: `socsim-llm` for LLM-driven agents and `socsim-results` for writing the `results/` tree. Neither is wired into the `socsim` binary; depend on them directly.
+
+**Build a client.** The production stack is one call behind the `live` feature; for tests, inject a `mock::ScriptedClient` instead — both yield the same `CachingClient<…>` shape:
+
+```rust,ignore
+use socsim_llm::{build_live_client, CachingClient, LlmClient, PromptCache, mock::ScriptedClient};
+
+// Production: Ollama-first → OpenAI-fallback → caching, from env vars.
+let mut client = build_live_client(cfg.cache_path.as_deref())?;   // Option<&Path>
+
+// Tests: a network-free scripted "model".
+let backend = ScriptedClient::constant("test-model", "yes");
+let mut client = CachingClient::new(backend, PromptCache::in_memory());
+```
+
+**Confine the call to a `Decision`-phase mechanism.** `LlmClient::complete` is synchronous, so it slots straight into `apply`:
+
+```rust,ignore
+use socsim_core::{Mechanism, Phase, Result, StepContext};
+use socsim_llm::LlmConfig;
+
+struct LlmDecision { /* hold a &mut client or shared cell */ }
+
+impl Mechanism<MyWorld> for LlmDecision {
+    fn name(&self) -> &str { "llm_decision" }
+    fn phases(&self) -> &'static [Phase] { &[Phase::Decision] }
+
+    fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, MyWorld>) -> Result<()> {
+        let prompt = ctx.world.build_prompt();
+        let resp = self.client.complete(&prompt, &LlmConfig::deterministic())?;  // temperature=0
+        ctx.world.apply_choice(&resp.text);
+        self.collector.record(resp.metadata);   // MetadataCollector → RunMetadata
+        Ok(())
+    }
+}
+```
+
+A warm `PromptCache` (plus `temperature = 0`) replays identical responses, so a re-run is pseudo-deterministic on top of the seed-deterministic core.
+
+**Write outputs.** `socsim-results` provides the timestamped-run + `latest`-symlink convention without any `Recorder`:
+
+```rust,ignore
+use socsim_results::{create_run_dir, refresh_latest_symlink, timestamp, write_csv, write_json};
+
+let ts = timestamp();                          // "YYYYMMDD_HHMMSS"
+let run_dir = create_run_dir("results")?;      // results/<ts>/
+write_csv(&metric_rows, run_dir.join("metrics.csv"))?;
+write_json(&collector.summary(), run_dir.join("llm_meta.json"))?;  // the RunMetadata sidecar
+refresh_latest_symlink("results", &ts)?;       // results/latest → <ts>
+```
+
+For analysis/visualisation tooling, a shared Python package lives at [`tools/socsim_tools/`](../tools/socsim_tools/README.md) (a `build_dispatcher` CLI router plus `settings`/`io` helpers) for building each replication's `*-tools` CLI; adopt it as a `uv` git-subdirectory dependency.
+
 ---
 
 ## Snapshots: save & resume

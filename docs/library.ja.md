@@ -620,6 +620,61 @@ write_my_csv(sim.world());          // your existing schema, no Recorder require
 | 出力 | `JsonlRecorder` / ランナーサマリー | 自分で書くもの |
 | 最適な用途 | 新規プロジェクト，パラメータスイープ，再現可能なシナリオファイル | 既存ツールへのエンジン埋め込み，カスタム出力スキーマ |
 
+### ライブラリモードでの LLM エージェントと結果出力
+
+エンジンのみのライブラリモードを補完する2つの小さなリーフクレートがあります：LLM 駆動エージェント向けの `socsim-llm` と，`results/` ツリーの書き出し向けの `socsim-results` です．どちらも `socsim` バイナリには組み込まれていないので，直接依存させます．
+
+**クライアントを構築する．** 本番スタックは `live` feature 越しに1回の呼び出しで，テストでは代わりに `mock::ScriptedClient` を注入します — どちらも同じ `CachingClient<…>` の形を返します：
+
+```rust,ignore
+use socsim_llm::{build_live_client, CachingClient, LlmClient, PromptCache, mock::ScriptedClient};
+
+// 本番: Ollama-first → OpenAI-fallback → キャッシュ，環境変数から．
+let mut client = build_live_client(cfg.cache_path.as_deref())?;   // Option<&Path>
+
+// テスト: ネットワークフリーのスクリプト化された「モデル」．
+let backend = ScriptedClient::constant("test-model", "yes");
+let mut client = CachingClient::new(backend, PromptCache::in_memory());
+```
+
+**呼び出しを `Decision` フェーズのメカニズムに閉じ込める．** `LlmClient::complete` は同期的なので，そのまま `apply` に差し込めます：
+
+```rust,ignore
+use socsim_core::{Mechanism, Phase, Result, StepContext};
+use socsim_llm::LlmConfig;
+
+struct LlmDecision { /* &mut client か共有セルを保持 */ }
+
+impl Mechanism<MyWorld> for LlmDecision {
+    fn name(&self) -> &str { "llm_decision" }
+    fn phases(&self) -> &'static [Phase] { &[Phase::Decision] }
+
+    fn apply(&mut self, _p: Phase, ctx: &mut StepContext<'_, MyWorld>) -> Result<()> {
+        let prompt = ctx.world.build_prompt();
+        let resp = self.client.complete(&prompt, &LlmConfig::deterministic())?;  // temperature=0
+        ctx.world.apply_choice(&resp.text);
+        self.collector.record(resp.metadata);   // MetadataCollector → RunMetadata
+        Ok(())
+    }
+}
+```
+
+ウォームな `PromptCache`（加えて `temperature = 0`）が同一のレスポンスを再生するので，再実行はシード決定論的なコアの上で疑似決定論的になります．
+
+**出力を書き出す．** `socsim-results` は `Recorder` なしで，タイムスタンプ付き実行 + `latest` シンボリックリンクの規約を提供します：
+
+```rust,ignore
+use socsim_results::{create_run_dir, refresh_latest_symlink, timestamp, write_csv, write_json};
+
+let ts = timestamp();                          // "YYYYMMDD_HHMMSS"
+let run_dir = create_run_dir("results")?;      // results/<ts>/
+write_csv(&metric_rows, run_dir.join("metrics.csv"))?;
+write_json(&collector.summary(), run_dir.join("llm_meta.json"))?;  // RunMetadata サイドカー
+refresh_latest_symlink("results", &ts)?;       // results/latest → <ts>
+```
+
+分析・可視化ツール向けには，共有 Python パッケージが [`tools/socsim_tools/`](../tools/socsim_tools/README.md) にあります（`build_dispatcher` CLI ルータと `settings`/`io` ヘルパ）．各 replication の `*-tools` CLI を構築するために使い，`uv` の git subdirectory 依存として取り込みます．
+
 動作するライブラリモードの例は `crates/socsim-engine/examples/engine_only.rs`（収束する非空間モデル）と `crates/socsim-engine/examples/cellular_automata.rs`（`run_observed` を使い `CellGrid` + `Adjacency` 上に構築したイベント駆動の格子CA）にあります．
 
 ---

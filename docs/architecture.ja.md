@@ -6,7 +6,7 @@
 
 ## クレートワークスペース
 
-ワークスペースは3層に整理された11個のクレートで構成されています：
+ワークスペースは3層に整理された13個のクレートで構成されています：
 
 ```
 socsim-cli          ← バイナリ（エントリーポイント）
@@ -20,6 +20,9 @@ socsim-cli          ← バイナリ（エントリーポイント）
             ├── socsim-grid        ← Grid, GridIndex, 近傍, 距離（空間モデル）
             ├── socsim-marl        ← 学習ポリシー(MARL): Policy, PolicyMechanism, MarlTrainer（burn; ライブラリ専用）
             └── socsim-rng         ← SimRng (ChaCha20), derive_seed
+
+socsim-llm      ← オプションのLLMエージェント層: LlmClient, CachingClient, build_live_client（socsim 依存なし; feature ゲート; ライブラリ専用）
+socsim-results  ← リーフの出力ヘルパ: timestamp, create_run_dir, write_csv/json, refresh_latest_symlink（socsim 依存なし; ライブラリ専用）
 ```
 
 依存ルール：
@@ -31,6 +34,8 @@ socsim-cli          ← バイナリ（エントリーポイント）
 - `socsim-cli` はすべてを `socsim` バイナリとして結合します．
 - `socsim-hr-lifecycle`，`socsim-net`，`socsim-grid` はエンジン層の隣に位置し，直交しています；`socsim-grid` は `socsim-core` にのみ依存します．
 - `socsim-marl`（Phase 6）は `socsim-engine` と `socsim-core` に依存します．**ライブラリ専用**（`socsim` バイナリには含まれません）で，ニューラルネットフレームワーク `burn` を取り込むため，hr-lifecycle 連携は `marl` feature でゲートしています．
+- `socsim-llm` はエンジン層の隣に位置する**直交した，オプションの**層です．**`socsim-*` 依存はなく**（`serde`/`serde_json`/`thiserror` のみ，加えて feature 越しの `ureq`），**ライブラリ専用**です．ライブのプロバイダバックエンドは feature ゲート（`ollama`，`openai`，および両者をまとめた `live`）されており，デフォルトビルドはネットワーク依存を一切取り込みません．LLM 駆動モデルの `Decision` フェーズで使用します．
+- `socsim-results` は**リーフクレート**で，**`socsim-*` 依存はなく**（`std` に加えて `serde`/`serde_json`/`csv`/`chrono` のみ），軽量ライブラリモード向けの出力ボイラープレートを提供します．`socsim-log`/`-config`/`-runner` を一切取り込みません．
 
 ---
 
@@ -109,6 +114,61 @@ socsim は2通りの使い方ができ，**どちらもファーストクラス*
 ## 学習ポリシー（MARL, Phase 6）
 
 `socsim-marl` は `Decision` フェーズを学習可能にします：`PolicyMechanism` が `Policy`（`burn` の小さな MLP を REINFORCE で学習する `DiscretePolicyNet` が実装）をラップし，他のメカニズムと同じ6フェーズループに差し込めます — エンジンの変更は不要です．`ObsEncoder`/`ActionApplier`/`RewardFn` が具体的な World とフラットな特徴・行動空間を橋渡しし，`TrajectoryBuffer` がエピソードを収集，`MarlTrainer` が外側の学習ループを回します．重みは `SimRng` からシードされ全テンソル演算は CPU 上なので，凍結ポリシーはビット単位で再現可能です．使い方は[ライブラリガイド](library.ja.md#学習ポリシーmarl)を参照してください．
+
+---
+
+## LLM層（socsim-llm）
+
+`socsim-llm` は LLM 駆動エージェント向けのオプション層です．socsim コアは**決定論的で LLM フリー**なので，このクレートはモデルの非決定性を1箇所に閉じ込め，*疑似決定論化*します — これは意図的な**2層決定論**の設計です：socsim コアがシード決定論的であり，その上に LLM 層を*キャッシュ疑似決定論的*に重ねます．規約として LLM 呼び出しはメカニズムの `Decision` フェーズに閉じ込めます（LLM 呼び出しは `Mechanism::apply` 内でインラインに行う同期的な `complete` にすぎません）．
+
+すべてはプロバイダ非依存の単一トレイトの上に構築されています：
+
+```rust,ignore
+pub trait LlmClient {
+    fn model(&self) -> &str;
+    fn endpoint(&self) -> &str;
+    fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError>;
+}
+```
+
+本番スタックは `live` feature 越しに1回の呼び出しで組み立てます：
+
+```rust,ignore
+let client: CachingClient<Box<dyn LlmClient>> =
+    socsim_llm::build_live_client(cache_path /* Option<&Path> */)?;
+```
+
+`build_live_client` は環境変数から **Ollama-first → OpenAI-fallback → 型消去 → キャッシュ**を構成します：
+
+- **Ollama**（プライマリ）— `OLLAMA_HOST`（既定 `http://localhost:11434`）と `OLLAMA_MODEL`（既定 `llama3.1`）．
+- **OpenAI**（ベストエフォートのフォールバック）— `OPENAI_API_KEY` と `OPENAI_MODEL`（既定 `gpt-4o-mini`）．`OPENAI_API_KEY` が未設定ならプレースホルダを構築し，Ollama 自体が失敗したときにのみエラーになります（Ollama 単体の構成でも動作します）．
+- バックエンドは `Box<dyn LlmClient>` に型消去され，本番スタックでもテスト用モックの注入でも同じ具体的な戻り値型で扱えます．
+
+構築は**遅延**です — キャッシュミス時に `CachingClient::complete` が呼ばれるまでネットワーク呼び出しは発生しません．
+
+疑似決定論は2つの要素から生まれます：
+
+- **`PromptCache`** — `hash(prompt + model)`（`cache_key`）をキーとするプロンプト → レスポンスのキャッシュで，インメモリ（`PromptCache::in_memory`）または JSON ファイルバック（`PromptCache::open`，アトミック保存）です．`LlmConfig::deterministic()` は `temperature = 0` と固定 `seed` を設定し，ウォームキャッシュと組み合わせると再実行で同一のレスポンスを再生し，ノイズの多いモデルを再現可能なオラクルに変えます．
+- **`MetadataCollector`** / **`RunMetadata`** — `CallMetadata` が呼び出しごとに model / endpoint / temperature / seed / `cache_hit` を記録し，`MetadataCollector::summary()` がこれらをシリアライズ可能な `RunMetadata`（model，endpoint，生成設定，総呼び出し数，キャッシュヒット数，キャッシュヒット率）に集約します．replication はこれを（例：`llm_meta.json` として）永続化します．
+
+決定論的なテストには `mock::ScriptedClient` があります — クロージャで応答するネットワークフリーの `LlmClient` で，ライブバックエンドとまったく同じように `CachingClient` に差し込めます．
+
+このクレートは**ライブラリ専用**で `socsim` バイナリには組み込まれていません；軽量 replication は git 依存で直接取り込みます．
+
+---
+
+## 結果出力ヘルパ（socsim-results）
+
+`socsim-results` は，軽量ライブラリモードの replication がそろってコピーしていた出力ボイラープレートを切り出したものです．これらの replication は独自の `main.rs` + clap CLI を備え出力を直接書き込む（`Recorder`/`Scenario` 機構を使わない）ため，このクレートは依存の少ない**リーフクレート**です — `std` に加えて `serde`/`serde_json`/`csv`/`chrono` のみで，**`socsim-*` 依存はない**ので，取り込んでも `socsim-log`/`-config`/`-runner` を一切引き込みません．
+
+共有の `results/` 出力規約を提供します：
+
+- `timestamp()` — 現在のローカル時刻を `YYYYMMDD_HHMMSS` のスタンプで返します．
+- `create_run_dir(base)` — タイムスタンプ付き実行ディレクトリ `base/<timestamp>` を作成します；`ensure_dir(path)` は冪等な `mkdir -p` です．
+- `refresh_latest_symlink(base, target)` — `base/latest` を最新の実行に（再）指定します（Unix のシンボリックリンク；それ以外ではベストエフォートの no-op）．
+- `write_csv(rows, path)` / `write_json(value, path)` — serde ベースの CSV/JSON ライタ（`socsim-llm` の `RunMetadata` はこの JSON ライタで永続化されます）．I/O / CSV / JSON の失敗源をまとめた `WriteError` を返します．
+
+設計上ドメイン非依存です：汎用のシリアライズプリミティブのみを提供するので，ドメイン型（`socsim-llm` の `RunMetadata` など）はそれぞれの所有クレートに置き，ここでは `write_json` 経由で書き込みます．
 
 ---
 
