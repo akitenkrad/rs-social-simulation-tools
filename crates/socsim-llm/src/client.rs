@@ -153,6 +153,65 @@ impl MetadataCollector {
             self.cache_hits() as f64 / self.calls.len() as f64
         }
     }
+
+    /// Summarise the collected calls into a serialisable [`RunMetadata`].
+    ///
+    /// The identity fields (`llm_model` / `llm_endpoint` / `llm_temperature` /
+    /// `llm_seed`) are taken from the **most recent non-cache** call when one
+    /// exists — that is the backend that actually answered, not the synthetic
+    /// `"cache"` endpoint a cache hit records — falling back to the most recent
+    /// call of any kind, then to defaults.  The counts and hit-rate come from
+    /// the collector itself.  An empty collector yields empty strings, zero
+    /// counts and a `0.0` hit-rate without panicking.
+    pub fn summary(&self) -> RunMetadata {
+        // Prefer the last non-cache call (the real backend), else the last call
+        // of any kind, so the recorded model/endpoint reflect a live provider
+        // rather than the `"cache"` placeholder when at least one miss happened.
+        let identity = self
+            .calls
+            .iter()
+            .rev()
+            .find(|c| !c.cache_hit)
+            .or_else(|| self.calls.last());
+
+        match identity {
+            Some(meta) => RunMetadata {
+                llm_model: meta.model.clone(),
+                llm_endpoint: meta.endpoint.clone(),
+                llm_temperature: meta.temperature,
+                llm_seed: meta.seed,
+                total_calls: self.total(),
+                cache_hits: self.cache_hits(),
+                cache_hit_rate: self.cache_hit_rate(),
+            },
+            None => RunMetadata::default(),
+        }
+    }
+}
+
+/// A serialisable, run-level summary of an entire run's LLM activity.
+///
+/// Produced by [`MetadataCollector::summary`].  This is the uniform shape the
+/// downstream replications persist (e.g. as `llm_meta.json`): the model /
+/// endpoint / generation settings the run talked to, plus the call and
+/// cache-hit counts.  Replication-specific prose (e.g. a determinism note)
+/// is intentionally **not** part of this struct.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RunMetadata {
+    /// Model name/version the run talked to (from the latest backend call).
+    pub llm_model: String,
+    /// Endpoint that served the run's backend calls.
+    pub llm_endpoint: String,
+    /// Temperature used (matches [`CallMetadata::temperature`]).
+    pub llm_temperature: f32,
+    /// Seed used (matches [`CallMetadata::seed`]).
+    pub llm_seed: u64,
+    /// Total number of [`complete`](LlmClient::complete) calls recorded.
+    pub total_calls: usize,
+    /// Number of those calls served from cache.
+    pub cache_hits: usize,
+    /// Cache-hit rate in `[0, 1]` (`0.0` if no calls were recorded).
+    pub cache_hit_rate: f64,
 }
 
 // ── the trait ──────────────────────────────────────────────────────────────
@@ -303,6 +362,77 @@ mod tests {
         let r2 = cached.complete("q", &LlmConfig::deterministic()).unwrap();
         assert!(r2.metadata.cache_hit); // warm hit served from cache
         assert_eq!(r2.text, "42");
+    }
+
+    #[test]
+    fn summary_of_populated_collector() {
+        let mut collector = MetadataCollector::new();
+        // Two backend misses then one cache hit: 1/3 hit rate, identity from a
+        // real backend call (not the "cache" placeholder).
+        collector.record(CallMetadata {
+            model: "llama3.1".into(),
+            endpoint: "http://localhost:11434/api/chat".into(),
+            temperature: 0.0,
+            seed: 42,
+            cache_hit: false,
+        });
+        collector.record(CallMetadata {
+            model: "llama3.1".into(),
+            endpoint: "http://localhost:11434/api/chat".into(),
+            temperature: 0.0,
+            seed: 42,
+            cache_hit: false,
+        });
+        collector.record(CallMetadata {
+            model: "llama3.1".into(),
+            endpoint: "cache".into(),
+            temperature: 0.0,
+            seed: 42,
+            cache_hit: true,
+        });
+
+        let s = collector.summary();
+        assert_eq!(s.total_calls, 3);
+        assert_eq!(s.cache_hits, 1);
+        assert!((s.cache_hit_rate - 1.0 / 3.0).abs() < 1e-12);
+        assert_eq!(s.llm_model, "llama3.1");
+        // Identity prefers the real backend over the "cache" placeholder.
+        assert_eq!(s.llm_endpoint, "http://localhost:11434/api/chat");
+        assert_eq!(s.llm_temperature, 0.0);
+        assert_eq!(s.llm_seed, 42);
+    }
+
+    #[test]
+    fn summary_falls_back_to_cache_identity_when_all_hits() {
+        // If every recorded call is a cache hit, identity comes from the last
+        // call (there is no non-cache call to prefer).
+        let mut collector = MetadataCollector::new();
+        collector.record(CallMetadata {
+            model: "gpt-4o-mini".into(),
+            endpoint: "cache".into(),
+            temperature: 0.0,
+            seed: 7,
+            cache_hit: true,
+        });
+        let s = collector.summary();
+        assert_eq!(s.total_calls, 1);
+        assert_eq!(s.cache_hits, 1);
+        assert_eq!(s.cache_hit_rate, 1.0);
+        assert_eq!(s.llm_model, "gpt-4o-mini");
+        assert_eq!(s.llm_endpoint, "cache");
+        assert_eq!(s.llm_seed, 7);
+    }
+
+    #[test]
+    fn summary_of_empty_collector_is_defaults() {
+        let s = MetadataCollector::new().summary();
+        assert_eq!(s.llm_model, "");
+        assert_eq!(s.llm_endpoint, "");
+        assert_eq!(s.llm_temperature, 0.0);
+        assert_eq!(s.llm_seed, 0);
+        assert_eq!(s.total_calls, 0);
+        assert_eq!(s.cache_hits, 0);
+        assert_eq!(s.cache_hit_rate, 0.0);
     }
 
     #[test]

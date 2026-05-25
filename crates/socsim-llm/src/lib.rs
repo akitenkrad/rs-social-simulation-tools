@@ -49,6 +49,8 @@ mod client;
 mod fallback;
 pub mod mock;
 
+#[cfg(feature = "live")]
+mod live;
 #[cfg(feature = "ollama")]
 mod ollama;
 #[cfg(feature = "openai")]
@@ -57,9 +59,12 @@ mod openai;
 pub use cache::{cache_key, PromptCache};
 pub use client::{
     CachingClient, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse, MetadataCollector,
+    RunMetadata,
 };
 pub use fallback::FallbackClient;
 
+#[cfg(feature = "live")]
+pub use live::build_live_client;
 #[cfg(feature = "ollama")]
 pub use ollama::OllamaClient;
 #[cfg(feature = "openai")]
