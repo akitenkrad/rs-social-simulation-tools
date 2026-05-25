@@ -12,7 +12,7 @@
 ## 1. Overview
 
 `threshold_contagion` is the **deterministic threshold** member of the
-network-contagion family in the general `socsim-social-dynamics` pack. Each agent
+network-contagion family in the general `socsim-social-dynamics` crate. Each agent
 carries a binary *active* flag. Once per step the mechanism performs a **synchronous
 round**: it snapshots the active set at the start of the step, and an inactive agent
 activates iff the fraction of its neighbours that are active reaches the threshold θ.

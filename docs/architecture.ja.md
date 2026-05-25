@@ -23,7 +23,7 @@ socsim-cli          ← バイナリ（エントリーポイント）
             ├── socsim-marl        ← 学習ポリシー(MARL): Policy, PolicyMechanism, MarlTrainer（burn; ライブラリ専用）
             └── socsim-rng         ← SimRng (ChaCha20), derive_seed
 
-socsim-social-dynamics ← 汎用の社会ダイナミクスパック: HegselmannKrauseMechanism, DeffuantMechanism, SocialJudgementMechanism, LorenzMechanism, SiContagionMechanism, ThresholdContagionMechanism, AxelrodMechanism, MeanOperator（→ socsim-core のみ; ライブラリ専用）
+socsim-social-dynamics ← 汎用の社会ダイナミクスクレート: HegselmannKrauseMechanism, DeffuantMechanism, SocialJudgementMechanism, LorenzMechanism, SiContagionMechanism, ThresholdContagionMechanism, AxelrodMechanism, MeanOperator（→ socsim-core のみ; ライブラリ専用）
 socsim-llm      ← オプションのLLMエージェント層: LlmClient, CachingClient, build_live_client（socsim 依存なし; feature ゲート; ライブラリ専用）
 socsim-results  ← リーフの出力ヘルパ: timestamp, create_run_dir, write_csv/json, refresh_latest_symlink（socsim 依存なし; ライブラリ専用）
 ```
@@ -39,7 +39,7 @@ socsim-results  ← リーフの出力ヘルパ: timestamp, create_run_dir, writ
 - `socsim-marl`（Phase 6）は `socsim-engine` と `socsim-core` に依存します．**ライブラリ専用**（`socsim` バイナリには含まれません）で，ニューラルネットフレームワーク `burn` を取り込むため，hr-lifecycle 連携は `marl` feature でゲートしています．
 - `socsim-llm` はエンジン層の隣に位置する**直交した，オプションの**層です．**`socsim-*` 依存はなく**（`serde`/`serde_json`/`thiserror` のみ，加えて feature 越しの `ureq`），**ライブラリ専用**です．ライブのプロバイダバックエンドは feature ゲート（`ollama`，`openai`，および両者をまとめた `live`）されており，デフォルトビルドはネットワーク依存を一切取り込みません．LLM 駆動モデルの `Decision` フェーズで使用します．
 - `socsim-results` は**リーフクレート**で，**`socsim-*` 依存はなく**（`std` に加えて `serde`/`serde_json`/`csv`/`chrono` のみ），軽量ライブラリモード向けの出力ボイラープレートを提供します．`socsim-log`/`-config`/`-runner` を一切取り込みません．
-- `socsim-social-dynamics` はエンジン層の隣に位置する**直交した，オプションの**パックです．**`socsim-core` のみ**に依存し（`ScalarOpinions` / `BinaryState` / `CultureVectors` / `Neighbors` 能力トレイトのため），**ライブラリ専用**です — `ModulePack` を持たず，`socsim` バイナリには組み込まれません．これは**最初の汎用（非 HR）メカニズムパック**です：再利用可能でドメイン非依存な社会ダイナミクスの構成要素 — 3つのファミリーにまたがる7つのメカニズム：意見ダイナミクス（有界信頼の `HegselmannKrauseMechanism` と `DeffuantMechanism`，`SocialJudgementMechanism`，`LorenzMechanism`，および A/G/H/P/R の `MeanOperator` ファミリー），ネットワーク伝播（`SiContagionMechanism`，`ThresholdContagionMechanism`），文化伝播（`AxelrodMechanism`） — を提供し，シナリオ固有の `socsim-hr-lifecycle` パックとは区別されます．
+- `socsim-social-dynamics` はエンジン層の隣に位置する**直交した，オプションの**クレートです．**`socsim-core` のみ**に依存し（`ScalarOpinions` / `BinaryState` / `CultureVectors` / `Neighbors` 能力トレイトのため），**ライブラリ専用**です — `ModulePack` を持たず，`socsim` バイナリには組み込まれません．これは**最初の汎用（非 HR）メカニズムクレート**です：再利用可能でドメイン非依存な社会ダイナミクスの構成要素 — 3つのファミリーにまたがる7つのメカニズム：意見ダイナミクス（有界信頼の `HegselmannKrauseMechanism` と `DeffuantMechanism`，`SocialJudgementMechanism`，`LorenzMechanism`，および A/G/H/P/R の `MeanOperator` ファミリー），ネットワーク伝播（`SiContagionMechanism`，`ThresholdContagionMechanism`），文化伝播（`AxelrodMechanism`） — を提供し，シナリオ固有の `socsim-hr-lifecycle` クレートとは区別されます．
 
 ---
 

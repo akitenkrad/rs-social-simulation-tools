@@ -9,7 +9,7 @@
 
 ## 1. 概要
 
-`deffuant` は，汎用の `socsim-social-dynamics` パックにおける有界信頼（BC）ファミリーの
+`deffuant` は，汎用の `socsim-social-dynamics` クレートにおける有界信頼（BC）ファミリーの
 **ペア／イベントベース**のメンバーです．Hegselmann–Krause が*すべての*エージェントを
 信頼集合全体に対して同時に更新するのに対し，Deffuant は一度に*2*エージェントを更新します．
 各ステップで `pairs_per_step` 回のランダムな出会いを行い，エージェント `i` とランダムな近傍 `j` を引きます．

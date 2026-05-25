@@ -12,7 +12,7 @@
 ## 1. Overview
 
 `axelrod` is the **cultural-dissemination** member of the general
-`socsim-social-dynamics` pack. Each agent holds a fixed-length categorical *culture
+`socsim-social-dynamics` crate. Each agent holds a fixed-length categorical *culture
 vector* of `F` features. The mechanism is **event-driven**: each step it runs
 `events_per_step` micro-events. In each event it draws a site `s` uniformly and a
 random neighbour `nb`, computes their similarity `sim = (#matching features) / F`,
