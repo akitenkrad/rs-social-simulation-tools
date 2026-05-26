@@ -22,6 +22,28 @@ CLIは10ステップごとのメトリクス系列（最後のステップを含
 socsim summarize runs/hr_lifecycle_baseline_42.jsonl
 ```
 
+### 別のパックを実行する — 意見ダイナミクス
+
+CLIはWorld多態なので，同じコマンドで任意のパックを駆動できます．同梱の `scenarios/opinion_dynamics_baseline.toml` は，Watts–Strogatz ソーシャルネットワーク上で Hegselmann–Krause の有界信頼コンセンサスモデルを実行します：
+
+```sh
+socsim run scenarios/opinion_dynamics_baseline.toml
+```
+
+```
+Running 'opinion_dynamics_baseline' (pack=opinion-dynamics, t_max=60, seeds=[42], parallel=false)
+
+t               clusters         max_delta              mean            spread          variance
+10               22.0000            0.1238            0.5092            0.9769            0.0360
+20               18.0000            0.0331            0.5088            0.9769            0.0268
+30               15.0000            0.0127            0.5094            0.9769            0.0243
+40               12.0000            0.0049            0.5097            0.9769            0.0235
+50               12.0000            0.0021            0.5098            0.9769            0.0233
+60               12.0000            0.0010            0.5098            0.9769            0.0232
+```
+
+`clusters`/`variance`/`spread`/`mean` の系列は，エージェントが局所的なコンセンサスに達するにつれ，意見が時間とともにより少ないクラスタへ収束していく様子を示します．`epsilon`（信頼半径）パラメータを大きくすると，集団は完全な合意（単一クラスタ）へ向かいます．
+
 ---
 
 ## 2. マルチシードによる再現性チェック

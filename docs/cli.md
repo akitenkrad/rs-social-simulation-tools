@@ -4,6 +4,8 @@
 
 The `socsim` binary exposes six subcommands. Run `socsim --help` or `socsim <COMMAND> --help` for flags.
 
+The binary is **world-polymorphic**: every scenario names a *module pack* and is dispatched to that pack's world type. Two packs ship today (`hr-lifecycle`, `opinion-dynamics`); new packs register behind a `pack-*` Cargo feature.
+
 ```
 socsim <COMMAND>
 
@@ -45,6 +47,8 @@ Output:
 ```
 Wrote starter scenario to 'scenarios/my_scenario.toml'
 ```
+
+The `opinion-dynamics` pack is also available, e.g. `socsim init --module-pack opinion-dynamics --out scenarios/op.toml`.
 
 ---
 
@@ -144,6 +148,7 @@ socsim list packs
 ```
 Available module packs:
   hr-lifecycle
+  opinion-dynamics
 ```
 
 ```sh
@@ -163,6 +168,13 @@ Mechanisms by pack:
     socialization
     toxic_spread
     turnover
+  [opinion-dynamics]
+    convergence
+    deffuant
+    hegselmann_krause
+    lorenz
+    opinion_metrics
+    social_judgement
 ```
 
 ---

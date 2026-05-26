@@ -22,6 +22,28 @@ To re-read the JSONL as a CSV summary later, without re-running:
 socsim summarize runs/hr_lifecycle_baseline_42.jsonl
 ```
 
+### Running another pack — opinion dynamics
+
+The CLI is world-polymorphic, so the same commands drive any pack. The bundled `scenarios/opinion_dynamics_baseline.toml` runs a Hegselmann–Krause bounded-confidence consensus model on a Watts–Strogatz social network:
+
+```sh
+socsim run scenarios/opinion_dynamics_baseline.toml
+```
+
+```
+Running 'opinion_dynamics_baseline' (pack=opinion-dynamics, t_max=60, seeds=[42], parallel=false)
+
+t               clusters         max_delta              mean            spread          variance
+10               22.0000            0.1238            0.5092            0.9769            0.0360
+20               18.0000            0.0331            0.5088            0.9769            0.0268
+30               15.0000            0.0127            0.5094            0.9769            0.0243
+40               12.0000            0.0049            0.5097            0.9769            0.0235
+50               12.0000            0.0021            0.5098            0.9769            0.0233
+60               12.0000            0.0010            0.5098            0.9769            0.0232
+```
+
+The `clusters`/`variance`/`spread`/`mean` series shows opinions coalescing into progressively fewer clusters over time as agents reach local consensus. Raise the `epsilon` (confidence-radius) parameter to drive the population toward full consensus (a single cluster).
+
 ---
 
 ## 2. Multi-seed reproducibility check

@@ -6,9 +6,9 @@
 
 ![Rust 2021](https://img.shields.io/badge/Rust-2021-orange)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
-![tests: 220 passing](https://img.shields.io/badge/tests-220%20passing-brightgreen)
+![tests: 266 passing](https://img.shields.io/badge/tests-266%20passing-brightgreen)
 
-`socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, spatial-grid primitives, world-state snapshots for save/resume, optional learnable (MARL) policies, an optional LLM-agent layer (Ollama/OpenAI with prompt caching), result-output helpers, and a CLI for running, sweeping, and summarising scenarios — all in a fourteen-crate workspace. A reference HR lifecycle module ships with ten mechanisms calibrated against published empirical findings, and a general opinion-dynamics crate adds the Hegselmann–Krause and Deffuant bounded-confidence mechanisms.
+`socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, spatial-grid primitives, world-state snapshots for save/resume, optional learnable (MARL) policies, an optional LLM-agent layer (Ollama/OpenAI with prompt caching), result-output helpers, and a CLI for running, sweeping, and summarising scenarios — all in a fourteen-crate workspace. The CLI is **world-polymorphic**: a scenario selects a *module pack* by name, and two packs ship today — a reference **HR lifecycle** module (ten mechanisms calibrated against published empirical findings) and an **opinion-dynamics** pack that runs bounded-confidence consensus models on a social network. Reusable, domain-agnostic mechanisms live in the general **`socsim-mechanisms`** catalog — eight mechanisms across four feature families: opinion dynamics, network contagion, cultural dissemination, and group dynamics.
 
 ## Installation
 
@@ -75,7 +75,7 @@ Bounded-confidence opinions coalesce into fewer clusters over time (consensus); 
 | [CLI reference](docs/cli.md) | Every subcommand, flags, JSONL output format |
 | [Use-cases & recipes](docs/usecases.md) | Runbook for common research workflows |
 | [Library API](docs/library.md) | Implement custom mechanisms and use socsim as a library |
-| [Mechanism catalog](docs/mechanisms.md) | All thirteen mechanisms: theory, sources, diagrams, phase positioning, and how to apply each |
+| [Mechanism catalog](docs/mechanisms.md) | All nineteen mechanisms: theory, sources, diagrams, phase positioning, and how to apply each |
 | [Architecture](docs/architecture.md) | Crate dependency graph, 6-phase tick loop, calibration philosophy |
 
 ## License

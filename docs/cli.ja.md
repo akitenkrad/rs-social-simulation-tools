@@ -4,6 +4,8 @@
 
 `socsim` バイナリは6つのサブコマンドを提供します．`socsim --help` または `socsim <COMMAND> --help` でフラグを確認できます．
 
+このバイナリは **World 多態**です：すべてのシナリオは *モジュールパック* を名前で指定し，そのパックのWorld型へディスパッチされます．現在2つのパック（`hr-lifecycle`，`opinion-dynamics`）を同梱しており，新しいパックは `pack-*` Cargoフィーチャの背後に登録されます．
+
 ```
 socsim <COMMAND>
 
@@ -45,6 +47,8 @@ socsim init --module-pack hr-lifecycle --out scenarios/my_scenario.toml
 ```
 Wrote starter scenario to 'scenarios/my_scenario.toml'
 ```
+
+`opinion-dynamics` パックも利用可能です（例：`socsim init --module-pack opinion-dynamics --out scenarios/op.toml`）．
 
 ---
 
@@ -144,6 +148,7 @@ socsim list packs
 ```
 Available module packs:
   hr-lifecycle
+  opinion-dynamics
 ```
 
 ```sh
@@ -163,6 +168,13 @@ Mechanisms by pack:
     socialization
     toxic_spread
     turnover
+  [opinion-dynamics]
+    convergence
+    deffuant
+    hegselmann_krause
+    lorenz
+    opinion_metrics
+    social_judgement
 ```
 
 ---
