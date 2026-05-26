@@ -7,10 +7,11 @@ authors.workspace = true
 license.workspace = true
 
 [features]
-default = ["opinion-dynamics", "contagion", "cultural"]
+default = ["opinion-dynamics", "contagion", "cultural", "group-dynamics"]
 opinion-dynamics = []   # HegselmannKrause, Deffuant, SocialJudgement, Lorenz, MeanOperator
 contagion = []          # SiContagion, ThresholdContagion
 cultural = []           # Axelrod
+group-dynamics = []     # GroupConformity
 
 [dependencies]
 rand.workspace = true

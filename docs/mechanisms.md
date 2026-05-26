@@ -9,12 +9,12 @@ a single `apply` method — and is composed with other mechanisms over the share
 like neural-network layers: each reads and writes the `WorldState`, and the
 engine runs them in a fixed order every step.
 
-This catalog documents the **eighteen** mechanisms that ship with socsim: the ten
+This catalog documents the **nineteen** mechanisms that ship with socsim: the ten
 reference [HR lifecycle](usecases.md) mechanisms (calibrated against published
-empirical findings), the learnable MARL `policy` mechanism, and the seven
+empirical findings), the learnable MARL `policy` mechanism, and the eight
 social-dynamics mechanisms (`hegselmann_krause`, `deffuant`, `social_judgement`,
-`lorenz`, `si_contagion`, `threshold_contagion`, `axelrod`) — the general, non-HR
-`socsim-mechanisms` crate.
+`lorenz`, `si_contagion`, `threshold_contagion`, `axelrod`, `group_conformity`) —
+the general, non-HR `socsim-mechanisms` crate.
 
 ## Overview
 
@@ -26,7 +26,7 @@ within a phase, mechanisms fire in scenario/insertion order. The dashed green
 arrows show **shared-state hand-offs** within a single step — e.g. `turnover`
 populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 
-## The eighteen mechanisms
+## The nineteen mechanisms
 
 | Mechanism | Phase | Source | Kind | Summary |
 |---|---|---|---|---|
@@ -48,8 +48,9 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`si_contagion`](mechanisms/si-contagion.md) | Interaction | SI epidemic model | network contagion | Each active neighbour infects an inactive agent independently with probability β (library-only). |
 | [`threshold_contagion`](mechanisms/threshold-contagion.md) | Interaction | Granovetter (1978) | network contagion | An inactive agent activates once its fraction of active neighbours reaches θ (library-only). |
 | [`axelrod`](mechanisms/axelrod.md) | Interaction | Axelrod (1997) | cultural dissemination | On each encounter copy one differing feature with probability equal to similarity (library-only). |
+| [`group_conformity`](mechanisms/group-conformity.md) | Interaction | DeGroot (1974) | within-group averaging | Each agent moves a fraction α toward its group's mean opinion; groups converge independently (library-only). |
 
-The last seven rows are the members of the general (non-HR)
+The last eight rows are the members of the general (non-HR)
 [`socsim-mechanisms`](architecture.md#crate-workspace) crate — reusable,
 domain-agnostic social-dynamics building blocks (opinion dynamics, network contagion,
 and cultural dissemination) distinct from the HR-lifecycle crate. All are

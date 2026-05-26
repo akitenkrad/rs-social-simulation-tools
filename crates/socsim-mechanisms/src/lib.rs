@@ -7,13 +7,15 @@
 //! ([`ScalarOpinions`](socsim_core::ScalarOpinions),
 //! [`BinaryState`](socsim_core::BinaryState),
 //! [`CultureVectors`](socsim_core::CultureVectors), each paired with
-//! [`Neighbors`](socsim_core::Neighbors)).
+//! [`Neighbors`](socsim_core::Neighbors); and
+//! [`GroupMembership`](socsim_core::GroupMembership) paired with
+//! [`ScalarOpinions`](socsim_core::ScalarOpinions)).
 //!
-//! The catalog is split into three Cargo **feature families** (all on by
-//! default): `opinion-dynamics`, `contagion` and `cultural`.  Disable default
-//! features and opt in to compile only the families you need.
+//! The catalog is split into four Cargo **feature families** (all on by
+//! default): `opinion-dynamics`, `contagion`, `cultural` and `group-dynamics`.
+//! Disable default features and opt in to compile only the families you need.
 //!
-//! Three mechanism families ship here:
+//! Four mechanism families ship here:
 //!
 //! - **Opinion dynamics** ([`opinion`] module) — scalar-opinion updates:
 //!   - [`HegselmannKrauseMechanism`] — Hegselmann–Krause bounded confidence
@@ -30,6 +32,9 @@
 //! - **Cultural dissemination** ([`culture`] module):
 //!   - [`AxelrodMechanism`] — Axelrod (1997) feature copying; math from
 //!     `wang2025`.
+//! - **Group dynamics** ([`group`] module) — group-partition opinion updates:
+//!   - [`GroupConformityMechanism`] — synchronous DeGroot-style within-group
+//!     averaging: each agent moves a fraction α toward its group's mean opinion.
 //!
 //! For hybrid models (e.g. `mou2024`, an LLM core + ABM periphery) the bare
 //! message-set **Δ-form** opinion updates ([`updates`] module —
@@ -58,6 +63,8 @@
 pub mod contagion;
 #[cfg(feature = "cultural")]
 pub mod culture;
+#[cfg(feature = "group-dynamics")]
+pub mod group;
 #[cfg(feature = "opinion-dynamics")]
 pub mod means;
 #[cfg(feature = "opinion-dynamics")]
@@ -69,6 +76,8 @@ pub mod updates;
 pub use contagion::{SiContagionMechanism, ThresholdContagionMechanism};
 #[cfg(feature = "cultural")]
 pub use culture::{axelrod_event, is_absorbing, AxelrodMechanism};
+#[cfg(feature = "group-dynamics")]
+pub use group::GroupConformityMechanism;
 #[cfg(feature = "opinion-dynamics")]
 pub use means::{apply_mean, parse_mean, MeanOperator};
 #[cfg(feature = "opinion-dynamics")]

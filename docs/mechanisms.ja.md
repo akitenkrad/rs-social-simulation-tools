@@ -8,10 +8,10 @@
 メカニズムはニューラルネットワーク層のように合成され，各メカニズムが `WorldState` を読み書きし，
 エンジンがそれらを毎ステップ固定順序で実行します．
 
-このカタログでは，socsim に同梱されている**18個**のメカニズムを解説します．内訳は，
+このカタログでは，socsim に同梱されている**19個**のメカニズムを解説します．内訳は，
 公表された経験的知見に対してキャリブレーション済みの参照用[HR ライフサイクル](usecases.ja.md)メカニズム10個，
-学習可能な MARL `policy` メカニズム1個，および7個の社会ダイナミクスメカニズム
-（`hegselmann_krause`，`deffuant`，`social_judgement`，`lorenz`，`si_contagion`，`threshold_contagion`，`axelrod`）
+学習可能な MARL `policy` メカニズム1個，および8個の社会ダイナミクスメカニズム
+（`hegselmann_krause`，`deffuant`，`social_judgement`，`lorenz`，`si_contagion`，`threshold_contagion`，`axelrod`，`group_conformity`）
 — 汎用の非 HR `socsim-mechanisms` クレート — です．
 
 ## 概要
@@ -23,7 +23,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 同一フェーズ内ではシナリオでの宣言順（＝挿入順）に発火します．破線の緑矢印は，1ステップ内での**共有状態の受け渡し**を示します．
 たとえば `turnover` が `departed_this_step` を設定し，PostStep で `knowledge_loss` がそれを読み取ります．
 
-## 18個のメカニズム
+## 19個のメカニズム
 
 | メカニズム | フェーズ | 出典 | 種別 | 概要 |
 |---|---|---|---|---|
@@ -45,8 +45,9 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`si_contagion`](mechanisms/si-contagion.ja.md) | Interaction | SI 感染症モデル | network contagion | 各アクティブな近傍が独立に確率 β で非アクティブなエージェントを感染させる（ライブラリ専用）． |
 | [`threshold_contagion`](mechanisms/threshold-contagion.ja.md) | Interaction | Granovetter (1978) | network contagion | 非アクティブなエージェントはアクティブ近傍の割合が θ に達すると活性化する（ライブラリ専用）． |
 | [`axelrod`](mechanisms/axelrod.ja.md) | Interaction | Axelrod (1997) | cultural dissemination | 出会いのたびに類似度に等しい確率で異なる特徴を1つコピーする（ライブラリ専用）． |
+| [`group_conformity`](mechanisms/group-conformity.ja.md) | Interaction | DeGroot (1974) | within-group averaging | 各エージェントが自グループの平均意見へ向けて割合 α だけ移動し，グループは独立に収束する（ライブラリ専用）． |
 
-最後の7行は，汎用の（非 HR）[`socsim-mechanisms`](architecture.ja.md#クレートワークスペース)クレートの
+最後の8行は，汎用の（非 HR）[`socsim-mechanisms`](architecture.ja.md#クレートワークスペース)クレートの
 メンバーであり，HR ライフサイクルクレートとは区別される再利用可能でドメイン非依存な社会ダイナミクスの構成要素
 （意見ダイナミクス，ネットワーク伝播，文化伝播）です．
 すべて**ライブラリ専用**（`ModulePack` ／シナリオ TOML 登録なし）です．

@@ -82,3 +82,36 @@ pub trait CultureVectors: WorldState {
     /// Overwrite agent `id`'s feature `f` with `value`.
     fn set_feature(&mut self, id: AgentId, f: usize, value: u32);
 }
+
+/// Stable identifier for a group/partition of agents.
+pub type GroupId = u64;
+
+/// A world that partitions its agents into named groups.
+///
+/// This is the capability the group-dynamics family (e.g. group conformity)
+/// operates on: every agent belongs to *exactly one* group, and a group's
+/// members can be enumerated.  The trait exposes only the *partition structure*
+/// — which agent is in which group — and deliberately says nothing about what
+/// per-agent quantity a mechanism aggregates over a group.  Mechanisms compute
+/// their own aggregates (mean, sum, …) over a *separate* capability such as
+/// [`ScalarOpinions`]; for example a within-group averaging mechanism pairs
+/// `GroupMembership` with `ScalarOpinions` to nudge each agent toward its
+/// group's mean opinion.
+///
+/// This mirrors how [`Neighbors`] exposes influence-set *structure* without
+/// prescribing the dynamics that run over it: the world owns the partition (a
+/// team index, a community label, a spatial block, …) and the mechanism owns
+/// the update rule.  The three accessors must be mutually consistent —
+/// [`group_of`](GroupMembership::group_of) of any member returned by
+/// [`group_members`](GroupMembership::group_members) is that group, and every
+/// group an agent maps to appears in [`groups`](GroupMembership::groups).
+pub trait GroupMembership: WorldState {
+    /// The group agent `id` currently belongs to.
+    fn group_of(&self, id: AgentId) -> GroupId;
+
+    /// All agents that currently belong to group `g`.
+    fn group_members(&self, g: GroupId) -> Vec<AgentId>;
+
+    /// All group identifiers currently present in the world.
+    fn groups(&self) -> Vec<GroupId>;
+}

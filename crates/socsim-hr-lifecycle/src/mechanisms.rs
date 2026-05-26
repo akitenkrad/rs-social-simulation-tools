@@ -20,8 +20,13 @@
 //!   candidate only if the kernel gains a source-first, no-break variant.
 //! - `learning_curve` — temporal (tenure-driven) update. **Candidate** for a
 //!   future shared temporal/decay kernel.
-//! - `peer_effect` / `ocb` — both aggregate per-team state; lifting needs a
-//!   future `GroupAggregates` capability trait in `socsim-core`.
+//! - `peer_effect` / `ocb` — both aggregate per-team state. `socsim-core` now
+//!   has a `GroupMembership` capability (groups + members), so a *generalized*
+//!   group-aggregate mechanism exists in `socsim-mechanisms` as
+//!   `group_conformity` (within-group averaging). hr's `peer_effect` is
+//!   **intentionally not migrated** to it: it is calibrated (the empirical
+//!   α_peer scale and the `base_mean_theta` normalisation) and must keep its
+//!   exact seeded behaviour, which the generic kernel does not reproduce.
 //! - `knowledge_loss` — keys off employees removed this step; lifting needs a
 //!   removal-event interface in `socsim-core`.
 

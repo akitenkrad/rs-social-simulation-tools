@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 pub use socsim_rng::{derive_seed, SimRng};
 
 pub mod opinion;
-pub use opinion::{BinaryState, CultureVectors, Neighbors, ScalarOpinions};
+pub use opinion::{
+    BinaryState, CultureVectors, GroupId, GroupMembership, Neighbors, ScalarOpinions,
+};
 
 // ── AgentId ──────────────────────────────────────────────────────────────────
 
