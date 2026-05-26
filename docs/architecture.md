@@ -6,7 +6,7 @@
 
 ## Crate workspace
 
-The workspace contains fourteen crates organised in three layers:
+The workspace contains fifteen crates organised in three layers:
 
 ![Crate dependency graph](assets/arch-crates.svg)
 
@@ -27,6 +27,7 @@ socsim-cli          ← binary (entry point)
 socsim-mechanisms ← general social-dynamics crate: HegselmannKrauseMechanism, DeffuantMechanism, SocialJudgementMechanism, LorenzMechanism, SiContagionMechanism, ThresholdContagionMechanism, AxelrodMechanism, GroupConformityMechanism, MeanOperator (→ socsim-core only; library-only)
 socsim-llm      ← optional LLM-agent layer: LlmClient, CachingClient, build_live_client (no socsim deps; feature-gated; library-only)
 socsim-results  ← leaf output helpers: timestamp, create_run_dir, write_csv/json, refresh_latest_symlink (no socsim deps; library-only)
+socsim-metrics  ← feature-gated observation metrics: zero-dep `stats` core (mean/variance/gini/entropy/hhi/clusters/bimodality/polarization/deltas) + optional `core` (opinion extractors + MetricsMechanism<W> → socsim-core), `network` (degree/clustering/components/cascade → socsim-net), `spatial` (Schelling segregation → socsim-grid) adapters; read-only/derived; library-only
 ```
 
 Dependency rules:
@@ -41,6 +42,7 @@ Dependency rules:
 - `socsim-llm` is an **orthogonal, optional** layer beside the engine. It has **no `socsim-*` dependencies** (only `serde`/`serde_json`/`thiserror`, plus `ureq` behind features) and is **library-only**. Its live provider backends are feature-gated (`ollama`, `openai`, and `live` = both); the default build pulls in no networking. It is used by the `Decision` phase of LLM-driven models.
 - `socsim-results` is a **leaf crate** with **no `socsim-*` dependencies** (only `std` plus `serde`/`serde_json`/`csv`/`chrono`). It provides the output boilerplate for the lightweight library mode and never drags in `socsim-log`/`-config`/`-runner`.
 - `socsim-mechanisms` is an **orthogonal, optional** crate beside the engine. It depends on **`socsim-core` only** (for the `ScalarOpinions` / `BinaryState` / `CultureVectors` / `Neighbors` capability traits) and is **library-only** — no `ModulePack`, not wired into the `socsim` binary. It is the **general mechanism catalog**: reusable, domain-agnostic building blocks organised into four Cargo **feature families** (all on by default — `opinion-dynamics`, `contagion`, `cultural`, `group-dynamics`), eight mechanisms in total: opinion dynamics (the bounded-confidence `HegselmannKrauseMechanism` and `DeffuantMechanism`, the `SocialJudgementMechanism`, and the `LorenzMechanism`, with the A/G/H/P/R `MeanOperator` family), network contagion (`SiContagionMechanism`, `ThresholdContagionMechanism`), cultural dissemination (`AxelrodMechanism`), and group dynamics (`GroupConformityMechanism`) — distinct from the scenario-specific packs bundled in the `socsim-packs` crate (which depends on it for its opinion-dynamics pack).
+- `socsim-metrics` is a **leaf-ish, feature-gated** crate beside `socsim-results` / `socsim-llm`. Its always-compiled `stats` module has **no dependencies** (pure numeric primitives over `&[f64]`/`&[u32]`), so a default `cargo build -p socsim-metrics` pulls in **zero `socsim-*` crates**. Its adapters are opt-in via Cargo features: `core` adds the opinion-world extractors and the generic `MetricsMechanism<W>` (→ `socsim-core`), `network` adds degree/clustering/component/cascade metrics (→ `socsim-net`, implies `core`), and `spatial` adds Schelling-style segregation metrics (→ `socsim-grid`, implies `core`). It is **library-only** and **read-only by construction**: every function is a pure observation/derived quantity (no RNG, no world mutation), and the one mechanism it exposes only records via the `Recorder` in `PostStep` — so adopting it has **no calibration impact** on any model.
 
 ---
 

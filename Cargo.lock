@@ -4443,6 +4443,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "socsim-metrics"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "socsim-core",
+ "socsim-grid",
+ "socsim-net",
+]
+
+[[package]]
 name = "socsim-net"
 version = "0.1.0"
 dependencies = [

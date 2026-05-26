@@ -15,6 +15,7 @@ members = [
     "crates/socsim-runner",
     "crates/socsim-cli",
     "crates/socsim-results",
+    "crates/socsim-metrics",
 ]
 
 [workspace.package]

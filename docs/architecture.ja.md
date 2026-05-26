@@ -6,7 +6,7 @@
 
 ## クレートワークスペース
 
-ワークスペースは3層に整理された14個のクレートで構成されています：
+ワークスペースは3層に整理された15個のクレートで構成されています：
 
 ![Crate dependency graph](assets/arch-crates.svg)
 
@@ -27,6 +27,7 @@ socsim-cli          ← バイナリ（エントリーポイント）
 socsim-mechanisms ← 汎用の社会ダイナミクスクレート: HegselmannKrauseMechanism, DeffuantMechanism, SocialJudgementMechanism, LorenzMechanism, SiContagionMechanism, ThresholdContagionMechanism, AxelrodMechanism, GroupConformityMechanism, MeanOperator（→ socsim-core のみ; ライブラリ専用）
 socsim-llm      ← オプションのLLMエージェント層: LlmClient, CachingClient, build_live_client（socsim 依存なし; feature ゲート; ライブラリ専用）
 socsim-results  ← リーフの出力ヘルパ: timestamp, create_run_dir, write_csv/json, refresh_latest_symlink（socsim 依存なし; ライブラリ専用）
+socsim-metrics  ← feature ゲートされた観測メトリクス: 依存ゼロの `stats` コア（mean/variance/gini/entropy/hhi/clusters/bimodality/polarization/deltas）＋ オプションの `core`（意見抽出子＋MetricsMechanism<W> → socsim-core），`network`（次数/クラスタリング/連結成分/カスケード → socsim-net），`spatial`（Schelling 分離度 → socsim-grid）アダプタ；読み取り専用/派生量；ライブラリ専用
 ```
 
 依存ルール：
@@ -41,6 +42,7 @@ socsim-results  ← リーフの出力ヘルパ: timestamp, create_run_dir, writ
 - `socsim-llm` はエンジン層の隣に位置する**直交した，オプションの**層です．**`socsim-*` 依存はなく**（`serde`/`serde_json`/`thiserror` のみ，加えて feature 越しの `ureq`），**ライブラリ専用**です．ライブのプロバイダバックエンドは feature ゲート（`ollama`，`openai`，および両者をまとめた `live`）されており，デフォルトビルドはネットワーク依存を一切取り込みません．LLM 駆動モデルの `Decision` フェーズで使用します．
 - `socsim-results` は**リーフクレート**で，**`socsim-*` 依存はなく**（`std` に加えて `serde`/`serde_json`/`csv`/`chrono` のみ），軽量ライブラリモード向けの出力ボイラープレートを提供します．`socsim-log`/`-config`/`-runner` を一切取り込みません．
 - `socsim-mechanisms` はエンジン層の隣に位置する**直交した，オプションの**クレートです．**`socsim-core` のみ**に依存し（`ScalarOpinions` / `BinaryState` / `CultureVectors` / `Neighbors` 能力トレイトのため），**ライブラリ専用**です — `ModulePack` を持たず，`socsim` バイナリには組み込まれません．これは**汎用メカニズムカタログ**です：再利用可能でドメイン非依存な構成要素を，4つの Cargo **フィーチャーファミリー**（既定で全て有効 — `opinion-dynamics`，`contagion`，`cultural`，`group-dynamics`）に整理し，合計8つのメカニズムを提供します：意見ダイナミクス（有界信頼の `HegselmannKrauseMechanism` と `DeffuantMechanism`，`SocialJudgementMechanism`，`LorenzMechanism`，および A/G/H/P/R の `MeanOperator` ファミリー），ネットワーク伝播（`SiContagionMechanism`，`ThresholdContagionMechanism`），文化伝播（`AxelrodMechanism`），グループダイナミクス（`GroupConformityMechanism`） — を提供し，`socsim-packs` クレートにバンドルされたシナリオ固有の pack 群（その opinion-dynamics pack が本クレートに依存します）とは区別されます．
+- `socsim-metrics` は `socsim-results` / `socsim-llm` の隣に位置する**ほぼリーフの，feature ゲートされた**クレートです．常にコンパイルされる `stats` モジュールは**依存なし**（`&[f64]`/`&[u32]` 上の純粋な数値プリミティブ）なので，既定の `cargo build -p socsim-metrics` は **`socsim-*` クレートを一切取り込みません**．アダプタは Cargo feature でオプトインします：`core` は意見 World 抽出子と汎用の `MetricsMechanism<W>` を追加（→ `socsim-core`），`network` は次数/クラスタリング/連結成分/カスケードのメトリクスを追加（→ `socsim-net`，`core` を含意），`spatial` は Schelling 流の分離度メトリクスを追加（→ `socsim-grid`，`core` を含意）します．**ライブラリ専用**かつ**構造上読み取り専用**です：すべての関数が純粋な観測/派生量（RNG なし，World 変更なし）であり，公開する唯一のメカニズムも `PostStep` で `Recorder` に記録するだけなので，採用してもいかなるモデルの**キャリブレーションにも影響しません**．
 
 ---
 

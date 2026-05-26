@@ -1,0 +1,23 @@
+[package]
+name        = "socsim-metrics"
+description = "Reusable observation metrics for socsim (dispersion, inequality, diversity, clustering, convergence; opinion/network/spatial adapters)"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+socsim-core = { path = "../socsim-core", optional = true }
+socsim-net  = { path = "../socsim-net",  optional = true }
+socsim-grid = { path = "../socsim-grid", optional = true }
+
+[features]
+default = []
+core    = ["dep:socsim-core"]              # capability-trait extractors + MetricsMechanism<W>
+network = ["core", "dep:socsim-net"]       # network-structure & cascade metrics
+spatial = ["core", "dep:socsim-grid"]      # spatial segregation metrics
+
+[dev-dependencies]
+# Only used by the `core`-feature opinion tests, where the `Recorder` trait's
+# `record_event` signature mentions `serde_json::Value`.
+serde_json = "1"
