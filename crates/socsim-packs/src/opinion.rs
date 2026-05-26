@@ -189,20 +189,17 @@ impl Mechanism<OpinionWorld> for OpinionMetricsMechanism {
 
     fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, OpinionWorld>) -> Result<()> {
         let curr: Vec<f64> = ctx.world.opinions().to_vec();
-        let n = curr.len();
         let t = ctx.clock.t();
 
-        let (mean, variance, spread, clusters) = if n == 0 {
-            (0.0, 0.0, 0.0, 0.0)
-        } else {
-            let mean = curr.iter().sum::<f64>() / n as f64;
-            let variance = curr.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64;
-            let lo = curr.iter().cloned().fold(f64::INFINITY, f64::min);
-            let hi = curr.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            let spread = hi - lo;
-            let clusters = distinct_clusters(&curr, self.tol) as f64;
-            (mean, variance, spread, clusters)
-        };
+        // `socsim_metrics::stats` computes these byte-identically to the former
+        // inline forms (mean = Σx/N; variance = Σ(x−mean)²/N; spread = max−min;
+        // distinct_clusters = sorted greedy single-linkage on a strict `> tol`
+        // gap), and each returns `0.0`/`0` for an empty slice — so the `n == 0`
+        // case still records exactly `0.0` without a special branch.
+        let mean = socsim_metrics::stats::mean(&curr);
+        let variance = socsim_metrics::stats::variance(&curr);
+        let spread = socsim_metrics::stats::spread(&curr);
+        let clusters = socsim_metrics::stats::distinct_clusters(&curr, self.tol) as f64;
 
         let max_delta = match &self.prev {
             Some(prev) => socsim_mechanisms::max_abs_delta(prev, &curr),
@@ -222,28 +219,6 @@ impl Mechanism<OpinionWorld> for OpinionMetricsMechanism {
         self.prev = Some(curr);
         Ok(())
     }
-}
-
-/// Number of distinct opinion clusters at tolerance `tol`.
-///
-/// Sorts the opinions and starts a new cluster whenever the gap to the previous
-/// value exceeds `tol`, so two opinions count as the same cluster iff they are
-/// linked by a chain of ≤ `tol` gaps.
-fn distinct_clusters(opinions: &[f64], tol: f64) -> usize {
-    if opinions.is_empty() {
-        return 0;
-    }
-    let mut sorted = opinions.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mut clusters = 1usize;
-    let mut last = sorted[0];
-    for &x in &sorted[1..] {
-        if (x - last).abs() > tol {
-            clusters += 1;
-        }
-        last = x;
-    }
-    clusters
 }
 
 // ── registration ─────────────────────────────────────────────────────────────
@@ -366,18 +341,6 @@ metrics  = ["clusters", "variance", "spread", "mean"]
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn distinct_clusters_counts_groups() {
-        // Two tight groups at ~0 and ~1.
-        let ops = vec![0.0, 0.001, 0.002, 1.0, 1.001];
-        assert_eq!(distinct_clusters(&ops, 0.01), 2);
-        // All distinct beyond tol.
-        let ops = vec![0.0, 0.5, 1.0];
-        assert_eq!(distinct_clusters(&ops, 0.01), 3);
-        // Empty.
-        assert_eq!(distinct_clusters(&[], 0.01), 0);
-    }
 
     #[test]
     fn world_builds_and_initializes_in_unit_range() {

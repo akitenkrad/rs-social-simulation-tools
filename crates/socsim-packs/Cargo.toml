@@ -15,6 +15,7 @@ socsim-core       = { path = "../socsim-core" }
 socsim-net        = { path = "../socsim-net" }
 socsim-config     = { path = "../socsim-config" }
 socsim-mechanisms = { path = "../socsim-mechanisms", default-features = false, features = ["opinion-dynamics"] }
+socsim-metrics    = { path = "../socsim-metrics" }
 socsim-marl       = { path = "../socsim-marl", optional = true }
 
 [features]

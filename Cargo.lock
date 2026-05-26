@@ -4477,6 +4477,7 @@ dependencies = [
  "socsim-log",
  "socsim-marl",
  "socsim-mechanisms",
+ "socsim-metrics",
  "socsim-net",
  "toml 0.8.23",
 ]
