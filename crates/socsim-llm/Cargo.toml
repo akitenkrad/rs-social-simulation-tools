@@ -28,3 +28,13 @@ live = ["ollama", "openai"]
 [dev-dependencies]
 tempfile = { workspace = true }
 toml     = { workspace = true }
+# Used only by the `tutorial_llm_agent` example (Tutorial 4): it drives the
+# six-phase loop with an LLM-call mechanism. The library itself stays free of
+# any socsim-core/engine dependency.
+socsim-core   = { path = "../socsim-core" }
+socsim-engine = { path = "../socsim-engine" }
+
+# Tutorial 4's backing example. No special features required — it runs under
+# default features using a network-free `ScriptedClient`.
+[[example]]
+name = "tutorial_llm_agent"

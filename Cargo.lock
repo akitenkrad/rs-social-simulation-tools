@@ -4409,6 +4409,8 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "socsim-core",
+ "socsim-engine",
  "tempfile",
  "thiserror 1.0.69",
  "toml 0.8.23",
