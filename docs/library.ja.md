@@ -374,6 +374,33 @@ for row in rec.metrics() {
 
 ---
 
+## `socsim-metrics` による再利用可能なメトリクス
+
+よくある要約統計を再実装する代わりに，**`socsim-metrics`** クレートが再利用可能なライブラリ専用の層として提供します．メトリクスは純粋な観測関数（RNG も状態変更もなし）なので，モデルの再現性に一切影響しません．
+
+- **依存ゼロの数値コア**（`socsim_metrics::stats`，常にコンパイルされる）：`mean`，`variance`，`std_dev`，`spread`，`min_max`，`gini`，`shannon_entropy`，`hhi`，`simpson_diversity`，`distinct_clusters(values, tol)`，`bimodality_coefficient`，`polarization`，`extremeness`，`max_abs_delta` / `mean_abs_delta`，`num_distinct` / `largest_share`．各関数が正確な式を doc コメントに明示している．
+- **`core` feature**（→ `socsim-core`）：`W: ScalarOpinions` から直接読む抽出器（`opinion_mean`，`opinion_variance`，`opinion_spread`，`opinion_clusters` 等）と，毎 `PostStep` に名前付きメトリクス集合を記録する汎用 `MetricsMechanism<W>`．
+- **`network` feature**（→ `socsim-net`）：`mean_degree`，`global_clustering_coefficient`，`component_sizes`，`largest_component_fraction`，`cascade_size` / `reach_fraction`．
+- **`spatial` feature**（→ `socsim-grid`）：ラベルアクセサ越しの `segregation_index`，`local_similarity`．
+
+既定ビルドは socsim クレートを一切引き込まない —— `socsim-metrics = { …, default-features = false }` で `stats` のみ取り込み，必要に応じて `core` / `network` / `spatial` を有効化する．
+
+`MetricsMechanism<W>` は宣言的にメトリクスを記録する（毎ステップ `recorder.record_metric` を代わりに呼ぶ）：
+
+```rust,ignore
+use socsim_metrics::opinion::{MetricsMechanism, opinion_variance, opinion_spread, opinion_clusters};
+
+let metrics = MetricsMechanism::new()
+    .with("variance", |w| opinion_variance(w))
+    .with("spread",   |w| opinion_spread(w))
+    .with("clusters", |w| opinion_clusters(w, 0.01));
+builder.add_mechanism(metrics);   // PostStep で発火し，エントリごとに record_metric
+```
+
+> **論文固有のメトリクスはローカルに残す．** `socsim-metrics` は*正準的な*統計の再利用に限る；モデル固有の定義を持つメトリクス（例：極端な意見の割合の積として定義した polarization，ドメインイベント上の cascade サイズ集計）は replication に残すべき —— 共有すると意味が変わる．opinion-dynamics パックの `OpinionMetricsMechanism`（`socsim-packs` 内）が，正準部分（`mean` / `variance` / `spread` / `distinct_clusters`）だけを `socsim-metrics::stats` へ委譲する実例．
+
+---
+
 ## HRライフサイクルモジュールをライブラリとして利用する
 
 `socsim-packs` の `hr_lifecycle` モジュールは `HrWorld`，`HrLifecyclePack`，そして個別エージェント `Employee` とチーム `Team` の構造体をエクスポートします．CLIを使わずプログラムから利用するには：

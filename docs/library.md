@@ -374,6 +374,33 @@ for row in rec.metrics() {
 
 ---
 
+## Reusable metrics with `socsim-metrics`
+
+Rather than reimplementing common summary statistics, the **`socsim-metrics`** crate provides them as a reusable, library-only layer. Metrics are pure observation functions (no RNG, no state mutation), so they never affect a model's reproducibility.
+
+- **Zero-dependency numeric core** (`socsim_metrics::stats`, always compiled): `mean`, `variance`, `std_dev`, `spread`, `min_max`, `gini`, `shannon_entropy`, `hhi`, `simpson_diversity`, `distinct_clusters(values, tol)`, `bimodality_coefficient`, `polarization`, `extremeness`, `max_abs_delta` / `mean_abs_delta`, `num_distinct` / `largest_share`. Each documents its exact formula.
+- **`core` feature** (→ `socsim-core`): extractors that read a `W: ScalarOpinions` directly (`opinion_mean`, `opinion_variance`, `opinion_spread`, `opinion_clusters`, …) plus a generic `MetricsMechanism<W>` that records a configurable set of named metrics each `PostStep`.
+- **`network` feature** (→ `socsim-net`): `mean_degree`, `global_clustering_coefficient`, `component_sizes`, `largest_component_fraction`, `cascade_size` / `reach_fraction`.
+- **`spatial` feature** (→ `socsim-grid`): `segregation_index`, `local_similarity` over a label accessor.
+
+The default build pulls in no socsim crates — depend on it as `socsim-metrics = { …, default-features = false }` for just `stats`, and enable `core` / `network` / `spatial` as needed.
+
+`MetricsMechanism<W>` records metrics declaratively (it calls `recorder.record_metric` for you each step):
+
+```rust,ignore
+use socsim_metrics::opinion::{MetricsMechanism, opinion_variance, opinion_spread, opinion_clusters};
+
+let metrics = MetricsMechanism::new()
+    .with("variance", |w| opinion_variance(w))
+    .with("spread",   |w| opinion_spread(w))
+    .with("clusters", |w| opinion_clusters(w, 0.01));
+builder.add_mechanism(metrics);   // fires in PostStep, one record_metric per entry
+```
+
+> **Keep paper-specific metrics local.** Reuse `socsim-metrics` only for *canonical* statistics; a metric with a model-specific definition (e.g. a polarization measure defined as the product of extreme-opinion fractions, or a cascade-size aggregation over domain events) belongs in the replication — sharing it would change its meaning. The opinion-dynamics pack's `OpinionMetricsMechanism` (in `socsim-packs`) is a worked example of delegating only the canonical parts (`mean` / `variance` / `spread` / `distinct_clusters`) to `socsim-metrics::stats`.
+
+---
+
 ## Using the reference HR lifecycle module as a library
 
 The `socsim-packs` `hr_lifecycle` module exports `HrWorld`, `HrLifecyclePack`, and the per-employee `Employee` and team `Team` structs. To use it programmatically without the CLI:
