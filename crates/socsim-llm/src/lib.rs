@@ -47,6 +47,7 @@
 mod cache;
 mod client;
 mod fallback;
+mod harness;
 pub mod mock;
 
 #[cfg(feature = "live")]
@@ -62,7 +63,10 @@ pub use client::{
     RunMetadata,
 };
 pub use fallback::FallbackClient;
+pub use harness::{llm_config, wrap_client, LiveClient, LlmSettings};
 
+#[cfg(feature = "live")]
+pub use harness::build_live_client_from_settings;
 #[cfg(feature = "live")]
 pub use live::build_live_client;
 #[cfg(feature = "ollama")]

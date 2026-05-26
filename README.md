@@ -6,7 +6,7 @@
 
 ![Rust 2021](https://img.shields.io/badge/Rust-2021-orange)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
-![tests: 277 passing](https://img.shields.io/badge/tests-277%20passing-brightgreen)
+![tests: 283 passing](https://img.shields.io/badge/tests-283%20passing-brightgreen)
 
 `socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, spatial-grid primitives, world-state snapshots for save/resume, optional learnable (MARL) policies, an optional LLM-agent layer (Ollama/OpenAI with prompt caching), result-output helpers, a reusable observation-metrics library, and a CLI for running, sweeping, and summarising scenarios — all in a fifteen-crate workspace. The CLI is **world-polymorphic**: a scenario selects a *module pack* by name, and two packs ship today — a reference **HR lifecycle** module (ten mechanisms calibrated against published empirical findings) and an **opinion-dynamics** pack that runs bounded-confidence consensus models on a social network. Reusable, domain-agnostic mechanisms live in the general **`socsim-mechanisms`** catalog — eight mechanisms across four feature families: opinion dynamics, network contagion, cultural dissemination, and group dynamics.
 

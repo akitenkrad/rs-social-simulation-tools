@@ -27,3 +27,4 @@ live = ["ollama", "openai"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+toml     = { workspace = true }
