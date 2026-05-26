@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The badge step on `main` commits an updated README back to the repo.
+permissions:
+  contents: write
+
+# Avoid overlapping badge commit-backs from concurrent pushes to the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the branch (not the detached SHA) so the badge step can
+          # push back on `main`. `ref_name` is the branch for push events and
+          # `<pr>/merge` for pull_request events (both safe to check out; only
+          # the `main` push runs the badge step). We avoid `github.head_ref`,
+          # whose value is attacker-controllable on forked PRs.
+          ref: ${{ github.ref_name }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        # GitHub's bash shell runs with `pipefail`, so a test failure still
+        # fails this step despite the pipe into `tee`. `cargo test` also builds
+        # the whole workspace, so this doubles as the build gate.
+        run: cargo test --workspace 2>&1 | tee test-output.txt
+
+      - name: Update test badge (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          # Sum the "N passed" counts across every `test result:` line
+          # (unit + integration + doc tests). Input is our own test log, not
+          # any untrusted GitHub context.
+          count=$(grep -oE '[0-9]+ passed' test-output.txt | awk '{s+=$1} END{print s+0}')
+          echo "passing tests: ${count}"
+          if [ "${count}" -eq 0 ]; then
+            echo "::warning::parsed 0 passing tests — leaving badge unchanged"
+            exit 0
+          fi
+          # Update both the alt-text and the shields.io URL in each README.
+          sed -i -E \
+            -e "s#tests: [0-9]+ passing#tests: ${count} passing#g" \
+            -e "s#tests-[0-9]+%20passing#tests-${count}%20passing#g" \
+            README.md README.ja.md
+          if git diff --quiet -- README.md README.ja.md; then
+            echo "badge already up to date (${count})"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md README.ja.md
+          git commit -m "ci: update test badge to ${count} passing [skip ci]"
+          git push
