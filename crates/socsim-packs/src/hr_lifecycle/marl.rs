@@ -3,7 +3,7 @@
 //! This module makes the **stay/quit decision** learnable: it supplies the
 //! [`ObsEncoder`], [`ActionApplier`] and [`RewardFn`] that let a
 //! [`DiscretePolicyNet`](socsim_marl::DiscretePolicyNet) replace the fixed
-//! [`turnover`](crate::HrLifecyclePack) logit heuristic, plus a small
+//! [`turnover`](crate::hr_lifecycle::HrLifecyclePack) logit heuristic, plus a small
 //! [`TurnoverPrepMechanism`] for the per-step bookkeeping the heuristic used to
 //! do inline.
 //!
@@ -26,7 +26,7 @@
 use socsim_core::{AgentId, Mechanism, Phase, Result, SimRng, StepContext};
 use socsim_marl::{ActionApplier, ObsEncoder, RewardFn};
 
-use crate::HrWorld;
+use crate::hr_lifecycle::HrWorld;
 
 /// Number of observation features fed to the turnover policy.
 pub const TURNOVER_OBS_DIM: usize = 5;
@@ -123,7 +123,7 @@ impl RewardFn<HrWorld> for TurnoverReward {
 
 /// `PreStep` companion to the learned turnover policy.
 ///
-/// Replaces the inline bookkeeping the [`turnover`](crate::HrLifecyclePack)
+/// Replaces the inline bookkeeping the [`turnover`](crate::hr_lifecycle::HrLifecyclePack)
 /// heuristic performed: it advances every employee's tenure and captures the
 /// head-count used as the `turnover_rate` denominator before any departures.
 pub struct TurnoverPrepMechanism;

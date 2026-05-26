@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use socsim_core::{AgentId, SimClock, SimRng, WorldState};
 use socsim_net::SocialNetwork;
 
-use crate::calibration::{LAMBDA_LEARN, P_TOXIC, THETA_FLOOR, THETA_MEAN, THETA_SD};
+use crate::hr_lifecycle::calibration::{LAMBDA_LEARN, P_TOXIC, THETA_FLOOR, THETA_MEAN, THETA_SD};
 
 // ── Employee ──────────────────────────────────────────────────────────────────
 

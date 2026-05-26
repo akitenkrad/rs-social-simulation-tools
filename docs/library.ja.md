@@ -376,10 +376,10 @@ for row in rec.metrics() {
 
 ## HRライフサイクルモジュールをライブラリとして利用する
 
-`socsim-hr-lifecycle` は `HrWorld`，`HrLifecyclePack`，そして個別エージェント `Employee` とチーム `Team` の構造体をエクスポートします．CLIを使わずプログラムから利用するには：
+`socsim-packs` の `hr_lifecycle` モジュールは `HrWorld`，`HrLifecyclePack`，そして個別エージェント `Employee` とチーム `Team` の構造体をエクスポートします．CLIを使わずプログラムから利用するには：
 
 ```rust,ignore
-use socsim_hr_lifecycle::{HrWorld, HrLifecyclePack};
+use socsim_packs::hr_lifecycle::{HrWorld, HrLifecyclePack};
 use socsim_config::{ModulePack, Params, Registry};
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
 use socsim_core::SimRng;
@@ -411,7 +411,7 @@ sim.run().unwrap();
 println!("org_performance = {}", sim.world().org_performance);
 ```
 
-完全な出力付きバージョンは `crates/socsim-hr-lifecycle/examples/hr_baseline.rs` を参照してください．
+完全な出力付きバージョンは `crates/socsim-packs/examples/hr_baseline.rs` を参照してください．
 
 ---
 
@@ -756,4 +756,4 @@ let stats = trainer.train(
 )?;
 ```
 
-学習後は `PolicyMechanism::inference(policy, …)` でメカニズムを構築すると**凍結**ポリシーを実行できます：貪欲行動を取り，RNG を消費せず，ビット再現可能です．`socsim-marl` は `burn` を取り込むため，hr-lifecycle 連携は `marl` feature でゲートしています（`cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover`）．
+学習後は `PolicyMechanism::inference(policy, …)` でメカニズムを構築すると**凍結**ポリシーを実行できます：貪欲行動を取り，RNG を消費せず，ビット再現可能です．`socsim-marl` は `burn` を取り込むため，hr-lifecycle 連携は `marl` feature でゲートしています（`cargo run -p socsim-packs --features marl --example marl_turnover`）．

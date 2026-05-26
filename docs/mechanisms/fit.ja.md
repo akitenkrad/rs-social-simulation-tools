@@ -98,7 +98,7 @@ rho_po = 0.07
 
 ```rust
 use socsim_config::{Registry, Params, ModulePack};
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
 
 let mut reg: Registry<HrWorld> = Registry::new();

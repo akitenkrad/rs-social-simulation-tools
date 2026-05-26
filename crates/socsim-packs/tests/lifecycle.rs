@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use socsim_config::{ModulePack, Params};
 use socsim_core::Recorder;
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 use socsim_log::{InMemoryRecorder, MetricRow};
 
 const T_MAX: u64 = 60;

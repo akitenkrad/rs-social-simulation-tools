@@ -3,13 +3,13 @@
 //!
 //! Run with:
 //! ```bash
-//! cargo run -p socsim-hr-lifecycle --example snapshot_resume
+//! cargo run -p socsim-packs --example snapshot_resume
 //! ```
 
 use socsim_config::{ModulePack, Params, Registry};
 use socsim_core::{Mechanism, SimClock, SimRng};
 use socsim_engine::{RandomActivationScheduler, Simulation, SimulationBuilder, Snapshot};
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 
 const T_MAX: u64 = 24;
 const PAUSE_AT: u64 = 12;

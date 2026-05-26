@@ -211,7 +211,7 @@ resumed.restore(snap);
 resumed.run()?;   // continues bit-identically from month 12
 ```
 
-Runnable demo: `cargo run -p socsim-hr-lifecycle --example snapshot_resume`. See the [library guide](library.md#snapshots-save--resume) for details.
+Runnable demo: `cargo run -p socsim-packs --example snapshot_resume`. See the [library guide](library.md#snapshots-save--resume) for details.
 
 ---
 
@@ -220,7 +220,7 @@ Runnable demo: `cargo run -p socsim-hr-lifecycle --example snapshot_resume`. See
 Replace a fixed decision heuristic with a policy learned by REINFORCE. The reference module ships a learnable turnover policy behind the `marl` feature:
 
 ```sh
-cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover
+cargo run -p socsim-packs --features marl --example marl_turnover
 ```
 
 This trains a `burn` policy network so employees learn to stay/quit by individual-rationality reward, reproducing rational turnover as an emergent policy. To wire MARL into your own world, implement `ObsEncoder` / `ActionApplier` / `RewardFn` and drive `MarlTrainer` — see the [library guide](library.md#learnable-policies-marl).

@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>socsim crate workspace dependency graph</title>
-<desc>The fourteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-hr-lifecycle use the green accent, while the library-only crates — socsim-marl (burn), socsim-mechanisms (depends on socsim-core only), socsim-llm and socsim-results — are drawn with dashed borders.</desc>
+<desc>The fourteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-packs use the green accent, while the library-only crates — socsim-marl (burn), socsim-mechanisms (depends on socsim-core only), socsim-llm and socsim-results — are drawn with dashed borders.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -100,7 +100,7 @@
 <text class="body" x="654" y="251" font-size="10" fill="#3C7E6C">SocialNetwork · ER / WS / BA generators</text>
 
 <rect x="638" y="266" width="306" height="44" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
-<text class="mono" x="654" y="287" font-size="12.5" fill="#0B5040">socsim-hr-lifecycle</text>
+<text class="mono" x="654" y="287" font-size="12.5" fill="#0B5040">socsim-packs</text>
 <text class="body" x="654" y="303" font-size="10" fill="#3C7E6C">reference module · 10 mechanisms</text>
 
 <!-- library-only (dashed) -->

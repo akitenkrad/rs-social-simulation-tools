@@ -29,7 +29,7 @@ Two operating modes allow the same type to serve both inference and training:
 `PolicyMechanism` is **library-only**: it is not registered in `HrLifecyclePack`
 and is not available via the `socsim` binary or scenario TOML files. It must be
 constructed in Rust code and added to a `SimulationBuilder` directly. It is
-gated behind the `marl` feature flag in `socsim-hr-lifecycle`.
+gated behind the `marl` feature flag in `socsim-packs`.
 
 ## 2. Theory & source
 

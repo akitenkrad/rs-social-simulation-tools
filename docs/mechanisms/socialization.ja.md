@@ -108,7 +108,7 @@ phase = "post_step"
 
 ```rust
 use socsim_config::{Registry, Params, ModulePack};
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
 
 let mut reg: Registry<HrWorld> = Registry::new();
@@ -138,4 +138,4 @@ sim.run()?;
 
 ## 11. 参考文献
 
-外部引用なし．関数形式は socsim-hr-lifecycle モデル内部のキャリブレーション上の選択です．
+外部引用なし．関数形式は socsim-packs hr-lifecycle モデル内部のキャリブレーション上の選択です．

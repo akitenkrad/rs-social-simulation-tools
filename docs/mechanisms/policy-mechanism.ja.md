@@ -16,7 +16,7 @@
 - **推論モード** — 貪欲に行動を選択し（`policy.act`），RNG を消費しないため，凍結したポリシーのもとで決定論的に動作する．
 - **収集モード** — 確率的にサンプリングし（`policy.sample`，`ctx.rng` を使用），さらに `MarlTrainer`（REINFORCE，`DiscretePolicyNet` の burn MLP，CPU）へ渡す共有 `TrajectoryBuffer` に軌跡を記録する．
 
-`PolicyMechanism` は**ライブラリ専用**である．`HrLifecyclePack` には登録されておらず，`socsim` バイナリやシナリオ TOML ファイルからは利用できないため，Rust コードで構築して `SimulationBuilder` に直接追加する必要がある．`socsim-hr-lifecycle` 側では `marl` feature フラグの後ろに置かれている．
+`PolicyMechanism` は**ライブラリ専用**である．`HrLifecyclePack` には登録されておらず，`socsim` バイナリやシナリオ TOML ファイルからは利用できないため，Rust コードで構築して `SimulationBuilder` に直接追加する必要がある．`socsim-packs` 側では `marl` feature フラグの後ろに置かれている．
 
 ## 2. 理論と出典
 

@@ -21,8 +21,6 @@
 //!     --seeds 0..10 --out runs/sweep/
 //! ```
 
-#[cfg(feature = "pack-opinion-dynamics")]
-mod opinion_world;
 mod packs;
 
 use std::path::{Path, PathBuf};

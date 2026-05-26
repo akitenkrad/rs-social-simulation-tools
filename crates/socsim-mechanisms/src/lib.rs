@@ -1,7 +1,8 @@
 //! General, reusable mechanism catalog for `socsim`.
 //!
 //! This is `socsim`'s **general** (domain-agnostic) mechanism catalog.  Where
-//! crates such as `socsim-hr-lifecycle` model one specific scenario, this crate
+//! crates such as `socsim-packs` (the hr-lifecycle pack) model one specific
+//! scenario, this crate
 //! provides reusable *building blocks* that operate over any world implementing
 //! the capability traits from `socsim-core`
 //! ([`ScalarOpinions`](socsim_core::ScalarOpinions),

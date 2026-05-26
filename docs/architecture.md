@@ -17,8 +17,9 @@ socsim-cli          ← binary (entry point)
             │       └── socsim-log         ← InMemoryRecorder, JsonlRecorder, CsvRecorder
             ├── socsim-config      ← Params, Registry, ModulePack, Scenario loader
             │       └── socsim-core        ← traits (Mechanism, WorldState, …), AgentId, Phase, Blackboard
-            ├── socsim-hr-lifecycle ← reference module (10 mechanisms); a CliPack behind `pack-hr-lifecycle` (default on)
-            │       └── socsim-net         ← SocialNetwork (ER, WS, BA generators)
+            ├── socsim-packs        ← bundled CLI packs: hr-lifecycle (10 mechanisms) + opinion-dynamics world; CliPacks behind `pack-hr-lifecycle` / `pack-opinion-dynamics` (both default on)
+            │       ├── socsim-net         ← SocialNetwork (ER, WS, BA generators)
+            │       └── socsim-mechanisms  ← opinion-dynamics mechanisms (HK, Deffuant, …) used by the opinion pack
             ├── socsim-grid        ← Grid, GridIndex, neighbourhoods, distances (spatial models)
             ├── socsim-marl        ← learnable (MARL) policies: Policy, PolicyMechanism, MarlTrainer (burn; library-only)
             └── socsim-rng         ← SimRng (ChaCha20), derive_seed
@@ -34,12 +35,12 @@ Dependency rules:
 - `socsim-config` depends on `socsim-core` but **not** on `socsim-engine` (avoiding a cycle).
 - `socsim-engine` depends on `socsim-core`, `socsim-log`, and `socsim-config`.
 - `socsim-runner` depends on all of the above and adds `rayon` for parallelism.
-- `socsim-cli` wires everything together into the `socsim` binary. It is **world-polymorphic**: command handlers operate through an object-safe, world-erased `CliPack` trait (`name` / `starter_toml` / `mechanism_names` / `run_seeds` / `run_sweep`, all returning the world-agnostic `RunResult` / `SweepPoint`), and each registered pack monomorphizes the generic `socsim-runner` functions for its own world type internally. The binary therefore names **no** concrete world type, and packs are looked up by name via a registry. `socsim-hr-lifecycle` is now just **one such pack**, gated behind the default-on `pack-hr-lifecycle` feature (an `optional` dependency), not a privileged world the whole CLI is generic over — additional packs slot in beside it without touching the run/sweep/validate/list pipeline.
-- `socsim-hr-lifecycle`, `socsim-net`, and `socsim-grid` sit beside the engine layer and are orthogonal to it; `socsim-grid` depends only on `socsim-core`.
-- `socsim-marl` (Phase 6) depends on `socsim-engine` and `socsim-core`. It is **library-only** — not part of the `socsim` binary — and pulls in the `burn` neural-network framework, so the hr-lifecycle integration gates it behind a `marl` feature.
+- `socsim-cli` wires everything together into the `socsim` binary. It is **world-polymorphic**: command handlers operate through an object-safe, world-erased `CliPack` trait (`name` / `starter_toml` / `mechanism_names` / `run_seeds` / `run_sweep`, all returning the world-agnostic `RunResult` / `SweepPoint`), and each registered pack monomorphizes the generic `socsim-runner` functions for its own world type internally. The binary therefore names **no** concrete world type, and packs are looked up by name via a registry. The bundled worlds now live in **`socsim-packs`** — the crate that bundles the hr-lifecycle and opinion-dynamics packs (each a `CliPack` gated behind `pack-hr-lifecycle` / `pack-opinion-dynamics`, an `optional` dependency) — not in the CLI itself; additional packs slot in beside them without touching the run/sweep/validate/list pipeline.
+- `socsim-packs`, `socsim-net`, and `socsim-grid` sit beside the engine layer and are orthogonal to it; `socsim-grid` depends only on `socsim-core`. `socsim-packs` depends on `socsim-net` (HR/opinion networks) and `socsim-mechanisms` (the opinion-dynamics mechanisms).
+- `socsim-marl` (Phase 6) depends on `socsim-engine` and `socsim-core`. It is **library-only** — not part of the `socsim` binary — and pulls in the `burn` neural-network framework, so the `socsim-packs` hr-lifecycle integration gates it behind a `marl` feature.
 - `socsim-llm` is an **orthogonal, optional** layer beside the engine. It has **no `socsim-*` dependencies** (only `serde`/`serde_json`/`thiserror`, plus `ureq` behind features) and is **library-only**. Its live provider backends are feature-gated (`ollama`, `openai`, and `live` = both); the default build pulls in no networking. It is used by the `Decision` phase of LLM-driven models.
 - `socsim-results` is a **leaf crate** with **no `socsim-*` dependencies** (only `std` plus `serde`/`serde_json`/`csv`/`chrono`). It provides the output boilerplate for the lightweight library mode and never drags in `socsim-log`/`-config`/`-runner`.
-- `socsim-mechanisms` is an **orthogonal, optional** crate beside the engine. It depends on **`socsim-core` only** (for the `ScalarOpinions` / `BinaryState` / `CultureVectors` / `Neighbors` capability traits) and is **library-only** — no `ModulePack`, not wired into the `socsim` binary. It is the **general mechanism catalog**: reusable, domain-agnostic building blocks organised into four Cargo **feature families** (all on by default — `opinion-dynamics`, `contagion`, `cultural`, `group-dynamics`), eight mechanisms in total: opinion dynamics (the bounded-confidence `HegselmannKrauseMechanism` and `DeffuantMechanism`, the `SocialJudgementMechanism`, and the `LorenzMechanism`, with the A/G/H/P/R `MeanOperator` family), network contagion (`SiContagionMechanism`, `ThresholdContagionMechanism`), cultural dissemination (`AxelrodMechanism`), and group dynamics (`GroupConformityMechanism`) — distinct from the scenario-specific `socsim-hr-lifecycle` crate.
+- `socsim-mechanisms` is an **orthogonal, optional** crate beside the engine. It depends on **`socsim-core` only** (for the `ScalarOpinions` / `BinaryState` / `CultureVectors` / `Neighbors` capability traits) and is **library-only** — no `ModulePack`, not wired into the `socsim` binary. It is the **general mechanism catalog**: reusable, domain-agnostic building blocks organised into four Cargo **feature families** (all on by default — `opinion-dynamics`, `contagion`, `cultural`, `group-dynamics`), eight mechanisms in total: opinion dynamics (the bounded-confidence `HegselmannKrauseMechanism` and `DeffuantMechanism`, the `SocialJudgementMechanism`, and the `LorenzMechanism`, with the A/G/H/P/R `MeanOperator` family), network contagion (`SiContagionMechanism`, `ThresholdContagionMechanism`), cultural dissemination (`AxelrodMechanism`), and group dynamics (`GroupConformityMechanism`) — distinct from the scenario-specific packs bundled in the `socsim-packs` crate (which depends on it for its opinion-dynamics pack).
 
 ---
 
@@ -233,7 +234,7 @@ These are **calibration controls** that govern the pace and magnitude of the sim
 | `THETA_MEAN` | 1.0 | Mean true ability θ at hire |
 | `THETA_SD` | 0.2 | Standard deviation of θ |
 
-All calibration constants live in `crates/socsim-hr-lifecycle/src/calibration.rs` with doc-comments citing their sources.
+All calibration constants live in `crates/socsim-packs/src/hr_lifecycle/calibration.rs` with doc-comments citing their sources.
 
 ---
 

@@ -376,10 +376,10 @@ for row in rec.metrics() {
 
 ## Using the reference HR lifecycle module as a library
 
-`socsim-hr-lifecycle` exports `HrWorld`, `HrLifecyclePack`, and the per-employee `Employee` and team `Team` structs. To use it programmatically without the CLI:
+The `socsim-packs` `hr_lifecycle` module exports `HrWorld`, `HrLifecyclePack`, and the per-employee `Employee` and team `Team` structs. To use it programmatically without the CLI:
 
 ```rust,ignore
-use socsim_hr_lifecycle::{HrWorld, HrLifecyclePack};
+use socsim_packs::hr_lifecycle::{HrWorld, HrLifecyclePack};
 use socsim_config::{ModulePack, Params, Registry};
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
 use socsim_core::SimRng;
@@ -411,7 +411,7 @@ sim.run().unwrap();
 println!("org_performance = {}", sim.world().org_performance);
 ```
 
-For the full printout version see `crates/socsim-hr-lifecycle/examples/hr_baseline.rs`.
+For the full printout version see `crates/socsim-packs/examples/hr_baseline.rs`.
 
 ---
 
@@ -754,6 +754,6 @@ let stats = trainer.train(
 )?;
 ```
 
-After training, build the mechanism with `PolicyMechanism::inference(policy, …)` to run the **frozen** policy: it takes greedy actions, consumes no RNG, and stays bit-reproducible. `socsim-marl` pulls in `burn`, so the hr-lifecycle integration is gated behind a `marl` feature (`cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover`).
+After training, build the mechanism with `PolicyMechanism::inference(policy, …)` to run the **frozen** policy: it takes greedy actions, consumes no RNG, and stays bit-reproducible. `socsim-marl` pulls in `burn`, so the hr-lifecycle integration is gated behind a `marl` feature (`cargo run -p socsim-packs --features marl --example marl_turnover`).
 
 Worked library-mode examples live at `crates/socsim-engine/examples/engine_only.rs` (a converging non-spatial model) and `crates/socsim-engine/examples/cellular_automata.rs` (an event-driven lattice CA on `CellGrid` + `Adjacency` using `run_observed`).

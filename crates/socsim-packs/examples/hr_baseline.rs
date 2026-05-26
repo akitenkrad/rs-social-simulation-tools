@@ -6,7 +6,7 @@
 //!
 //! Run with:
 //! ```bash
-//! cargo run -p socsim-hr-lifecycle --example hr_baseline
+//! cargo run -p socsim-packs --example hr_baseline
 //! ```
 
 use std::sync::{Arc, Mutex};
@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use socsim_config::{ModulePack, Params};
 use socsim_core::Recorder;
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 use socsim_log::InMemoryRecorder;
 
 // ── SharedRecorder ─────────────────────────────────────────────────────────

@@ -36,7 +36,7 @@ use rand_distr::{Distribution, Normal};
 use socsim_config::{ModulePack, Params, Registry};
 use socsim_core::{Mechanism, Phase, Result, StepContext};
 
-use crate::{
+use crate::hr_lifecycle::{
     calibration::{
         ALPHA_K, ALPHA_PEER, BASE_QUIT_LOGIT, BETA_LOSS, KAPPA_LOSS, LAMBDA_LEARN, PHI_TACIT,
         P_SPREAD, P_TOXIC, QUIT_CASCADE_BUMP, QUIT_EMBED_SENS, QUIT_SAT_SENS, RHO_PJ, RHO_PO,
@@ -139,7 +139,7 @@ impl Mechanism<HrWorld> for PeerEffectMechanism {
 ///
 /// Per employee per month: `ΔK = α_k · satisfaction · po_fit`; summed over a
 /// team this is the team's monthly OCB knowledge inflow.  `α_k` is a tunable
-/// calibration scale (see [`crate::calibration::ALPHA_K`]), sized so the inflow
+/// calibration scale (see [`crate::hr_lifecycle::calibration::ALPHA_K`]), sized so the inflow
 /// roughly balances the attrition outflow from `knowledge_loss` at steady
 /// state — keeping `knowledge_stock` stable rather than collapsing.
 pub struct OcbMechanism {
@@ -246,7 +246,7 @@ impl Mechanism<HrWorld> for FitMechanism {
 /// cascade are smaller modulations.  The `ρ_po_turn = −0.35` term is the
 /// empirical PO-fit→turnover-intent correlation (Kristof-Brown 2005) used as a
 /// standardized influence strength; the other terms are tunable calibration
-/// scales documented in [`crate::calibration`].
+/// scales documented in [`crate::hr_lifecycle::calibration`].
 pub struct TurnoverMechanism {
     rho_po_turn: f64,
     base_logit: f64,
@@ -355,7 +355,7 @@ impl Mechanism<HrWorld> for TurnoverMechanism {
 /// ```
 ///
 /// Expressing tenure in years (not months) and scaling by the tunable
-/// [`crate::calibration::KAPPA_LOSS`] keeps a typical leaver's drain comparable
+/// [`crate::hr_lifecycle::calibration::KAPPA_LOSS`] keeps a typical leaver's drain comparable
 /// to a few months of team OCB inflow, so `knowledge_stock` does not collapse.
 /// `φ_tacit = 0.85` is the empirical tacit-knowledge ratio (Nonaka 1994).
 pub struct KnowledgeLossMechanism {
@@ -518,23 +518,23 @@ impl Mechanism<HrWorld> for HiringMechanism {
             }
         }
 
-        let mut new_ids: Vec<(crate::world::Employee, socsim_core::AgentId)> = Vec::new();
+        let mut new_ids: Vec<(crate::hr_lifecycle::world::Employee, socsim_core::AgentId)> = Vec::new();
 
         for (team_idx, count) in team_counts.iter_mut().enumerate() {
             while *count < target {
                 // Draw true ability on the positive scale.
-                let true_theta = crate::world::Employee::draw_theta(&normal, ctx.rng);
+                let true_theta = crate::hr_lifecycle::world::Employee::draw_theta(&normal, ctx.rng);
                 // Selection signal with validity ρ (standardized; recorded for
                 // future selection gates, hire is unconditional for now).
                 let z_theta =
-                    (true_theta - crate::calibration::THETA_MEAN) / crate::calibration::THETA_SD;
+                    (true_theta - crate::hr_lifecycle::calibration::THETA_MEAN) / crate::hr_lifecycle::calibration::THETA_SD;
                 let noise: f64 = normal.sample(ctx.rng);
                 let noise_scale = (1.0 - self.rho_si * self.rho_si).sqrt();
                 let _signal = self.rho_si * z_theta + noise_scale * noise;
 
                 let is_toxic = ctx.rng.gen::<f64>() < self.p_toxic;
                 let id = ctx.world.alloc_id();
-                let emp = crate::world::Employee::new(true_theta, team_idx, is_toxic, ctx.rng);
+                let emp = crate::hr_lifecycle::world::Employee::new(true_theta, team_idx, is_toxic, ctx.rng);
                 new_ids.push((emp, id));
                 *count += 1;
             }
@@ -664,8 +664,8 @@ impl Mechanism<HrWorld> for OrgPerformanceMechanism {
 ///
 /// ```rust,no_run
 /// use socsim_config::{Registry, Params, ModulePack};
-/// use socsim_hr_lifecycle::HrLifecyclePack;
-/// use socsim_hr_lifecycle::HrWorld;
+/// use socsim_packs::hr_lifecycle::HrLifecyclePack;
+/// use socsim_packs::hr_lifecycle::HrWorld;
 ///
 /// let mut reg: Registry<HrWorld> = Registry::new();
 /// HrLifecyclePack.register(&mut reg);

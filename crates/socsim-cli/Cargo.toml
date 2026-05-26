@@ -16,16 +16,13 @@ socsim-config       = { path = "../socsim-config" }
 socsim-engine       = { path = "../socsim-engine" }
 socsim-log          = { path = "../socsim-log" }
 socsim-runner       = { path = "../socsim-runner" }
-socsim-net          = { path = "../socsim-net" }
-socsim-hr-lifecycle = { path = "../socsim-hr-lifecycle", optional = true }
-socsim-mechanisms   = { path = "../socsim-mechanisms", optional = true }
+socsim-packs        = { path = "../socsim-packs", optional = true, default-features = false }
 clap.workspace      = true
 serde_json.workspace = true
 anyhow.workspace    = true
-rand.workspace      = true
 toml.workspace      = true
 
 [features]
 default = ["pack-hr-lifecycle", "pack-opinion-dynamics"]
-pack-hr-lifecycle = ["dep:socsim-hr-lifecycle"]
-pack-opinion-dynamics = ["dep:socsim-mechanisms"]
+pack-hr-lifecycle     = ["dep:socsim-packs", "socsim-packs/hr-lifecycle"]
+pack-opinion-dynamics = ["dep:socsim-packs", "socsim-packs/opinion-dynamics"]

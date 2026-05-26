@@ -4353,15 +4353,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "rand 0.8.6",
  "serde_json",
  "socsim-config",
  "socsim-core",
  "socsim-engine",
- "socsim-hr-lifecycle",
  "socsim-log",
- "socsim-mechanisms",
- "socsim-net",
+ "socsim-packs",
  "socsim-runner",
  "toml 0.8.23",
 ]
@@ -4404,22 +4401,6 @@ name = "socsim-grid"
 version = "0.1.0"
 dependencies = [
  "socsim-core",
-]
-
-[[package]]
-name = "socsim-hr-lifecycle"
-version = "0.1.0"
-dependencies = [
- "rand 0.8.6",
- "rand_distr 0.4.3",
- "serde",
- "serde_json",
- "socsim-config",
- "socsim-core",
- "socsim-engine",
- "socsim-log",
- "socsim-marl",
- "socsim-net",
 ]
 
 [[package]]
@@ -4473,6 +4454,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "socsim-packs"
+version = "0.1.0"
+dependencies = [
+ "rand 0.8.6",
+ "rand_distr 0.4.3",
+ "serde",
+ "serde_json",
+ "socsim-config",
+ "socsim-core",
+ "socsim-engine",
+ "socsim-log",
+ "socsim-marl",
+ "socsim-mechanisms",
+ "socsim-net",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "socsim-results"
 version = "0.1.0"
 dependencies = [
@@ -4502,8 +4501,8 @@ dependencies = [
  "socsim-config",
  "socsim-core",
  "socsim-engine",
- "socsim-hr-lifecycle",
  "socsim-log",
+ "socsim-packs",
 ]
 
 [[package]]

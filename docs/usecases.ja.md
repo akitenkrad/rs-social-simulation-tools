@@ -211,7 +211,7 @@ resumed.restore(snap);
 resumed.run()?;   // 12ヶ月目からビット単位で継続
 ```
 
-実行可能デモ：`cargo run -p socsim-hr-lifecycle --example snapshot_resume`．詳細は[ライブラリガイド](library.ja.md#スナップショット保存と再開)を参照してください．
+実行可能デモ：`cargo run -p socsim-packs --example snapshot_resume`．詳細は[ライブラリガイド](library.ja.md#スナップショット保存と再開)を参照してください．
 
 ---
 
@@ -220,7 +220,7 @@ resumed.run()?;   // 12ヶ月目からビット単位で継続
 固定の意思決定ヒューリスティックを REINFORCE で学習したポリシーに置き換えます．参照モジュールは `marl` feature の背後に学習可能な離職ポリシーを同梱しています：
 
 ```sh
-cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover
+cargo run -p socsim-packs --features marl --example marl_turnover
 ```
 
 これは `burn` のポリシーネットワークを訓練し，従業員が個人合理性報酬によって stay/quit を学習，合理的離職を創発的なポリシーとして再現します．MARL を独自の World に組み込むには `ObsEncoder` / `ActionApplier` / `RewardFn` を実装し `MarlTrainer` を回します — [ライブラリガイド](library.ja.md#学習ポリシーmarl)を参照してください．

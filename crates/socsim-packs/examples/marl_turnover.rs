@@ -8,7 +8,7 @@
 //!
 //! Run with:
 //! ```bash
-//! cargo run -p socsim-hr-lifecycle --features marl --example marl_turnover
+//! cargo run -p socsim-packs --features marl --example marl_turnover
 //! ```
 
 use std::cell::RefCell;
@@ -17,11 +17,11 @@ use std::rc::Rc;
 use socsim_config::{ModulePack, Params, Registry};
 use socsim_core::{SimClock, SimRng};
 use socsim_engine::{SequentialScheduler, Simulation, SimulationBuilder};
-use socsim_hr_lifecycle::marl::{
+use socsim_packs::hr_lifecycle::marl::{
     TurnoverActionApplier, TurnoverObsEncoder, TurnoverPrepMechanism, TurnoverReward,
     TURNOVER_OBS_DIM,
 };
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 use socsim_marl::{
     DiscretePolicyNet, MarlTrainer, NetConfig, PolicyMechanism, TrainConfig, TrajectoryBuffer,
 };

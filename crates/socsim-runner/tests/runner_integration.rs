@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use socsim_config::{ModulePack, Registry, Scenario};
 use socsim_core::SimRng;
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 use socsim_runner::{run_once, run_seeds, WorldFactory};
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────

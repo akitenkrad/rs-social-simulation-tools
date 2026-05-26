@@ -1,0 +1,36 @@
+[package]
+name        = "socsim-packs"
+description = "Bundled socsim CLI packs: the HR-lifecycle reference module and the opinion-dynamics world (world types + mechanisms + registration + starter scenarios)"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace      = true
+serde_json.workspace = true
+rand.workspace       = true
+rand_distr.workspace = true
+socsim-core       = { path = "../socsim-core" }
+socsim-net        = { path = "../socsim-net" }
+socsim-config     = { path = "../socsim-config" }
+socsim-mechanisms = { path = "../socsim-mechanisms", default-features = false, features = ["opinion-dynamics"] }
+socsim-marl       = { path = "../socsim-marl", optional = true }
+
+[features]
+default = ["hr-lifecycle", "opinion-dynamics"]
+# The 9-stage employee-lifecycle reference module.
+hr-lifecycle = []
+# The bounded-confidence opinion-dynamics world.
+opinion-dynamics = []
+# Phase 6: learnable turnover policy (pulls in burn via socsim-marl).
+marl = ["dep:socsim-marl"]
+
+[dev-dependencies]
+socsim-engine = { path = "../socsim-engine" }
+socsim-log    = { path = "../socsim-log" }
+toml.workspace = true
+
+[[example]]
+name = "marl_turnover"
+required-features = ["marl"]

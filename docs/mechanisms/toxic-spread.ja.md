@@ -72,7 +72,7 @@ p_spread = 0.46
 
 ```rust
 use socsim_config::{Registry, Params, ModulePack};
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
 
 let mut reg: Registry<HrWorld> = Registry::new();

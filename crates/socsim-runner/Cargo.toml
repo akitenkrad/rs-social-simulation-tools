@@ -16,4 +16,4 @@ serde_json.workspace = true
 rayon.workspace      = true
 
 [dev-dependencies]
-socsim-hr-lifecycle = { path = "../socsim-hr-lifecycle" }
+socsim-packs = { path = "../socsim-packs", features = ["hr-lifecycle"] }

@@ -1,7 +1,7 @@
 //! Integration test for the learnable turnover policy (design §14.1.7).
 //!
 //! Only compiled with the `marl` feature:
-//! `cargo test -p socsim-hr-lifecycle --features marl`.
+//! `cargo test -p socsim-packs --features marl`.
 #![cfg(feature = "marl")]
 
 use std::cell::RefCell;
@@ -10,11 +10,11 @@ use std::rc::Rc;
 use socsim_config::{ModulePack, Params, Registry};
 use socsim_core::{Mechanism, SimClock, SimRng};
 use socsim_engine::{SequentialScheduler, Simulation, SimulationBuilder};
-use socsim_hr_lifecycle::marl::{
+use socsim_packs::hr_lifecycle::marl::{
     TurnoverActionApplier, TurnoverObsEncoder, TurnoverPrepMechanism, TurnoverReward,
     TURNOVER_OBS_DIM,
 };
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 use socsim_marl::{
     DiscretePolicyNet, EpisodeStat, MarlTrainer, NetConfig, PolicyMechanism, TrainConfig,
     TrajectoryBuffer,

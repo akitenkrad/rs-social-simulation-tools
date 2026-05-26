@@ -143,7 +143,7 @@ constraint is automatically respected by the engine.
 
 ```rust
 use socsim_config::{Registry, Params, ModulePack};
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 use socsim_engine::{RandomActivationScheduler, SimulationBuilder};
 
 let mut reg: Registry<HrWorld> = Registry::new();
@@ -187,4 +187,4 @@ In a baseline scenario (with `hiring` and `turnover` active):
 ## 11. References
 
 No external citation. The functional form is a calibration choice internal to
-the socsim-hr-lifecycle model.
+the socsim-packs hr-lifecycle model.

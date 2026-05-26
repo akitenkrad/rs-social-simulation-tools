@@ -10,7 +10,7 @@ members = [
     "crates/socsim-mechanisms",
     "crates/socsim-grid",
     "crates/socsim-llm",
-    "crates/socsim-hr-lifecycle",
+    "crates/socsim-packs",
     "crates/socsim-marl",
     "crates/socsim-runner",
     "crates/socsim-cli",

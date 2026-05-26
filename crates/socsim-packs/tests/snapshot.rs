@@ -9,7 +9,7 @@
 use socsim_config::{ModulePack, Params, Registry};
 use socsim_core::{Mechanism, SimClock, SimRng, WorldState};
 use socsim_engine::{RandomActivationScheduler, Simulation, SimulationBuilder, Snapshot};
-use socsim_hr_lifecycle::{HrLifecyclePack, HrWorld};
+use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
 
 const N_TEAMS: usize = 3;
 const TEAM_SIZE: usize = 6;
