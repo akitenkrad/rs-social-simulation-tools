@@ -653,18 +653,26 @@ write_my_csv(sim.world());          // your existing schema, no Recorder require
 
 Two small leaf crates round out engine-only library mode: `socsim-llm` for LLM-driven agents and `socsim-results` for writing the `results/` tree. Neither is wired into the `socsim` binary; depend on them directly.
 
-**Build a client.** The production stack is one call behind the `live` feature; for tests, inject a `mock::ScriptedClient` instead — both yield the same `CachingClient<…>` shape:
+**Build a client — use the shared harness, don't hand-roll a per-model `llm.rs`.** `socsim-llm` ships a reusable harness so LLM models don't reinvent the client wiring: `LlmSettings { temperature, seed, cache_path }`, the `LiveClient` type alias (`CachingClient<Box<dyn LlmClient>>`), `build_live_client_from_settings` (production, `live` feature), `wrap_client` (inject any backend — e.g. a test mock), and `llm_config` (a deterministic `LlmConfig` from the settings). Production and tests yield the same `LiveClient`:
 
 ```rust,ignore
-use socsim_llm::{build_live_client, CachingClient, LlmClient, PromptCache, mock::ScriptedClient};
+use socsim_llm::{
+    LlmSettings, LiveClient, build_live_client_from_settings, wrap_client, llm_config,
+    PromptCache, mock::ScriptedClient,
+};
 
-// Production: Ollama-first → OpenAI-fallback → caching, from env vars.
-let mut client = build_live_client(cfg.cache_path.as_deref())?;   // Option<&Path>
+let settings = LlmSettings { temperature: 0.0, seed: 42, cache_path: Some("runs/cache.json".into()) };
 
-// Tests: a network-free scripted "model".
-let backend = ScriptedClient::constant("test-model", "yes");
-let mut client = CachingClient::new(backend, PromptCache::in_memory());
+// Production: Ollama-first → OpenAI-fallback → caching (needs feature = "live").
+let client: LiveClient = build_live_client_from_settings(&settings)?;
+
+// Tests: a network-free scripted "model", wrapped into the same LiveClient shape.
+let client: LiveClient = wrap_client(ScriptedClient::constant("test-model", "yes"), PromptCache::in_memory());
+
+let cfg = llm_config(&settings);   // LlmConfig::deterministic() + temperature + seed
 ```
+
+All eleven bundled LLM replications use this harness rather than a per-model client module. (The lower-level `build_live_client(cache_path: Option<&Path>)` is still available if you need it directly.)
 
 **Confine the call to a `Decision`-phase mechanism.** `LlmClient::complete` is synchronous, so it slots straight into `apply`:
 

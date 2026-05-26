@@ -653,18 +653,26 @@ write_my_csv(sim.world());          // your existing schema, no Recorder require
 
 エンジンのみのライブラリモードを補完する2つの小さなリーフクレートがあります：LLM 駆動エージェント向けの `socsim-llm` と，`results/` ツリーの書き出し向けの `socsim-results` です．どちらも `socsim` バイナリには組み込まれていないので，直接依存させます．
 
-**クライアントを構築する．** 本番スタックは `live` feature 越しに1回の呼び出しで，テストでは代わりに `mock::ScriptedClient` を注入します — どちらも同じ `CachingClient<…>` の形を返します：
+**クライアントを構築する — 共有ハーネスを使い，モデルごとの `llm.rs` を手書きしない．** `socsim-llm` は再利用可能なハーネスを提供するので，LLM モデルはクライアント配線を再発明しません：`LlmSettings { temperature, seed, cache_path }`，`LiveClient` 型エイリアス（`CachingClient<Box<dyn LlmClient>>`），`build_live_client_from_settings`（本番，`live` feature），`wrap_client`（任意のバックエンド注入 — 例: テスト用 mock），`llm_config`（settings から決定論的 `LlmConfig`）．本番もテストも同じ `LiveClient` を返します：
 
 ```rust,ignore
-use socsim_llm::{build_live_client, CachingClient, LlmClient, PromptCache, mock::ScriptedClient};
+use socsim_llm::{
+    LlmSettings, LiveClient, build_live_client_from_settings, wrap_client, llm_config,
+    PromptCache, mock::ScriptedClient,
+};
 
-// 本番: Ollama-first → OpenAI-fallback → キャッシュ，環境変数から．
-let mut client = build_live_client(cfg.cache_path.as_deref())?;   // Option<&Path>
+let settings = LlmSettings { temperature: 0.0, seed: 42, cache_path: Some("runs/cache.json".into()) };
 
-// テスト: ネットワークフリーのスクリプト化された「モデル」．
-let backend = ScriptedClient::constant("test-model", "yes");
-let mut client = CachingClient::new(backend, PromptCache::in_memory());
+// 本番: Ollama-first → OpenAI-fallback → キャッシュ（feature = "live" が必要）．
+let client: LiveClient = build_live_client_from_settings(&settings)?;
+
+// テスト: ネットワークフリーのスクリプト化「モデル」を同じ LiveClient の形に包む．
+let client: LiveClient = wrap_client(ScriptedClient::constant("test-model", "yes"), PromptCache::in_memory());
+
+let cfg = llm_config(&settings);   // LlmConfig::deterministic() + temperature + seed
 ```
+
+同梱の11本の LLM 再現実装はすべて，モデルごとのクライアントモジュールではなくこのハーネスを使っています．（低レベルの `build_live_client(cache_path: Option<&Path>)` も直接使えます．）
 
 **呼び出しを `Decision` フェーズのメカニズムに閉じ込める．** `LlmClient::complete` は同期的なので，そのまま `apply` に差し込めます：
 
