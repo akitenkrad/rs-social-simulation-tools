@@ -8,7 +8,7 @@
 
 ## 1. HRライフサイクルベースラインの実行
 
-同梱のシナリオ `scenarios/hr_lifecycle_baseline.toml` は，5チーム×40エージェントのHRライフサイクルモデルをシード42で60ステップ（月次）実行します．
+同梱のシナリオ `scenarios/hr_lifecycle_baseline.toml` は，5チーム×40エージェントのHRライフサイクルモデルをシード42で60ステップ（月次）実行します．モデルの全体像は[hr-lifecycle パック](packs/hr-lifecycle.ja.md)を参照してください．
 
 ```sh
 socsim run scenarios/hr_lifecycle_baseline.toml
@@ -24,7 +24,7 @@ socsim summarize runs/hr_lifecycle_baseline_42.jsonl
 
 ### 別のパックを実行する — 意見ダイナミクス
 
-CLIはWorld多態なので，同じコマンドで任意のパックを駆動できます．同梱の `scenarios/opinion_dynamics_baseline.toml` は，Watts–Strogatz ソーシャルネットワーク上で Hegselmann–Krause の有界信頼コンセンサスモデルを実行します：
+CLIはWorld多態なので，同じコマンドで任意のパックを駆動できます．同梱の `scenarios/opinion_dynamics_baseline.toml` は，Watts–Strogatz ソーシャルネットワーク上で Hegselmann–Krause の有界信頼コンセンサスモデルを実行します（[opinion-dynamics パック](packs/opinion-dynamics.ja.md)を参照）：
 
 ```sh
 socsim run scenarios/opinion_dynamics_baseline.toml

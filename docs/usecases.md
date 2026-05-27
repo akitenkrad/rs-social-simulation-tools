@@ -8,7 +8,7 @@ This page collects concrete, copy-paste-ready workflows for common research task
 
 ## 1. Run the HR lifecycle baseline
 
-The bundled scenario `scenarios/hr_lifecycle_baseline.toml` runs a 5-team, 40-agent HR lifecycle model for 60 monthly steps with seed 42.
+The bundled scenario `scenarios/hr_lifecycle_baseline.toml` runs a 5-team, 40-agent HR lifecycle model for 60 monthly steps with seed 42. See the [hr-lifecycle pack](packs/hr-lifecycle.md) for the full model.
 
 ```sh
 socsim run scenarios/hr_lifecycle_baseline.toml
@@ -24,7 +24,7 @@ socsim summarize runs/hr_lifecycle_baseline_42.jsonl
 
 ### Running another pack — opinion dynamics
 
-The CLI is world-polymorphic, so the same commands drive any pack. The bundled `scenarios/opinion_dynamics_baseline.toml` runs a Hegselmann–Krause bounded-confidence consensus model on a Watts–Strogatz social network:
+The CLI is world-polymorphic, so the same commands drive any pack. The bundled `scenarios/opinion_dynamics_baseline.toml` runs a Hegselmann–Krause bounded-confidence consensus model on a Watts–Strogatz social network (see the [opinion-dynamics pack](packs/opinion-dynamics.md)):
 
 ```sh
 socsim run scenarios/opinion_dynamics_baseline.toml

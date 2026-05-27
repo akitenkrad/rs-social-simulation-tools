@@ -131,7 +131,7 @@ socsim validate scenarios/hr_lifecycle_baseline.toml
 
 ## list
 
-利用可能なモジュールパック，または各パック内のメカニズムを一覧表示します．
+利用可能なモジュールパック，または各パック内のメカニズムを一覧表示します．各パックの内容については[モジュールパックカタログ](packs.ja.md)を参照してください．
 
 ```
 socsim list <WHAT>

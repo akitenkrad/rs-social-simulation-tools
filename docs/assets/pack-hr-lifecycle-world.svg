@@ -1,0 +1,95 @@
+<svg width="100%" viewBox="0 0 880 460" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>hr-lifecycle pack — HrWorld data model</title>
+<desc>HrWorld owns a roster of Employees keyed by AgentId, a vector of Teams holding knowledge_stock and mean_theta, a Watts-Strogatz SocialNetwork, and three per-step transient buffers: new_hires_this_step, departed_this_step, headcount_at_step_start.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="874" height="454" rx="18" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<text class="title" x="440" y="34" font-size="16" fill="#332E6E" text-anchor="middle">HrWorld — data model</text>
+
+<!-- outer world frame -->
+<rect x="28" y="52" width="824" height="384" rx="14" fill="none" stroke="#534AB7" stroke-width="1.4" stroke-dasharray="2 0"/>
+<text class="mono" x="46" y="74" font-size="13" fill="#534AB7">HrWorld</text>
+
+<!-- Employees roster -->
+<rect x="48" y="92" width="246" height="208" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="64" y="114" font-size="12.5" fill="#332E6E">employees:</text>
+<text class="mono" x="64" y="130" font-size="11.5" fill="#6B6A64">  BTreeMap&lt;AgentId, Employee&gt;</text>
+<line x1="64" y1="140" x2="278" y2="140" stroke="#C7C2E8" stroke-width="1"/>
+<text class="body" x="64" y="158" font-size="11.5" fill="#534AB7" font-weight="600">Employee</text>
+<g class="mono" font-size="11" fill="#332E6E">
+  <text x="64" y="176">theta · tenure · team</text>
+  <text x="64" y="194">embeddedness · po_fit · pj_fit</text>
+  <text x="64" y="212">satisfaction · socialization</text>
+  <text x="64" y="230">productivity · cum_reward</text>
+  <text x="64" y="248">is_toxic · recent_quit_neighbors</text>
+</g>
+<text class="body" x="64" y="278" font-size="10.5" fill="#6B6A64">true ability θ ~ N(THETA_MEAN, THETA_SD)</text>
+
+<!-- Teams -->
+<rect x="316" y="92" width="232" height="118" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="332" y="114" font-size="12.5" fill="#332E6E">teams: Vec&lt;Team&gt;</text>
+<line x1="332" y1="124" x2="532" y2="124" stroke="#C7C2E8" stroke-width="1"/>
+<text class="body" x="332" y="142" font-size="11.5" fill="#534AB7" font-weight="600">Team</text>
+<g class="mono" font-size="11.5" fill="#332E6E">
+  <text x="332" y="162">knowledge_stock</text>
+  <text x="332" y="182">mean_theta (cached)</text>
+</g>
+<text class="body" x="332" y="200" font-size="10.5" fill="#6B6A64">recompute_team_means() each step</text>
+
+<!-- Network -->
+<rect x="316" y="224" width="232" height="76" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+<text class="mono" x="332" y="246" font-size="12.5" fill="#332E6E">network: SocialNetwork</text>
+<text class="body" x="332" y="266" font-size="11" fill="#6B6A64">Watts–Strogatz (k, β)</text>
+<text class="body" x="332" y="284" font-size="11" fill="#6B6A64">edges added on hire, removed on quit</text>
+
+<!-- transient buffers -->
+<rect x="570" y="92" width="262" height="208" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
+<text class="body" x="701" y="114" font-size="12.5" fill="#0F6E56" text-anchor="middle" font-weight="600">per-step transient state</text>
+<line x1="586" y1="124" x2="816" y2="124" stroke="#9FD4C4" stroke-width="1"/>
+<g class="mono" font-size="11.5" fill="#0B5040">
+  <text x="586" y="146">new_hires_this_step</text>
+  <text x="586" y="178">departed_this_step</text>
+  <text x="586" y="210">headcount_at_step_start</text>
+</g>
+<text class="body" x="586" y="164" font-size="10" fill="#3C7E6C">  → socialization (PostStep)</text>
+<text class="body" x="586" y="196" font-size="10" fill="#3C7E6C">  → knowledge_loss, org_performance</text>
+<text class="body" x="586" y="228" font-size="10" fill="#3C7E6C">  → org_performance (turnover_rate)</text>
+<text class="body" x="586" y="262" font-size="10.5" fill="#6B6A64">cleared at end of each step;</text>
+<text class="body" x="586" y="278" font-size="10.5" fill="#6B6A64">the producer→consumer hand-offs</text>
+<text class="body" x="586" y="294" font-size="10.5" fill="#6B6A64">that wire the 10 mechanisms together</text>
+
+<!-- scalar fields -->
+<rect x="48" y="320" width="500" height="96" rx="12" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.1"/>
+<text class="body" x="64" y="342" font-size="11.5" fill="#534AB7" font-weight="600">aggregate / scalar fields</text>
+<g class="mono" font-size="11.5" fill="#332E6E">
+  <text x="64" y="364">clock: SimClock</text>
+  <text x="64" y="384">org_performance · base_mean_theta</text>
+  <text x="64" y="404">target_team_size · next_id</text>
+  <text x="300" y="364">target headcount → hiring</text>
+  <text x="300" y="384">θ baseline → peer_effect</text>
+</g>
+
+<!-- init note -->
+<rect x="570" y="320" width="262" height="96" rx="12" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+<text class="body" x="701" y="342" font-size="11.5" fill="#444441" text-anchor="middle" font-weight="600">HrWorld::new(...)</text>
+<g class="mono" font-size="11" fill="#6B6A64">
+  <text x="586" y="364">n_teams · team_size_initial</text>
+  <text x="586" y="384">network_k · network_beta</text>
+  <text x="586" y="404">seeded SimRng → reproducible</text>
+</g>
+
+</svg>

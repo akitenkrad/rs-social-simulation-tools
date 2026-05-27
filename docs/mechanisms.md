@@ -16,6 +16,9 @@ social-dynamics mechanisms (`hegselmann_krause`, `deffuant`, `social_judgement`,
 `lorenz`, `si_contagion`, `threshold_contagion`, `axelrod`, `group_conformity`) —
 the general, non-HR `socsim-mechanisms` crate.
 
+Mechanisms are composed into runnable models by [module packs](packs.md), which
+bundle the world data model, a default mechanism set, and starter scenarios.
+
 ## Overview
 
 ![Mechanisms across the 6-phase tick loop](assets/mechanisms-overview.svg)

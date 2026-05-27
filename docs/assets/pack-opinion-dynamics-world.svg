@@ -1,0 +1,90 @@
+<svg width="100%" viewBox="0 0 880 440" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>opinion-dynamics pack — OpinionWorld and capability-trait decoupling</title>
+<desc>OpinionWorld stores per-agent scalar opinions in a Vec and a SocialNetwork. It implements the ScalarOpinions and Neighbors capability traits from socsim-core, which let the domain-agnostic socsim-mechanisms opinion mechanisms operate on it without knowing its concrete storage.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="gn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#0F6E56" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="874" height="434" rx="18" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<text class="title" x="440" y="34" font-size="16" fill="#0F6E56" text-anchor="middle">OpinionWorld — capability-trait decoupling</text>
+
+<!-- concrete world (left) -->
+<rect x="40" y="64" width="252" height="232" rx="13" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
+<text class="mono" x="58" y="88" font-size="13" fill="#0F6E56" font-weight="700">OpinionWorld</text>
+<text class="body" x="58" y="106" font-size="10.5" fill="#3C7E6C">(socsim-packs)</text>
+<line x1="58" y1="116" x2="276" y2="116" stroke="#9FD4C4" stroke-width="1"/>
+<g class="mono" font-size="11.5" fill="#0B5040">
+  <text x="58" y="138">clock: SimClock</text>
+  <text x="58" y="160">opinions: Vec&lt;f64&gt;</text>
+  <text x="58" y="182">net: SocialNetwork</text>
+  <text x="58" y="204">last_max_delta: f64</text>
+</g>
+<text class="body" x="58" y="232" font-size="10.5" fill="#3C7E6C">opinions[id] ∈ [0,1]</text>
+<text class="body" x="58" y="250" font-size="10.5" fill="#6B6A64">init: uniform / normal / polarized</text>
+<text class="body" x="58" y="272" font-size="10.5" fill="#6B6A64">net: WS / Erdős–Rényi / Barabási–Albert</text>
+
+<!-- capability traits (center) -->
+<rect x="328" y="78" width="208" height="204" rx="13" fill="#FBFAF6" stroke="#0F6E56" stroke-width="1.3"/>
+<text class="body" x="432" y="100" font-size="12.5" fill="#0F6E56" text-anchor="middle" font-weight="700">capability traits</text>
+<text class="body" x="432" y="116" font-size="10.5" fill="#3C7E6C" text-anchor="middle">(socsim-core)</text>
+<rect x="346" y="130" width="172" height="62" rx="9" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.1"/>
+<text class="mono" x="432" y="151" font-size="12" fill="#0B5040" text-anchor="middle">ScalarOpinions</text>
+<text class="mono" x="432" y="169" font-size="10" fill="#3C7E6C" text-anchor="middle">opinion(id) -&gt; f64</text>
+<text class="mono" x="432" y="183" font-size="10" fill="#3C7E6C" text-anchor="middle">set_opinion(id, v)</text>
+<rect x="346" y="202" width="172" height="56" rx="9" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.1"/>
+<text class="mono" x="432" y="223" font-size="12" fill="#0B5040" text-anchor="middle">Neighbors</text>
+<text class="mono" x="432" y="241" font-size="10" fill="#3C7E6C" text-anchor="middle">neighbors_of(id)</text>
+
+<!-- generic mechanisms (right) -->
+<rect x="572" y="64" width="268" height="232" rx="13" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.4"/>
+<text class="mono" x="590" y="88" font-size="13" fill="#332E6E" font-weight="700">socsim-mechanisms</text>
+<text class="body" x="590" y="106" font-size="10.5" fill="#7A5BC0">generic over W: ScalarOpinions + Neighbors</text>
+<line x1="590" y1="116" x2="824" y2="116" stroke="#C7C2E8" stroke-width="1"/>
+<g class="mono" font-size="11.5" fill="#332E6E">
+  <text x="590" y="140">hegselmann_krause</text>
+  <text x="590" y="164">deffuant</text>
+  <text x="590" y="188">social_judgement</text>
+  <text x="590" y="212">lorenz</text>
+  <text x="590" y="236">convergence</text>
+</g>
+<text class="body" x="590" y="266" font-size="10.5" fill="#6B6A64">same code runs on any world that</text>
+<text class="body" x="590" y="282" font-size="10.5" fill="#6B6A64">implements the two traits</text>
+
+<!-- arrows: world implements traits; mechanisms call traits -->
+<path d="M292 178 H344" stroke="#0F6E56" stroke-width="1.6" marker-end="url(#gn)"/>
+<text class="body" x="318" y="170" font-size="10" fill="#0F6E56" text-anchor="middle">implements</text>
+<path d="M570 178 H520" stroke="#534AB7" stroke-width="1.6" marker-end="url(#gn)" marker-start="url(#gn)"/>
+<text class="body" x="546" y="170" font-size="10" fill="#534AB7" text-anchor="middle">calls</text>
+
+<!-- pack metrics box -->
+<rect x="40" y="320" width="800" height="92" rx="12" fill="#FBFAF6" stroke="#0F6E56" stroke-width="1.2"/>
+<text class="body" x="58" y="342" font-size="12" fill="#0F6E56" font-weight="700">pack-specific: opinion_metrics (PostStep) → recorded each step</text>
+<g class="mono" font-size="11.5" fill="#0B5040">
+  <text x="58" y="368">clusters</text>
+  <text x="190" y="368">variance</text>
+  <text x="330" y="368">spread</text>
+  <text x="450" y="368">mean</text>
+  <text x="560" y="368">max_delta</text>
+</g>
+<g class="body" font-size="10" fill="#6B6A64">
+  <text x="58" y="386">distinct groups</text>
+  <text x="190" y="386">population var</text>
+  <text x="330" y="386">max − min</text>
+  <text x="450" y="386">arithmetic</text>
+  <text x="560" y="386">largest |Δx| step</text>
+</g>
+<text class="body" x="58" y="406" font-size="10.5" fill="#6B6A64">computed via socsim-metrics::stats; convergence (PostStep) stops the run when max|Δx| &lt; tol</text>
+
+</svg>

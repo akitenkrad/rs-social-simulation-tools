@@ -77,6 +77,7 @@ t               clusters         max_delta              mean            spread  
 | [ユースケース＆レシピ](docs/usecases.ja.md) | 代表的な研究ワークフローのランブック |
 | [ライブラリAPI](docs/library.ja.md) | カスタムメカニズムの実装とライブラリとしての利用 |
 | [Mechanismカタログ](docs/mechanisms.ja.md) | 全19メカニズム：理論，出典，図解，フェーズ上の位置付け，各メカニズムの適用方法 |
+| [モジュールパック](docs/packs.ja.md) | 同梱の2つのパック（`hr-lifecycle`，`opinion-dynamics`）：World のデータモデル，メカニズムの構成，スターターシナリオ，記録されるメトリクス |
 | [アーキテクチャ](docs/architecture.ja.md) | クレート依存グラフ，6フェーズティックループ，キャリブレーション哲学 |
 
 ## ライセンス

@@ -1,0 +1,85 @@
+<svg width="100%" viewBox="0 0 920 470" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>module packs overview — hr-lifecycle and opinion-dynamics</title>
+<desc>A scenario names a module pack; the CLI looks it up through the object-safe CliPack trait, which builds the pack's concrete world and registers its mechanisms via a ModulePack into a Registry. Two packs ship today: hr-lifecycle (HrWorld, ten calibrated mechanisms) and opinion-dynamics (OpinionWorld, bounded-confidence mechanisms).</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="nu" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#5F5E5A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="914" height="464" rx="18" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<text class="title" x="460" y="34" font-size="16" fill="#444441" text-anchor="middle">Module packs — a scenario selects a world by name</text>
+
+<!-- scenario toml -->
+<rect x="40" y="62" width="180" height="86" rx="12" fill="#FBFAF6" stroke="#5F5E5A" stroke-width="1.2"/>
+<text class="mono" x="56" y="84" font-size="11.5" fill="#444441">scenario.toml</text>
+<line x1="56" y1="94" x2="204" y2="94" stroke="#C9C6BC" stroke-width="1"/>
+<text class="mono" x="56" y="114" font-size="10.5" fill="#6B6A64">[simulation]</text>
+<text class="mono" x="56" y="130" font-size="10.5" fill="#6B6A64">module_pack = "..."</text>
+
+<!-- CliPack registry -->
+<rect x="262" y="50" width="200" height="110" rx="12" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.2"/>
+<text class="mono" x="362" y="74" font-size="12.5" fill="#444441" text-anchor="middle" font-weight="700">CliPack registry</text>
+<text class="body" x="362" y="92" font-size="10" fill="#6B6A64" text-anchor="middle">(socsim-cli)</text>
+<text class="body" x="362" y="116" font-size="10.5" fill="#6B6A64" text-anchor="middle">dispatch(name) → world-erased</text>
+<text class="mono" x="362" y="134" font-size="10.5" fill="#444441" text-anchor="middle">name · starter_toml</text>
+<text class="mono" x="362" y="150" font-size="10.5" fill="#444441" text-anchor="middle">run_seeds · run_sweep</text>
+
+<path d="M220 105 H260" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#nu)"/>
+
+<!-- ModulePack + Registry note -->
+<rect x="504" y="62" width="376" height="86" rx="12" fill="#FBFAF6" stroke="#5F5E5A" stroke-width="1.1"/>
+<text class="body" x="692" y="84" font-size="11.5" fill="#444441" text-anchor="middle" font-weight="600">each pack: ModulePack&lt;W&gt; → Registry&lt;W&gt;</text>
+<text class="body" x="692" y="104" font-size="10.5" fill="#6B6A64" text-anchor="middle">register("name", |params| Box&lt;dyn Mechanism&lt;W&gt;&gt;)</text>
+<text class="body" x="692" y="124" font-size="10.5" fill="#6B6A64" text-anchor="middle">gated behind a pack-* Cargo feature; the CLI</text>
+<text class="body" x="692" y="140" font-size="10.5" fill="#6B6A64" text-anchor="middle">binary names no concrete world type</text>
+<path d="M462 105 H502" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#nu)"/>
+
+<!-- HR pack card -->
+<rect x="60" y="190" width="380" height="244" rx="14" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.5"/>
+<text class="mono" x="80" y="216" font-size="14" fill="#332E6E" font-weight="700">hr-lifecycle</text>
+<text class="body" x="80" y="234" font-size="10.5" fill="#7A5BC0">pack-hr-lifecycle · HrWorld</text>
+<line x1="80" y1="244" x2="420" y2="244" stroke="#C7C2E8" stroke-width="1"/>
+<text class="body" x="80" y="266" font-size="11.5" fill="#332E6E" font-weight="600">An employee-lifecycle reference model</text>
+<text class="body" x="80" y="284" font-size="10.5" fill="#6B6A64">10 mechanisms, calibrated to published findings</text>
+<g class="mono" font-size="10.5" fill="#332E6E">
+  <text x="80" y="308">learning_curve · peer_effect · ocb</text>
+  <text x="80" y="326">fit · turnover · hiring</text>
+  <text x="80" y="344">knowledge_loss · socialization · toxic_spread</text>
+  <text x="80" y="362">org_performance</text>
+</g>
+<text class="body" x="80" y="388" font-size="10.5" fill="#6B6A64">Watts–Strogatz social network · monthly steps</text>
+<rect x="80" y="400" width="340" height="22" rx="7" fill="#FBFAF6" stroke="#534AB7" stroke-width="1"/>
+<text class="mono" x="250" y="415" font-size="10.5" fill="#332E6E" text-anchor="middle">org_performance · avg_tenure · turnover_rate · knowledge_stock</text>
+
+<!-- Opinion pack card -->
+<rect x="478" y="190" width="380" height="244" rx="14" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.5"/>
+<text class="mono" x="498" y="216" font-size="14" fill="#0F6E56" font-weight="700">opinion-dynamics</text>
+<text class="body" x="498" y="234" font-size="10.5" fill="#3C7E6C">pack-opinion-dynamics · OpinionWorld</text>
+<line x1="498" y1="244" x2="838" y2="244" stroke="#9FD4C4" stroke-width="1"/>
+<text class="body" x="498" y="266" font-size="11.5" fill="#0B5040" font-weight="600">Bounded-confidence opinion dynamics</text>
+<text class="body" x="498" y="284" font-size="10.5" fill="#6B6A64">reuses the socsim-mechanisms catalog via traits</text>
+<g class="mono" font-size="10.5" fill="#0B5040">
+  <text x="498" y="308">hegselmann_krause · deffuant</text>
+  <text x="498" y="326">social_judgement · lorenz</text>
+  <text x="498" y="344">convergence (stop)</text>
+  <text x="498" y="362">opinion_metrics</text>
+</g>
+<text class="body" x="498" y="388" font-size="10.5" fill="#6B6A64">WS / Erdős–Rényi / Barabási–Albert network</text>
+<rect x="498" y="400" width="340" height="22" rx="7" fill="#FBFAF6" stroke="#0F6E56" stroke-width="1"/>
+<text class="mono" x="668" y="415" font-size="10.5" fill="#0B5040" text-anchor="middle">clusters · variance · spread · mean · max_delta</text>
+
+<path d="M362 160 C 362 176, 250 176, 250 188" fill="none" stroke="#5F5E5A" stroke-width="1.4" marker-end="url(#nu)"/>
+<path d="M362 160 C 362 176, 668 176, 668 188" fill="none" stroke="#5F5E5A" stroke-width="1.4" marker-end="url(#nu)"/>
+
+</svg>

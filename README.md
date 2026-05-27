@@ -77,6 +77,7 @@ Bounded-confidence opinions coalesce into fewer clusters over time (consensus); 
 | [Use-cases & recipes](docs/usecases.md) | Runbook for common research workflows |
 | [Library API](docs/library.md) | Implement custom mechanisms and use socsim as a library |
 | [Mechanism catalog](docs/mechanisms.md) | All nineteen mechanisms: theory, sources, diagrams, phase positioning, and how to apply each |
+| [Module packs](docs/packs.md) | The two bundled packs (`hr-lifecycle`, `opinion-dynamics`): world data model, mechanism composition, starter scenarios, and recorded metrics |
 | [Architecture](docs/architecture.md) | Crate dependency graph, 6-phase tick loop, calibration philosophy |
 
 ## License

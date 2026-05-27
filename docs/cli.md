@@ -131,7 +131,7 @@ socsim validate scenarios/hr_lifecycle_baseline.toml
 
 ## list
 
-List available module packs or the mechanisms inside each pack.
+List available module packs or the mechanisms inside each pack. For what each pack contains, see the [module pack catalog](packs.md).
 
 ```
 socsim list <WHAT>

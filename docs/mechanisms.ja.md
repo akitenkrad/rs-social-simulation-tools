@@ -14,6 +14,8 @@
 （`hegselmann_krause`，`deffuant`，`social_judgement`，`lorenz`，`si_contagion`，`threshold_contagion`，`axelrod`，`group_conformity`）
 — 汎用の非 HR `socsim-mechanisms` クレート — です．
 
+メカニズムは[モジュールパック](packs.ja.md)によって実行可能なモデルへと構成されます．パックは World のデータモデル，既定のメカニズム集合，スターターシナリオをまとめて提供します．
+
 ## 概要
 
 ![Mechanisms across the 6-phase tick loop](assets/mechanisms-overview.svg)
