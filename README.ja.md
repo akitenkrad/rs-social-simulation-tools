@@ -10,6 +10,12 @@
 
 `socsim` はRustで書かれた，コンポーザブルなエージェントベース社会シミュレーションプラットフォームです．トレイトベースのメカニズムシステム，シードされたChaCha20 RNGによる決定論的再現性，ソーシャルネットワーク層，空間グリッドのプリミティブ，保存・再開のためのWorld状態スナップショット，オプションの学習ポリシー（MARL），オプションのLLMエージェント層（Ollama/OpenAI，プロンプトキャッシュ付き），結果出力ヘルパ，再利用可能な観測メトリクスライブラリ，そしてシナリオの実行・パラメータスイープ・集計のためのCLIを，15クレートのワークスペースとして提供します．CLIは **World 多態**です：シナリオは名前で *モジュールパック* を選択し，現在3つのパックを同梱しています — 文献に基づくキャリブレーションパラメータを持つ10メカニズムの参考実装 **HRライフサイクル** モジュール，ソーシャルネットワーク上で有界信頼コンセンサスモデルを実行する **opinion-dynamics** パック，そして階層的なネットワーク上で沈黙の風土の創発をモデル化し，LLM／ルールベースの voice 決定を切り替えられる **`organizational-silence`** パックです．再利用可能でドメイン非依存なメカニズムは汎用の **`socsim-mechanisms`** カタログに収録され，意見ダイナミクス，ネットワーク伝播，文化伝播，グループダイナミクスの4つのフィーチャファミリにわたる8メカニズムを提供します．
 
+## アーキテクチャ概要
+
+<p align="center"><img src="docs/assets/design-overview.svg" width="100%" alt="socsim at a glance — mechanisms compose like neural-net layers over a deterministic six-phase tick loop on a shared world; a Scheduler and seeded SimRng feed in; a Recorder emits metrics and events."></p>
+
+`Simulation` エンジンは順序付き・フェーズタグ付きの `Mechanism` 層を駆動し，各層が共有 `WorldState` を読み書きします．`Scheduler` とシード化された `SimRng` を入力に取り，`Recorder` がメトリクスとイベントを出力します．6 フェーズのリボン（`PreStep → Environment → Decision → Interaction → Reward → PostStep`）は，各ステップでメカニズムが動作する固定順序です．クレート構成の実装ビューは [アーキテクチャページ](docs/architecture.ja.md)，抽象設計の理由は [設計ページ](docs/design.ja.md) を参照してください．
+
 ## インストール
 
 ソースからビルド（Rustツールチェーンが必要）：
