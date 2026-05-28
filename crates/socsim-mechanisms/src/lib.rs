@@ -497,6 +497,117 @@ mod tests {
         assert!(world.opinions.iter().all(|&x| (0.0..=1.0).contains(&x)));
     }
 
+    // ── Hegselmann–Krause asymmetric variant (HK 2002 §4.2 / Fig. 10–13) ─────
+
+    #[test]
+    fn hk_asymmetric_equal_bounds_match_symmetric_bit_for_bit() {
+        // The asymmetric code path with eps_l == eps_r must produce a result
+        // bit-identical to the symmetric constructor — that is the contract
+        // that lets existing call sites upgrade for free.
+        let init: Vec<f64> = (0..21).map(|i| i as f64 / 20.0).collect();
+        let mut sym_world = OpinionWorld::complete(init.clone());
+        let mut sym_rng = SimRng::from_seed(99);
+        let mut sym_hk = HegselmannKrauseMechanism::new(0.18, MeanOperator::Arithmetic);
+        run(&mut sym_hk, &mut sym_world, &mut sym_rng, 25);
+
+        let mut asym_world = OpinionWorld::complete(init);
+        let mut asym_rng = SimRng::from_seed(99);
+        let mut asym_hk =
+            HegselmannKrauseMechanism::with_asymmetric(0.18, 0.18, MeanOperator::Arithmetic);
+        run(&mut asym_hk, &mut asym_world, &mut asym_rng, 25);
+
+        assert_eq!(sym_world.opinions, asym_world.opinions);
+    }
+
+    #[test]
+    fn hk_asymmetric_three_agent_step_matches_hand_computation() {
+        // Tiny deterministic example so the asymmetric window semantics are
+        // pinned by a hand-computable value, independent of mean / rng noise.
+        //
+        //   Agents at x = [0.0, 0.3, 0.5],  eps_l = 0.2,  eps_r = 0.4
+        //   Membership test: -0.2 ≤ x_j − x_i ≤ 0.4.
+        //
+        //   i=0 (x=0.0):  diffs {0.0, 0.3, 0.5}  → keep {0.0, 0.3} (0.5 > 0.4)
+        //                 mean = (0.0 + 0.3) / 2 = 0.15
+        //   i=1 (x=0.3):  diffs {-0.3, 0.0, 0.2} → keep {0.3, 0.5} (-0.3 < -0.2)
+        //                 mean = (0.3 + 0.5) / 2 = 0.40
+        //   i=2 (x=0.5):  diffs {-0.5, -0.2, 0.0} → keep {0.3, 0.5} (-0.5 < -0.2)
+        //                 mean = (0.3 + 0.5) / 2 = 0.40
+        //
+        //   Expected state after one step: [0.15, 0.40, 0.40].
+        let mut world = OpinionWorld::complete(vec![0.0, 0.3, 0.5]);
+        let mut rng = SimRng::from_seed(0);
+        let mut hk = HegselmannKrauseMechanism::with_asymmetric(0.2, 0.4, MeanOperator::Arithmetic);
+        run(&mut hk, &mut world, &mut rng, 1);
+
+        let expected = [0.15, 0.40, 0.40];
+        for (i, (got, want)) in world.opinions.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (got - want).abs() < 1e-12,
+                "agent {} got {} want {}",
+                i,
+                got,
+                want
+            );
+        }
+    }
+
+    #[test]
+    fn hk_asymmetric_shifts_mean_toward_wider_side() {
+        // Paper §4.2 claim (qualitative): when ε_l ≪ ε_r the final mean drifts
+        // *upward* (toward the wider right side).  Compare against a matched
+        // symmetric run for noise cancellation; the asymmetric run must finish
+        // strictly above the symmetric run by a margin.
+        let init: Vec<f64> = (0..50).map(|i| i as f64 / 49.0).collect();
+
+        let mut sym_world = OpinionWorld::complete(init.clone());
+        let mut sym_rng = SimRng::from_seed(123);
+        let mut sym_hk = HegselmannKrauseMechanism::new(0.15, MeanOperator::Arithmetic);
+        run(&mut sym_hk, &mut sym_world, &mut sym_rng, 100);
+
+        let mut asym_world = OpinionWorld::complete(init);
+        let mut asym_rng = SimRng::from_seed(123);
+        let mut asym_hk =
+            HegselmannKrauseMechanism::with_asymmetric(0.05, 0.25, MeanOperator::Arithmetic);
+        run(&mut asym_hk, &mut asym_world, &mut asym_rng, 100);
+
+        let mean = |xs: &[f64]| xs.iter().sum::<f64>() / xs.len() as f64;
+        let sym_mean = mean(&sym_world.opinions);
+        let asym_mean = mean(&asym_world.opinions);
+        assert!(
+            (sym_mean - 0.5).abs() < 0.05,
+            "symmetric mean should hover near 0.5, got {}",
+            sym_mean
+        );
+        assert!(
+            asym_mean > sym_mean + 0.03,
+            "asymmetric mean (eps_l=0.05, eps_r=0.25) should drift toward the wider side; \
+             got asym={} vs sym={}",
+            asym_mean,
+            sym_mean
+        );
+    }
+
+    #[test]
+    fn hk_is_asymmetric_predicate_truth_table() {
+        // Symmetric constructor → never asymmetric.
+        assert!(!HegselmannKrauseMechanism::new(0.2, MeanOperator::Arithmetic).is_asymmetric());
+        // Equal bounds via with_asymmetric → still symmetric.
+        assert!(
+            !HegselmannKrauseMechanism::with_asymmetric(0.2, 0.2, MeanOperator::Arithmetic)
+                .is_asymmetric()
+        );
+        // Unequal bounds → asymmetric.
+        assert!(
+            HegselmannKrauseMechanism::with_asymmetric(0.1, 0.3, MeanOperator::Arithmetic)
+                .is_asymmetric()
+        );
+        // Partial overrides also count when they don't match `epsilon`.
+        let mut hk = HegselmannKrauseMechanism::new(0.2, MeanOperator::Arithmetic);
+        hk.epsilon_right = Some(0.4);
+        assert!(hk.is_asymmetric());
+    }
+
     // ── Deffuant (after Neighbors refactor) ───────────────────────────────────
 
     #[test]
