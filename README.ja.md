@@ -8,7 +8,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 ![tests: 297 passing](https://img.shields.io/badge/tests-297%20passing-brightgreen)
 
-`socsim` はRustで書かれた，コンポーザブルなエージェントベース社会シミュレーションプラットフォームです．トレイトベースのメカニズムシステム，シードされたChaCha20 RNGによる決定論的再現性，ソーシャルネットワーク層，空間グリッドのプリミティブ，保存・再開のためのWorld状態スナップショット，オプションの学習ポリシー（MARL），オプションのLLMエージェント層（Ollama/OpenAI，プロンプトキャッシュ付き），結果出力ヘルパ，再利用可能な観測メトリクスライブラリ，そしてシナリオの実行・パラメータスイープ・集計のためのCLIを，15クレートのワークスペースとして提供します．CLIは **World 多態**です：シナリオは名前で *モジュールパック* を選択し，現在2つのパックを同梱しています — 文献に基づくキャリブレーションパラメータを持つ10メカニズムの参考実装 **HRライフサイクル** モジュールと，ソーシャルネットワーク上で有界信頼コンセンサスモデルを実行する **opinion-dynamics** パックです．再利用可能でドメイン非依存なメカニズムは汎用の **`socsim-mechanisms`** カタログに収録され，意見ダイナミクス，ネットワーク伝播，文化伝播，グループダイナミクスの4つのフィーチャファミリにわたる8メカニズムを提供します．
+`socsim` はRustで書かれた，コンポーザブルなエージェントベース社会シミュレーションプラットフォームです．トレイトベースのメカニズムシステム，シードされたChaCha20 RNGによる決定論的再現性，ソーシャルネットワーク層，空間グリッドのプリミティブ，保存・再開のためのWorld状態スナップショット，オプションの学習ポリシー（MARL），オプションのLLMエージェント層（Ollama/OpenAI，プロンプトキャッシュ付き），結果出力ヘルパ，再利用可能な観測メトリクスライブラリ，そしてシナリオの実行・パラメータスイープ・集計のためのCLIを，15クレートのワークスペースとして提供します．CLIは **World 多態**です：シナリオは名前で *モジュールパック* を選択し，現在3つのパックを同梱しています — 文献に基づくキャリブレーションパラメータを持つ10メカニズムの参考実装 **HRライフサイクル** モジュール，ソーシャルネットワーク上で有界信頼コンセンサスモデルを実行する **opinion-dynamics** パック，そして階層的なネットワーク上で沈黙の風土の創発をモデル化し，LLM／ルールベースの voice 決定を切り替えられる **`organizational-silence`** パックです．再利用可能でドメイン非依存なメカニズムは汎用の **`socsim-mechanisms`** カタログに収録され，意見ダイナミクス，ネットワーク伝播，文化伝播，グループダイナミクスの4つのフィーチャファミリにわたる8メカニズムを提供します．
 
 ## インストール
 
@@ -50,7 +50,7 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 60               35.6250           92.3841           41.8100            0.0000
 ```
 
-`socsim` バイナリは World 多態です：シナリオは **モジュールパック**を名前で選択します（`socsim list packs`）．現在2つのパックを同梱しています — 較正済みの `hr-lifecycle` リファレンスモジュールと，`socsim-mechanisms` の有界信頼メカニズムをソーシャルネットワーク上で実行する汎用 `opinion-dynamics` パックです：
+`socsim` バイナリは World 多態です：シナリオは **モジュールパック**を名前で選択します（`socsim list packs`）．現在3つのパックを同梱しています — 較正済みの `hr-lifecycle` リファレンスモジュール，`socsim-mechanisms` の有界信頼メカニズムをソーシャルネットワーク上で実行する汎用 `opinion-dynamics` パック，そして階層的な組織で沈黙の風土の創発をモデル化する `organizational-silence` パックです：
 
 ```sh
 socsim run scenarios/opinion_dynamics_baseline.toml
@@ -67,6 +67,21 @@ t               clusters         max_delta              mean            spread  
 
 有界信頼の意見は時間とともにより少ないクラスタへ収束します（コンセンサス）．`epsilon` を大きくすると完全な合意に至ります．
 
+```sh
+socsim run scenarios/org_silence_baseline.toml
+```
+
+```
+Running 'org_silence_baseline' (pack=organizational-silence, t_max=60, seeds=[42], parallel=false)
+
+t              silence_rate   climate_of_silence       voice_volume      org_performance
+10                 0.5500               0.2750             0.2750              28.5630
+30                 0.7250               0.4250             0.1500              22.4173
+60                 0.6500               0.3500             0.2250              25.9982
+```
+
+沈黙の風土 C(t) は t=24 の salience ショックまで上昇し，その後，高い σ のもとでの voice が Argyris ダブルループ学習メカニズム経由でチームの `knowledge_stock` に流入することで，部分的に回復します．
+
 ## ドキュメント
 
 | ドキュメント | 内容 |
@@ -77,7 +92,7 @@ t               clusters         max_delta              mean            spread  
 | [ユースケース＆レシピ](docs/usecases.ja.md) | 代表的な研究ワークフローのランブック |
 | [ライブラリAPI](docs/library.ja.md) | カスタムメカニズムの実装とライブラリとしての利用 |
 | [Mechanismカタログ](docs/mechanisms.ja.md) | 全19メカニズム：理論，出典，図解，フェーズ上の位置付け，各メカニズムの適用方法 |
-| [モジュールパック](docs/packs.ja.md) | 同梱の2つのパック（`hr-lifecycle`，`opinion-dynamics`）：World のデータモデル，メカニズムの構成，スターターシナリオ，記録されるメトリクス |
+| [モジュールパック](docs/packs.ja.md) | 同梱の3つのパック（`hr-lifecycle`，`opinion-dynamics`，`organizational-silence`）：World のデータモデル，メカニズムの構成，スターターシナリオ，記録されるメトリクス |
 | [アーキテクチャ](docs/architecture.ja.md) | クレート依存グラフ，6フェーズティックループ，キャリブレーション哲学 |
 
 ## ライセンス

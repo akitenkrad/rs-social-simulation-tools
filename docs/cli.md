@@ -4,7 +4,7 @@
 
 The `socsim` binary exposes six subcommands. Run `socsim --help` or `socsim <COMMAND> --help` for flags.
 
-The binary is **world-polymorphic**: every scenario names a *module pack* and is dispatched to that pack's world type. Two packs ship today (`hr-lifecycle`, `opinion-dynamics`); new packs register behind a `pack-*` Cargo feature.
+The binary is **world-polymorphic**: every scenario names a *module pack* and is dispatched to that pack's world type. Three packs ship today (`hr-lifecycle`, `opinion-dynamics`, `organizational-silence`); new packs register behind a `pack-*` Cargo feature.
 
 ```
 socsim <COMMAND>
@@ -149,6 +149,7 @@ socsim list packs
 Available module packs:
   hr-lifecycle
   opinion-dynamics
+  organizational-silence
 ```
 
 ```sh
@@ -175,7 +176,22 @@ Mechanisms by pack:
     lorenz
     opinion_metrics
     social_judgement
+  [organizational-silence]
+    climate_silence
+    fear_appraisal
+    issue_salience
+    org_learning
+    org_performance
+    prefalse_cascade
+    psafety_update
+    retaliation_event
+    silence_spiral
+    voice_decision_rule
 ```
+
+When the CLI is built with `--features pack-organizational-silence-llm`, the
+`[organizational-silence]` block also lists a `voice_decision` entry (the LLM
+variant of `voice_decision_rule`).
 
 ---
 

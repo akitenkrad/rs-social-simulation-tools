@@ -121,7 +121,7 @@ socsim sweep scenarios/hr_lifecycle_baseline.toml --param "toxic_spread.p_spread
 
 ### 4. （任意）パックを `CliPack` として `socsim` バイナリに公開する
 
-同梱の2パックが `socsim list packs` に現れるのは，それぞれが **`CliPack`** — World多態のバイナリがディスパッチする，オブジェクト安全でWorldを消去したアダプタ — にも包まれているからです．自分のパックをCLIに追加するには：
+同梱の3パックが `socsim list packs` に現れるのは，それぞれが **`CliPack`** — World多態のバイナリがディスパッチする，オブジェクト安全でWorldを消去したアダプタ — にも包まれているからです．自分のパックをCLIに追加するには：
 
 1. `impl CliPack` する `struct FooCliPack;` を実装する（内部で具体的なワールドを所有し，`name`，`starter_toml`，`mechanism_names`，`run_seeds`，`run_sweep` を公開）；
 2. Cargoフィーチャ `pack-foo = ["dep:socsim-foo"]` を追加する；

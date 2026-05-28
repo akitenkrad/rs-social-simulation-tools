@@ -8,7 +8,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 ![tests: 297 passing](https://img.shields.io/badge/tests-297%20passing-brightgreen)
 
-`socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, spatial-grid primitives, world-state snapshots for save/resume, optional learnable (MARL) policies, an optional LLM-agent layer (Ollama/OpenAI with prompt caching), result-output helpers, a reusable observation-metrics library, and a CLI for running, sweeping, and summarising scenarios — all in a fifteen-crate workspace. The CLI is **world-polymorphic**: a scenario selects a *module pack* by name, and two packs ship today — a reference **HR lifecycle** module (ten mechanisms calibrated against published empirical findings) and an **opinion-dynamics** pack that runs bounded-confidence consensus models on a social network. Reusable, domain-agnostic mechanisms live in the general **`socsim-mechanisms`** catalog — eight mechanisms across four feature families: opinion dynamics, network contagion, cultural dissemination, and group dynamics.
+`socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, spatial-grid primitives, world-state snapshots for save/resume, optional learnable (MARL) policies, an optional LLM-agent layer (Ollama/OpenAI with prompt caching), result-output helpers, a reusable observation-metrics library, and a CLI for running, sweeping, and summarising scenarios — all in a fifteen-crate workspace. The CLI is **world-polymorphic**: a scenario selects a *module pack* by name, and three packs ship today — a reference **HR lifecycle** module (ten mechanisms calibrated against published empirical findings), an **opinion-dynamics** pack that runs bounded-confidence consensus models on a social network, and an **`organizational-silence`** pack that models the emergence of a climate of silence on a hierarchical network with LLM- or rule-based voice decisions. Reusable, domain-agnostic mechanisms live in the general **`socsim-mechanisms`** catalog — eight mechanisms across four feature families: opinion dynamics, network contagion, cultural dissemination, and group dynamics.
 
 ## Installation
 
@@ -50,7 +50,7 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 60               35.6250           92.3841           41.8100            0.0000
 ```
 
-The `socsim` binary is world-polymorphic: scenarios select a **module pack** by name (`socsim list packs`). Two packs ship today — the calibrated `hr-lifecycle` reference module and a general `opinion-dynamics` pack that runs the bounded-confidence mechanisms from `socsim-mechanisms` on a social network:
+The `socsim` binary is world-polymorphic: scenarios select a **module pack** by name (`socsim list packs`). Three packs ship today — the calibrated `hr-lifecycle` reference module, a general `opinion-dynamics` pack that runs the bounded-confidence mechanisms from `socsim-mechanisms` on a social network, and an `organizational-silence` pack that models the emergence of a climate of silence on a hierarchical organisation:
 
 ```sh
 socsim run scenarios/opinion_dynamics_baseline.toml
@@ -67,6 +67,21 @@ t               clusters         max_delta              mean            spread  
 
 Bounded-confidence opinions coalesce into fewer clusters over time (consensus); a larger `epsilon` drives full consensus.
 
+```sh
+socsim run scenarios/org_silence_baseline.toml
+```
+
+```
+Running 'org_silence_baseline' (pack=organizational-silence, t_max=60, seeds=[42], parallel=false)
+
+t              silence_rate   climate_of_silence       voice_volume      org_performance
+10                 0.5500               0.2750             0.2750              28.5630
+30                 0.7250               0.4250             0.1500              22.4173
+60                 0.6500               0.3500             0.2250              25.9982
+```
+
+The climate of silence C(t) rises until the salience shock at t=24, then partly recovers as voicing under high σ feeds the team `knowledge_stock` via the Argyris double-loop learning mechanism.
+
 ## Documentation
 
 | Document | Description |
@@ -77,7 +92,7 @@ Bounded-confidence opinions coalesce into fewer clusters over time (consensus); 
 | [Use-cases & recipes](docs/usecases.md) | Runbook for common research workflows |
 | [Library API](docs/library.md) | Implement custom mechanisms and use socsim as a library |
 | [Mechanism catalog](docs/mechanisms.md) | All nineteen mechanisms: theory, sources, diagrams, phase positioning, and how to apply each |
-| [Module packs](docs/packs.md) | The two bundled packs (`hr-lifecycle`, `opinion-dynamics`): world data model, mechanism composition, starter scenarios, and recorded metrics |
+| [Module packs](docs/packs.md) | The three bundled packs (`hr-lifecycle`, `opinion-dynamics`, `organizational-silence`): world data model, mechanism composition, starter scenarios, and recorded metrics |
 | [Architecture](docs/architecture.md) | Crate dependency graph, 6-phase tick loop, calibration philosophy |
 
 ## License

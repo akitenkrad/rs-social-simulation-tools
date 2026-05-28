@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 920 470" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>module packs overview — hr-lifecycle and opinion-dynamics</title>
-<desc>A scenario names a module pack; the CLI looks it up through the object-safe CliPack trait, which builds the pack's concrete world and registers its mechanisms via a ModulePack into a Registry. Two packs ship today: hr-lifecycle (HrWorld, ten calibrated mechanisms) and opinion-dynamics (OpinionWorld, bounded-confidence mechanisms).</desc>
+<desc>A scenario names a module pack; the CLI looks it up through the object-safe CliPack trait, which builds the pack's concrete world and registers its mechanisms via a ModulePack into a Registry. Three packs ship today: hr-lifecycle (HrWorld, ten calibrated mechanisms), opinion-dynamics (OpinionWorld, bounded-confidence mechanisms), and organizational-silence (SilenceWorld, ten mechanisms plus an optional LLM voice-decision variant).</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
