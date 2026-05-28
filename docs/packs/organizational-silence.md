@@ -106,16 +106,26 @@ optional eleventh, `voice_decision`, replaces `voice_decision_rule` when the
 
 | Mechanism | Phase | Kind | Role |
 |---|---|---|---|
-| `issue_salience` | Environment | scenario-driven | Updates σ(t); supports a step-function shock (`shock_t`, `shock_delta`) for a mid-run triggering event. |
-| `retaliation_event` | Environment | stochastic | With probability `p_retaliate` per step, picks a recent voicer (or any agent as fallback), marks them and their neighbours as retaliated against, and records a `retaliation` event (Kish-Gephart 2009). |
-| `fear_appraisal` | Decision | empirical | Updates each employee's fear from this step's retaliation set and supervisor openness; small per-step decay returns fear to baseline in calm climates (Kish-Gephart 2009). |
-| `voice_decision_rule` | Decision | mixed | Rule-based logistic voice/silence decision; on silence, assigns a motive ∈ {`acquiescent`, `defensive`, `prosocial`} by dominant suppressor (Van Dyne 2003). |
-| `silence_spiral` | Interaction | empirical | Snapshots each employee's neighbour silence ratio ρ_i and nudges psych_safety down by `epsilon · ρ · 0.05`; the ρ_i snapshot is the carrier of the spiral effect into the next tick (Noelle-Neumann 1974). |
-| `prefalse_cascade` | Interaction | mixed | Iterative voice-flip cascade: any silent agent with `private_concern < 0` flips to Voice when their neighbour voice ratio exceeds their personal `voice_threshold`, repeated to fixpoint. Records a `cascade` event when the total flipped mass exceeds `cascade_threshold` (default 5%) of the population (Kuran 1995 / Granovetter 1978). |
-| `org_performance` | Reward | aggregation | Refreshes the macro aggregates and records `silence_rate`, `climate_of_silence`, `voice_volume`, `knowledge_stock`, `org_performance`, `opinion_clusters`, `n_employees`; fires a `motive_mix` event with the (acquiescent, defensive, prosocial) breakdown over currently-silent agents. |
-| `psafety_update` | PostStep | empirical | Nudges each employee's ψ up by `psafety_learn` if they voiced, down by `psafety_learn` if they were retaliated against (Edmondson 1999). |
-| `climate_silence` | PostStep | aggregation | Recomputes C(t) so the published value reflects the end-of-step world after the cascade and any other Reward-phase / PostStep changes. |
-| `org_learning` | PostStep | optional intervention | Argyris (1977) double-loop learning: when at least one employee voiced *and* σ(t) > `salience_floor`, each voicer's team gets a `learning_rate` increment to its `knowledge_stock`; otherwise the entire stock decays by `decay_rate` (≈ 1%/step) reflecting unrenewed tacit knowledge in a silent climate. |
+| [`issue_salience`](../mechanisms/issue-salience.md) | Environment | scenario-driven | Updates σ(t); supports a step-function shock (`shock_t`, `shock_delta`) for a mid-run triggering event. |
+| [`retaliation_event`](../mechanisms/retaliation-event.md) | Environment | stochastic | With probability `p_retaliate` per step, picks a recent voicer (or any agent as fallback), marks them and their neighbours as retaliated against, and records a `retaliation` event (Kish-Gephart 2009). |
+| [`fear_appraisal`](../mechanisms/fear-appraisal.md) | Decision | empirical | Updates each employee's fear from this step's retaliation set and supervisor openness; small per-step decay returns fear to baseline in calm climates (Kish-Gephart 2009). |
+| [`voice_decision_rule`](../mechanisms/voice-decision-rule.md) | Decision | mixed | Rule-based logistic voice/silence decision; on silence, assigns a motive ∈ {`acquiescent`, `defensive`, `prosocial`} by dominant suppressor (Van Dyne 2003). The LLM variant `voice_decision` shares the page (§2.1). |
+| [`silence_spiral`](../mechanisms/silence-spiral.md) | Interaction | empirical | Snapshots each employee's neighbour silence ratio ρ_i and nudges psych_safety down by `epsilon · ρ · 0.05`; the ρ_i snapshot is the carrier of the spiral effect into the next tick (Noelle-Neumann 1974). |
+| [`prefalse_cascade`](../mechanisms/prefalse-cascade.md) | Interaction | mixed | Iterative voice-flip cascade: any silent agent with `private_concern < 0` flips to Voice when their neighbour voice ratio exceeds their personal `voice_threshold`, repeated to fixpoint. Records a `cascade` event when the total flipped mass exceeds `cascade_threshold` (default 5%) of the population (Kuran 1995 / Granovetter 1978). |
+| [`org_performance`](../mechanisms/org-performance.md) | Reward | aggregation | Refreshes the macro aggregates and records `silence_rate`, `climate_of_silence`, `voice_volume`, `knowledge_stock`, `org_performance`, `opinion_clusters`, `n_employees`; fires a `motive_mix` event with the (acquiescent, defensive, prosocial) breakdown over currently-silent agents. (Note: the reference page documents the hr-lifecycle body; the silence body is summarised in this row and in the table below.) |
+| [`psafety_update`](../mechanisms/psafety-update.md) | PostStep | empirical | Nudges each employee's ψ up by `psafety_learn` if they voiced, down by `psafety_learn` if they were retaliated against (Edmondson 1999). |
+| [`climate_silence`](../mechanisms/climate-silence.md) | PostStep | aggregation | Recomputes C(t) so the published value reflects the end-of-step world after the cascade and any other Reward-phase / PostStep changes. |
+| [`org_learning`](../mechanisms/org-learning.md) | PostStep | optional intervention | Argyris (1977) double-loop learning: when at least one employee voiced *and* σ(t) > `salience_floor`, each voicer's team gets a `learning_rate` increment to its `knowledge_stock`; otherwise the entire stock decays by `decay_rate` (≈ 1%/step) reflecting unrenewed tacit knowledge in a silent climate. |
+
+> **Note on `org_performance`.** The reference page
+> [`mechanisms/org-performance.md`](../mechanisms/org-performance.md) documents
+> the hr-lifecycle body (productivity sum, tenure mean, turnover rate, team
+> mean-θ recompute). The body the **organisational-silence pack** registers
+> under the same name is different: it records `silence_rate`,
+> `climate_of_silence`, `voice_volume`, `knowledge_stock`, `org_performance`,
+> `opinion_clusters`, and `n_employees`, and fires a `motive_mix` event each
+> step. The two bodies coexist because each pack registers `org_performance`
+> into its own `Registry<W>` typed to its own world.
 
 The full equations, parameter defaults, and citations live in
 [`crates/socsim-packs/src/organizational_silence/mechanisms.rs`](../../crates/socsim-packs/src/organizational_silence/mechanisms.rs)

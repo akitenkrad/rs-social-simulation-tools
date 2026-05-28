@@ -9,15 +9,27 @@ a single `apply` method — and is composed with other mechanisms over the share
 like neural-network layers: each reads and writes the `WorldState`, and the
 engine runs them in a fixed order every step.
 
-This catalog documents the **nineteen** mechanisms that ship with socsim: the ten
-reference [HR lifecycle](usecases.md) mechanisms (calibrated against published
-empirical findings), the learnable MARL `policy` mechanism, and the eight
-social-dynamics mechanisms (`hegselmann_krause`, `deffuant`, `social_judgement`,
-`lorenz`, `si_contagion`, `threshold_contagion`, `axelrod`, `group_conformity`) —
-the general, non-HR `socsim-mechanisms` crate.
+This catalog documents the **twenty-eight** mechanisms that ship with socsim:
+the ten reference [HR lifecycle](usecases.md) mechanisms (calibrated against
+published empirical findings), the nine
+[organisational-silence](packs/organizational-silence.md) mechanisms (silence
+motives + spiral + threshold cascade on a hierarchical network), the learnable
+MARL `policy` mechanism, and the eight social-dynamics mechanisms
+(`hegselmann_krause`, `deffuant`, `social_judgement`, `lorenz`, `si_contagion`,
+`threshold_contagion`, `axelrod`, `group_conformity`) — the general, non-HR
+`socsim-mechanisms` crate.
 
 Mechanisms are composed into runnable models by [module packs](packs.md), which
 bundle the world data model, a default mechanism set, and starter scenarios.
+The name `org_performance` is registered by **both** [`hr-lifecycle`](packs/hr-lifecycle.md)
+and [`organizational-silence`](packs/organizational-silence.md), with
+pack-specific bodies: the hr-lifecycle variant aggregates productivity,
+tenure, knowledge stock, and turnover rate; the organizational-silence
+variant aggregates silence rate, climate of silence, voice volume, knowledge
+stock, opinion clusters, and headcount, and fires a `motive_mix` event. Both
+share the [`org_performance`](mechanisms/org-performance.md) reference page,
+which documents the hr-lifecycle body; the silence variant is documented in
+the pack page's §3 row.
 
 ## Overview
 
@@ -29,7 +41,7 @@ within a phase, mechanisms fire in scenario/insertion order. The dashed green
 arrows show **shared-state hand-offs** within a single step — e.g. `turnover`
 populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 
-## The nineteen mechanisms
+## The twenty-eight mechanisms
 
 | Mechanism | Phase | Source | Kind | Summary |
 |---|---|---|---|---|
@@ -42,7 +54,16 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`socialization`](mechanisms/socialization.md) | PostStep | onboarding model | calibration | Onboards new hires, raising embeddedness. |
 | [`knowledge_loss`](mechanisms/knowledge-loss.md) | PostStep | Nonaka (1994) | mixed | Departing veterans drain tacit team knowledge. |
 | [`toxic_spread`](mechanisms/toxic-spread.md) | Interaction | Housman & Minor (2015) | empirical | Toxic behaviour spreads along network edges. |
-| [`org_performance`](mechanisms/org-performance.md) | Reward | aggregation | — | Aggregates productivity and records the step metrics. |
+| [`org_performance`](mechanisms/org-performance.md) | Reward | aggregation | — | Aggregates productivity and records the step metrics. Also registered by `organizational-silence` with a different body (silence metrics + `motive_mix` event). |
+| [`issue_salience`](mechanisms/issue-salience.md) | Environment | scenario-driven | scenario-driven | Updates $\sigma(t)$; supports a mid-run step-function shock for triggering events. |
+| [`retaliation_event`](mechanisms/retaliation-event.md) | Environment | Kish-Gephart et al. (2009) | stochastic | Low-probability per-step shock: picks a recent voicer and marks them + their neighbours as retaliated against. |
+| [`fear_appraisal`](mechanisms/fear-appraisal.md) | Decision | Kish-Gephart et al. (2009) | empirical | Updates fear from this step's retaliation buffer, decay, and supervisor openness. |
+| [`voice_decision_rule`](mechanisms/voice-decision-rule.md) | Decision | Van Dyne (2003) + Edmondson (1999) + Detert & Edmondson (2011) | mixed | Logistic Voice/Silence draw; on Silence assigns Acquiescent / Defensive / Prosocial motive. The LLM variant `voice_decision` shares the page. |
+| [`silence_spiral`](mechanisms/silence-spiral.md) | Interaction | Noelle-Neumann (1974) | empirical | Snapshots $\rho_i$ and erodes $\psi$ by $\epsilon \cdot \rho \cdot 0.05$; carries spiral across steps. |
+| [`prefalse_cascade`](mechanisms/prefalse-cascade.md) | Interaction | Kuran (1995) / Granovetter (1978) | mixed | Iterative voice-flip cascade on silent dissenters; records a `cascade` event past `cascade_threshold`. |
+| [`psafety_update`](mechanisms/psafety-update.md) | PostStep | Edmondson (1999) | empirical | Per-step $\psi$ update from voice and retaliation events. |
+| [`climate_silence`](mechanisms/climate-silence.md) | PostStep | Morrison & Milliken (2000) | aggregation | Recomputes $C(t)$ at end of step so the published value reflects PostStep changes. |
+| [`org_learning`](mechanisms/org-learning.md) | PostStep | Argyris (1977) | calibration | Double-loop knowledge bump when voicing under salience; otherwise tacit-knowledge decay. |
 | [`policy`](mechanisms/policy-mechanism.md) | Decision | MARL (§14.1) | learnable | A learned RL policy as a drop-in Decision mechanism (library-only). |
 | [`hegselmann_krause`](mechanisms/hegselmann-krause.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | Synchronous bounded-confidence update toward the chosen mean of opinions within ε (library-only). |
 | [`deffuant`](mechanisms/deffuant.md) | Interaction | Deffuant et al. (2000) | bounded-confidence | Pairwise bounded-confidence update: two agents within ε converge by a rate μ (library-only). |
@@ -56,8 +77,13 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 The last eight rows are the members of the general (non-HR)
 [`socsim-mechanisms`](architecture.md#crate-workspace) crate — reusable,
 domain-agnostic social-dynamics building blocks (opinion dynamics, network contagion,
-and cultural dissemination) distinct from the HR-lifecycle crate. All are
-**library-only** (no `ModulePack` / scenario-TOML registration).
+and cultural dissemination) distinct from the HR-lifecycle and
+organisational-silence crates. All are **library-only** (no `ModulePack` /
+scenario-TOML registration). The nine organisational-silence rows in the
+middle of the table all ship from the
+[`organizational-silence`](packs/organizational-silence.md) pack
+(plus the optional LLM `voice_decision` variant under the
+`pack-organizational-silence-llm` feature).
 
 **Kind** distinguishes *empirical* influence strengths (fixed correlations ρ
 from meta-analyses; do not tune) from *tunable* calibration scales that govern

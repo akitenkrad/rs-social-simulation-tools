@@ -44,6 +44,57 @@ t               clusters         max_delta              mean            spread  
 
 `clusters`/`variance`/`spread`/`mean` の系列は，エージェントが局所的なコンセンサスに達するにつれ，意見が時間とともにより少ないクラスタへ収束していく様子を示します．`epsilon`（信頼半径）パラメータを大きくすると，集団は完全な合意（単一クラスタ）へ向かいます．
 
+### 組織的沈黙ベースラインの実行
+
+3番目の同梱パックは，較正済みロジスティックの voice 決定，Granovetter/Kuran の閾値カスケード，Noelle-Neumann のスパイラル，および月24の実行途中の顕在性ショックを伴う，階層型 Watts–Strogatz 組織上の沈黙の風土の創発をモデル化します．ワールドモデルは[organizational-silence パック](packs/organizational-silence.ja.md)を，エージェントごとの決定ルールは[`voice_decision_rule`](mechanisms/voice-decision-rule.ja.md)ページを参照してください．
+
+`pack-organizational-silence` フィーチャ（デフォルト）で CLI をビルドし，同梱シナリオを1シードで実行します．
+
+```sh
+cargo build --release -p socsim-cli --features pack-organizational-silence
+./target/release/socsim run scenarios/org_silence_baseline.toml --seeds 0..1
+```
+
+```
+Running 'org_silence_baseline' (pack=organizational-silence, t_max=60, seeds=[0], parallel=false)
+
+Seed 0 — 122 events recorded
+
+t       climate_of_silence   knowledge_stock       n_employees  opinion_clusters   org_performance      silence_rate      voice_volume
+10                0.1000           36.5407           40.0000            7.0000           32.8866            0.5500            0.4500
+20                0.0250           33.0467           40.0000            7.0000           32.2206            0.5250            0.4750
+30                0.0250           39.7446           40.0000            7.0000           38.7510            0.2500            0.7500
+40                0.0250           54.8446           40.0000            7.0000           53.4735            0.2250            0.7750
+50                0.0500           69.0446           40.0000            7.0000           65.5923            0.3500            0.6500
+60                0.0000           83.1946           40.0000            7.0000           83.1946            0.3000            0.7000
+```
+
+`silence_rate` は $t = 24$ の顕在性ショック前は 0.55 付近にあり，ショック後の領域では概ね 0.22〜0.35 に下がります — 上昇した $\sigma$ が境界エージェントを Voice 側へ傾け，カスケードがその傾きを増幅するからです．`org_performance` メトリクスは，ショック後の顕在性のもとで `org_learning` の on 分岐が発火し続けると `knowledge_stock` とともに上昇します．`org_performance`，`prefalse_cascade`，`retaliation_event` が捕捉した記録イベントは，メトリクスと並んで JSONL 実行ログに送出されます．簡単な確認（`head` を `grep -c` に置き換えれば種類別のカウント）：
+
+```sh
+grep '"type":"event"' runs/org_silence_baseline_0.jsonl | head -4
+```
+
+```
+{"kind":"cascade","payload":{"fraction":0.175,"size":7},"t":1,"type":"event"}
+{"kind":"motive_mix","payload":{"acquiescent":9,"defensive":5,"no_motive":0,"prosocial":0},"t":1,"type":"event"}
+{"kind":"cascade","payload":{"fraction":0.175,"size":7},"t":2,"type":"event"}
+{"kind":"motive_mix","payload":{"acquiescent":12,"defensive":5,"no_motive":0,"prosocial":1},"t":2,"type":"event"}
+```
+
+`motive_mix` は毎ステップ `org_performance` から，現在 silent なエージェントの内訳とともに発火します．`cascade` は `prefalse_cascade` から，ティック内の反転質量が `cascade_threshold`（デフォルト 5 %）を超えると発火します．`retaliation` は `retaliation_event` からベルヌーイ率 `p_retaliate = 0.05` で発火します（60ステップのシード 0 実行では約 2〜4 回）．
+
+#### LLM 駆動の決定層を試す
+
+同じワールドとメカニズムスタックで，ロジスティックの `voice_decision_rule` を LLM 駆動の `voice_decision` に差し替えられます．LLM フィーチャでビルドし，同梱の LLM シナリオを実行します．
+
+```sh
+cargo build --release -p socsim-cli --features pack-organizational-silence-llm
+./target/release/socsim run scenarios/org_silence_llm.toml
+```
+
+LLM シナリオは `temperature = 0`，`seed = 42`，JSON ファイルバックのプロンプトキャッシュ（`runs/silence_cache.json`）を使用するため，ウォームキャッシュは実行を決定論的なオラクルに変えます．ライブ実行には到達可能なローカル Ollama または `OPENAI_API_KEY` 環境変数のいずれかが必要です — バックエンド組み立ての詳細は [organizational-silence パックページ §3.1](packs/organizational-silence.ja.md#31-llm-変種-voice_decision) を，呼び出しごとのプロンプト仕様は [`voice_decision_rule` ページ §2.1](mechanisms/voice-decision-rule.ja.md#21-llm-変種voice_decision) を参照してください．パラダイム横断比較（ルール vs LLM）は，同一シードでの2シナリオの差分に帰着します．
+
 ---
 
 ## 2. マルチシードによる再現性チェック
