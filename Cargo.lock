@@ -4478,6 +4478,7 @@ dependencies = [
  "socsim-config",
  "socsim-core",
  "socsim-engine",
+ "socsim-llm",
  "socsim-log",
  "socsim-marl",
  "socsim-mechanisms",

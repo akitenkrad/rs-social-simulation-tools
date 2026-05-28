@@ -17,13 +17,23 @@ socsim-config     = { path = "../socsim-config" }
 socsim-mechanisms = { path = "../socsim-mechanisms", default-features = false, features = ["opinion-dynamics"] }
 socsim-metrics    = { path = "../socsim-metrics" }
 socsim-marl       = { path = "../socsim-marl", optional = true }
+# Optional LLM helper layer, pulled in only when the
+# `organizational-silence-llm` feature is enabled (gates the
+# `voice_decision` LLM mechanism in the organizational-silence pack).
+socsim-llm        = { path = "../socsim-llm", optional = true, features = ["live"] }
 
 [features]
-default = ["hr-lifecycle", "opinion-dynamics"]
+default = ["hr-lifecycle", "opinion-dynamics", "organizational-silence"]
 # The 9-stage employee-lifecycle reference module.
 hr-lifecycle = []
 # The bounded-confidence opinion-dynamics world.
 opinion-dynamics = []
+# The organizational-silence ABM (Morrison & Milliken 2000 + Van Dyne 2003 +
+# Noelle-Neumann 1974 + Kuran 1995).  Rule-based version, deterministic.
+organizational-silence = []
+# Optional LLM voice-decision layer for organizational-silence (Decision phase
+# replaced by a structured-prompt LLM call; rule version stays available).
+organizational-silence-llm = ["organizational-silence", "dep:socsim-llm"]
 # Phase 6: learnable turnover policy (pulls in burn via socsim-marl).
 marl = ["dep:socsim-marl"]
 
