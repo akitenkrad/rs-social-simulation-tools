@@ -189,6 +189,22 @@ Swap the operator to explore the 2005 generalisation, e.g.
 `HegselmannKrauseMechanism::new(0.2, MeanOperator::Power(2.0))`. To stop on
 convergence, also add a `ConvergenceMechanism::new(1e-9)`.
 
+For paper-style "ε-profile" runs (HK 2002 §3 Property IV / Fig. 4–8, plus the
+asymmetric Fig. 10–13 sweeps), the equispaced initial distribution
+`x_i = i/(n − 1)` is canonical. The crate exposes it as a free helper
+`regular_profile(n) -> Vec<f64>` so each replication does not have to re-derive
+it:
+
+```rust
+use socsim_mechanisms::regular_profile;
+
+let opinions = regular_profile(625);    // [0.0, 1/624, …, 1.0]; [0.5] for n=1; [] for n=0
+let world = OpinionWorld { clock: SimClock::default(), opinions };
+```
+
+Random initial distributions remain scenario-specific (open-interval clamps for
+the H/G means, polarised mixtures, etc.) and are left to the driver.
+
 ## 9. Determinism & RNG
 
 **Deterministic** for the arithmetic, geometric, harmonic, and power means
