@@ -10,6 +10,12 @@
 
 `socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, spatial-grid primitives, world-state snapshots for save/resume, optional learnable (MARL) policies, an optional LLM-agent layer (Ollama/OpenAI with prompt caching), result-output helpers, a reusable observation-metrics library, and a CLI for running, sweeping, and summarising scenarios — all in a fifteen-crate workspace. The CLI is **world-polymorphic**: a scenario selects a *module pack* by name, and three packs ship today — a reference **HR lifecycle** module (ten mechanisms calibrated against published empirical findings), an **opinion-dynamics** pack that runs bounded-confidence consensus models on a social network, and an **`organizational-silence`** pack that models the emergence of a climate of silence on a hierarchical network with LLM- or rule-based voice decisions. Reusable, domain-agnostic mechanisms live in the general **`socsim-mechanisms`** catalog — eight mechanisms across four feature families: opinion dynamics, network contagion, cultural dissemination, and group dynamics.
 
+## Architecture overview
+
+<p align="center"><img src="docs/assets/design-overview.svg" width="100%" alt="socsim at a glance — mechanisms compose like neural-net layers over a deterministic six-phase tick loop on a shared world; a Scheduler and seeded SimRng feed in; a Recorder emits metrics and events."></p>
+
+A `Simulation` engine drives ordered, phase-tagged `Mechanism` layers that read and write a shared `WorldState`; a `Scheduler` and a seeded `SimRng` feed in; a `Recorder` emits metrics and events. The six-phase ribbon (`PreStep → Environment → Decision → Interaction → Reward → PostStep`) is the fixed order in which mechanisms act each step. For the crate-graph implementation view see the [architecture page](docs/architecture.md); for the design rationale behind the abstractions see the [design page](docs/design.md).
+
 ## Installation
 
 Build from source (Rust toolchain required):
