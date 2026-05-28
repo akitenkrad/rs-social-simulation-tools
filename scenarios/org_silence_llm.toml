@@ -1,0 +1,95 @@
+# Organizational Silence LLM Scenario
+# Uses the LLM-driven `voice_decision` mechanism for the Decision phase.
+# Requires building with `--features pack-organizational-silence-llm` and a
+# reachable Ollama / OpenAI backend (cache hits will be served without network).
+
+[simulation]
+name        = "org_silence_llm"
+module_pack = "organizational-silence"
+t_max       = 60
+seed        = 42
+scheduler   = "random_activation"
+
+[world]
+n_teams                = 5
+team_size_initial      = 8
+n_levels               = 3
+network_model          = "watts_strogatz"
+network_k              = 6
+network_beta           = 0.1
+supervisor_homogeneity = 0.5
+
+[llm]
+decision_mode = "llm"
+temperature   = 0.0
+seed          = 42
+cache_path    = "runs/silence_cache.json"
+
+[[mechanism]]
+name  = "issue_salience"
+phase = "environment"
+[mechanism.params]
+sigma_base  = 0.3
+shock_t     = 24
+shock_delta = 0.4
+
+[[mechanism]]
+name  = "retaliation_event"
+phase = "environment"
+[mechanism.params]
+p_retaliate = 0.05
+
+[[mechanism]]
+name  = "fear_appraisal"
+phase = "decision"
+[mechanism.params]
+fear_sensitivity = 0.4
+
+# LLM-driven voice decision.  Uses the same `[llm]` block above for cache
+# config; mechanism-level params here override seed / cache_path if needed.
+[[mechanism]]
+name  = "voice_decision"
+phase = "decision"
+[mechanism.params]
+cache_path = "runs/silence_cache.json"
+seed       = 42
+
+[[mechanism]]
+name  = "silence_spiral"
+phase = "interaction"
+[mechanism.params]
+epsilon = 0.25
+
+[[mechanism]]
+name  = "prefalse_cascade"
+phase = "interaction"
+[mechanism.params]
+cascade_threshold = 0.05
+
+[[mechanism]]
+name  = "org_performance"
+phase = "reward"
+[mechanism.params]
+cluster_tol = 0.05
+
+[[mechanism]]
+name  = "psafety_update"
+phase = "post_step"
+[mechanism.params]
+psafety_learn = 0.1
+
+[[mechanism]]
+name  = "climate_silence"
+phase = "post_step"
+
+[[mechanism]]
+name  = "org_learning"
+phase = "post_step"
+[mechanism.params]
+learning_rate  = 0.05
+decay_rate     = 0.01
+salience_floor = 0.3
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"
+metrics  = ["silence_rate", "climate_of_silence", "voice_volume", "knowledge_stock", "org_performance", "opinion_clusters"]

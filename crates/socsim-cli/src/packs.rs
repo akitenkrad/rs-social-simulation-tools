@@ -57,6 +57,7 @@ pub trait CliPack: Send + Sync {
 // ── Registry / dispatch ─────────────────────────────────────────────────────────
 
 /// Return every pack compiled into this build (gated by Cargo features).
+#[allow(clippy::vec_init_then_push)]
 pub fn packs() -> Vec<Box<dyn CliPack>> {
     #[allow(unused_mut)]
     let mut v: Vec<Box<dyn CliPack>> = Vec::new();
@@ -64,6 +65,8 @@ pub fn packs() -> Vec<Box<dyn CliPack>> {
     v.push(Box::new(HrLifecycleCliPack));
     #[cfg(feature = "pack-opinion-dynamics")]
     v.push(Box::new(OpinionDynamicsCliPack));
+    #[cfg(feature = "pack-organizational-silence")]
+    v.push(Box::new(OrganizationalSilenceCliPack));
     v
 }
 
@@ -270,3 +273,106 @@ mod opinion_dynamics {
 
 #[cfg(feature = "pack-opinion-dynamics")]
 pub use opinion_dynamics::OpinionDynamicsCliPack;
+
+// ── organizational-silence pack ────────────────────────────────────────────────
+
+#[cfg(feature = "pack-organizational-silence")]
+mod organizational_silence {
+    use super::*;
+
+    use socsim_config::{ModulePack, Params, Registry};
+    use socsim_core::SimRng;
+    use socsim_packs::organizational_silence::{OrganizationalSilencePack, SilenceWorld};
+    use socsim_runner::WorldFactory;
+
+    /// CLI-side wrapper exposing the `organizational-silence` pack through
+    /// [`CliPack`].
+    pub struct OrganizationalSilenceCliPack;
+
+    impl OrganizationalSilenceCliPack {
+        /// Build the world factory closure for [`SilenceWorld`].
+        fn world_factory() -> WorldFactory<SilenceWorld> {
+            Box::new(|params: &Params, seed: u64| {
+                let n_teams = params.get_u64("n_teams", 5) as usize;
+                let team_size = params.get_u64("team_size_initial", 8) as usize;
+                let n_levels = params.get_u64("n_levels", 3) as u8;
+                let ws_k = params.get_u64("network_k", 6) as usize;
+                let ws_beta = params.get_f64("network_beta", 0.1);
+                let supervisor_homogeneity = params.get_f64("supervisor_homogeneity", 0.5);
+                let mut rng = SimRng::from_seed(seed);
+                let world = SilenceWorld::new(
+                    n_teams,
+                    team_size,
+                    n_levels,
+                    ws_k,
+                    ws_beta,
+                    supervisor_homogeneity,
+                    &mut rng,
+                );
+                Ok(world)
+            })
+        }
+
+        /// Register all `organizational-silence` mechanisms into a registry.
+        fn register(reg: &mut Registry<SilenceWorld>) {
+            OrganizationalSilencePack.register(reg);
+        }
+    }
+
+    impl CliPack for OrganizationalSilenceCliPack {
+        fn name(&self) -> &'static str {
+            "organizational-silence"
+        }
+
+        fn starter_toml(&self) -> &'static str {
+            socsim_packs::organizational_silence::ORGANIZATIONAL_SILENCE_STARTER
+        }
+
+        fn mechanism_names(&self) -> Vec<String> {
+            let mut reg: Registry<SilenceWorld> = Registry::new();
+            Self::register(&mut reg);
+            let mut names: Vec<String> = reg.names().into_iter().map(|s| s.to_owned()).collect();
+            names.sort();
+            names
+        }
+
+        fn run_seeds(
+            &self,
+            scenario: &Scenario,
+            seeds: &[u64],
+            parallel: bool,
+        ) -> Result<Vec<RunResult>> {
+            let factory = Self::world_factory();
+            let results = socsim_runner::run_seeds::<SilenceWorld>(
+                scenario,
+                &factory,
+                &Self::register,
+                seeds.iter().copied(),
+                parallel,
+            )?;
+            Ok(results)
+        }
+
+        fn run_sweep(
+            &self,
+            scenario: &Scenario,
+            axes: &[SweepAxis],
+            seeds: &[u64],
+            parallel: bool,
+        ) -> Result<Vec<SweepPoint>> {
+            let factory = Self::world_factory();
+            let points = socsim_runner::run_sweep::<SilenceWorld>(
+                scenario,
+                axes,
+                &factory,
+                &Self::register,
+                seeds.to_vec(),
+                parallel,
+            )?;
+            Ok(points)
+        }
+    }
+}
+
+#[cfg(feature = "pack-organizational-silence")]
+pub use organizational_silence::OrganizationalSilenceCliPack;

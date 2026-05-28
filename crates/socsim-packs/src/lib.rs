@@ -19,3 +19,5 @@
 pub mod hr_lifecycle;
 #[cfg(feature = "opinion-dynamics")]
 pub mod opinion;
+#[cfg(feature = "organizational-silence")]
+pub mod organizational_silence;

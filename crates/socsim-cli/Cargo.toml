@@ -23,6 +23,8 @@ anyhow.workspace    = true
 toml.workspace      = true
 
 [features]
-default = ["pack-hr-lifecycle", "pack-opinion-dynamics"]
-pack-hr-lifecycle     = ["dep:socsim-packs", "socsim-packs/hr-lifecycle"]
-pack-opinion-dynamics = ["dep:socsim-packs", "socsim-packs/opinion-dynamics"]
+default = ["pack-hr-lifecycle", "pack-opinion-dynamics", "pack-organizational-silence"]
+pack-hr-lifecycle              = ["dep:socsim-packs", "socsim-packs/hr-lifecycle"]
+pack-opinion-dynamics          = ["dep:socsim-packs", "socsim-packs/opinion-dynamics"]
+pack-organizational-silence    = ["dep:socsim-packs", "socsim-packs/organizational-silence"]
+pack-organizational-silence-llm = ["pack-organizational-silence", "socsim-packs/organizational-silence-llm"]

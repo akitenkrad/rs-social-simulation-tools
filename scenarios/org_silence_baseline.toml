@@ -1,0 +1,96 @@
+# Organizational Silence Baseline Scenario (rule-based)
+# 5 teams × 8 employees on a Watts–Strogatz network, 60 monthly steps, seed 42.
+# Uses the rule-based `voice_decision_rule` mechanism so the run is fully
+# deterministic and needs no LLM backend.
+#
+# To switch to the LLM variant: rename the `voice_decision_rule` mechanism to
+# `voice_decision` and rebuild the CLI with:
+#   cargo build -p socsim-cli --features pack-organizational-silence-llm
+
+[simulation]
+name        = "org_silence_baseline"
+module_pack = "organizational-silence"
+t_max       = 60
+seed        = 42
+scheduler   = "random_activation"
+
+[world]
+n_teams                = 5
+team_size_initial      = 8
+n_levels               = 3
+network_model          = "watts_strogatz"
+network_k              = 6
+network_beta           = 0.1
+supervisor_homogeneity = 0.5
+
+[[mechanism]]
+name  = "issue_salience"
+phase = "environment"
+[mechanism.params]
+sigma_base  = 0.3
+shock_t     = 24
+shock_delta = 0.4
+
+[[mechanism]]
+name  = "retaliation_event"
+phase = "environment"
+[mechanism.params]
+p_retaliate = 0.05            # kish-gephart:2009
+
+[[mechanism]]
+name  = "fear_appraisal"
+phase = "decision"
+[mechanism.params]
+fear_sensitivity = 0.4
+
+[[mechanism]]
+name  = "voice_decision_rule"
+phase = "decision"
+[mechanism.params]
+beta_0        = -0.5
+beta_psafety  = 1.2           # edmondson:1999
+beta_fear     = 1.5           # kish-gephart:2009
+beta_ivt      = 0.8           # detert:2011
+beta_sup      = 1.0
+beta_salience = 1.0
+beta_climate  = 1.5           # noelle-neumann:1974
+
+[[mechanism]]
+name  = "silence_spiral"
+phase = "interaction"
+[mechanism.params]
+epsilon = 0.25                # noelle-neumann:1974
+
+[[mechanism]]
+name  = "prefalse_cascade"
+phase = "interaction"
+[mechanism.params]
+cascade_threshold = 0.05      # kuran:1995
+
+[[mechanism]]
+name  = "org_performance"
+phase = "reward"
+[mechanism.params]
+cluster_tol = 0.05
+
+[[mechanism]]
+name  = "psafety_update"
+phase = "post_step"
+[mechanism.params]
+psafety_learn = 0.1           # edmondson:1999
+
+[[mechanism]]
+name  = "climate_silence"
+phase = "post_step"
+
+[[mechanism]]
+name  = "org_learning"
+phase = "post_step"
+[mechanism.params]
+learning_rate  = 0.05
+decay_rate     = 0.01
+salience_floor = 0.3
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"
+metrics  = ["silence_rate", "climate_of_silence", "voice_volume", "knowledge_stock", "org_performance", "opinion_clusters"]
