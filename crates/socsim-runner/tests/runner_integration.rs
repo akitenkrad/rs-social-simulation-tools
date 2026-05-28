@@ -198,6 +198,56 @@ fn run_seeds_parallel_equals_sequential() {
 }
 
 #[test]
+fn run_once_populates_events_with_payloads() {
+    // hr-lifecycle records `hiring` and `turnover` events via Recorder; this
+    // test guards against regressions where events get counted but dropped
+    // from `RunResult` (so the CLI JSONL log loses them).
+    let scenario = Scenario::parse(BASELINE_TOML).unwrap();
+    let factory = make_factory();
+    let result = run_once(&scenario, &factory, &register, 7).unwrap();
+
+    assert!(
+        !result.events.is_empty(),
+        "hr-lifecycle baseline must record at least one event"
+    );
+    assert_eq!(
+        result.events.len(),
+        result.event_count,
+        "event_count must equal events.len() for compatibility"
+    );
+
+    // Payloads must be retained — not just kinds — so downstream JSONL
+    // consumers can analyse them.
+    let hiring = result.events.iter().find(|e| e.kind == "hiring");
+    let turnover = result.events.iter().find(|e| e.kind == "turnover");
+    assert!(hiring.is_some(), "should record at least one `hiring` event");
+    assert!(
+        turnover.is_some(),
+        "should record at least one `turnover` event"
+    );
+    if let Some(ev) = hiring {
+        assert!(
+            ev.payload.get("agent_id").is_some(),
+            "hiring payload should carry agent_id, got {}",
+            ev.payload
+        );
+    }
+    if let Some(ev) = turnover {
+        assert!(
+            ev.payload.get("agent_id").is_some(),
+            "turnover payload should carry agent_id"
+        );
+    }
+
+    // Events must round-trip through serde so `RunResult` can be JSON-logged.
+    let json = serde_json::to_string(&result).expect("RunResult serialises");
+    let back: socsim_runner::RunResult =
+        serde_json::from_str(&json).expect("RunResult round-trips");
+    assert_eq!(back.events.len(), result.events.len());
+    assert_eq!(back.events[0].kind, result.events[0].kind);
+}
+
+#[test]
 fn summarize_hr_results_sane() {
     let scenario = Scenario::parse(BASELINE_TOML).unwrap();
     let factory = make_factory();

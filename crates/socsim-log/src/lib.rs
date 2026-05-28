@@ -10,6 +10,7 @@
 //!   grouped by table and renders each as column-aligned CSV; the natural sink
 //!   for `metrics.csv`-style tabular output consumed by pandas/Excel.
 
+use serde::{Deserialize, Serialize};
 use socsim_core::Recorder;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -17,7 +18,7 @@ use std::io::{self, Write};
 // ── Shared row types ─────────────────────────────────────────────────────────
 
 /// A recorded scalar metric row.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricRow {
     /// Simulation time step.
     pub t: u64,
@@ -28,7 +29,7 @@ pub struct MetricRow {
 }
 
 /// A recorded event row.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventRow {
     /// Simulation time step.
     pub t: u64,
