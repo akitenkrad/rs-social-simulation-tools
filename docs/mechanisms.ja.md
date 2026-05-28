@@ -8,13 +8,21 @@
 メカニズムはニューラルネットワーク層のように合成され，各メカニズムが `WorldState` を読み書きし，
 エンジンがそれらを毎ステップ固定順序で実行します．
 
-このカタログでは，socsim に同梱されている**19個**のメカニズムを解説します．内訳は，
+このカタログでは，socsim に同梱されている**28個**のメカニズムを解説します．内訳は，
 公表された経験的知見に対してキャリブレーション済みの参照用[HR ライフサイクル](usecases.ja.md)メカニズム10個，
+[組織的沈黙](packs/organizational-silence.ja.md)メカニズム9個（沈黙動機＋スパイラル＋階層型ネットワーク上の閾値カスケード），
 学習可能な MARL `policy` メカニズム1個，および8個の社会ダイナミクスメカニズム
 （`hegselmann_krause`，`deffuant`，`social_judgement`，`lorenz`，`si_contagion`，`threshold_contagion`，`axelrod`，`group_conformity`）
 — 汎用の非 HR `socsim-mechanisms` クレート — です．
 
 メカニズムは[モジュールパック](packs.ja.md)によって実行可能なモデルへと構成されます．パックは World のデータモデル，既定のメカニズム集合，スターターシナリオをまとめて提供します．
+名前 `org_performance` は [`hr-lifecycle`](packs/hr-lifecycle.ja.md) と
+[`organizational-silence`](packs/organizational-silence.ja.md) の**双方**から登録され，パック固有のボディを持ちます．
+hr-lifecycle 変種は生産性，在職期間，知識ストック，離職率を集約します．
+organizational-silence 変種は silence rate，climate of silence，voice volume，knowledge stock，opinion clusters，
+headcount を集約し，`motive_mix` イベントを発火します．
+両者は [`org_performance`](mechanisms/org-performance.ja.md) リファレンスページを共有し，
+そちらは hr-lifecycle のボディを文書化します．silence 変種はパックページの §3 行に記載されています．
 
 ## 概要
 
@@ -25,7 +33,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 同一フェーズ内ではシナリオでの宣言順（＝挿入順）に発火します．破線の緑矢印は，1ステップ内での**共有状態の受け渡し**を示します．
 たとえば `turnover` が `departed_this_step` を設定し，PostStep で `knowledge_loss` がそれを読み取ります．
 
-## 19個のメカニズム
+## 28個のメカニズム
 
 | メカニズム | フェーズ | 出典 | 種別 | 概要 |
 |---|---|---|---|---|
@@ -38,7 +46,16 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`socialization`](mechanisms/socialization.ja.md) | PostStep | onboarding model | calibration | 新入社員をオンボードし，組織定着度を高める． |
 | [`knowledge_loss`](mechanisms/knowledge-loss.ja.md) | PostStep | Nonaka (1994) | mixed | ベテランの離職がチームの暗黙知を流出させる． |
 | [`toxic_spread`](mechanisms/toxic-spread.ja.md) | Interaction | Housman & Minor (2015) | empirical | 有害行動がネットワークエッジに沿って伝播する． |
-| [`org_performance`](mechanisms/org-performance.ja.md) | Reward | aggregation | — | 生産性を集計し，ステップメトリクスを記録する． |
+| [`org_performance`](mechanisms/org-performance.ja.md) | Reward | aggregation | — | 生産性を集計し，ステップメトリクスを記録する．`organizational-silence` からも別ボディ（silence メトリクス＋`motive_mix` イベント）で登録される． |
+| [`issue_salience`](mechanisms/issue-salience.ja.md) | Environment | scenario-driven | scenario-driven | $\sigma(t)$ を更新．トリガーイベント用に実行途中のステップ関数ショックをサポート． |
+| [`retaliation_event`](mechanisms/retaliation-event.ja.md) | Environment | Kish-Gephart et al. (2009) | stochastic | ステップごと低確率のショック．最近の voicer を選び本人＋隣接者を「報復された」と印付ける． |
+| [`fear_appraisal`](mechanisms/fear-appraisal.ja.md) | Decision | Kish-Gephart et al. (2009) | empirical | このステップの報復バッファ，減衰，上司開放性から fear を更新． |
+| [`voice_decision_rule`](mechanisms/voice-decision-rule.ja.md) | Decision | Van Dyne (2003) + Edmondson (1999) + Detert & Edmondson (2011) | mixed | ロジスティックの Voice／Silence 抽出．Silence の場合に Acquiescent／Defensive／Prosocial 動機を割り当てる．LLM 変種 `voice_decision` はページを共有． |
+| [`silence_spiral`](mechanisms/silence-spiral.ja.md) | Interaction | Noelle-Neumann (1974) | empirical | $\rho_i$ をスナップショットし $\psi$ を $\epsilon \cdot \rho \cdot 0.05$ だけ侵食．スパイラルをステップ間で運搬． |
+| [`prefalse_cascade`](mechanisms/prefalse-cascade.ja.md) | Interaction | Kuran (1995) / Granovetter (1978) | mixed | silent dissenter に対する反復的 voice 反転カスケード．`cascade_threshold` を超えると `cascade` イベントを記録． |
+| [`psafety_update`](mechanisms/psafety-update.ja.md) | PostStep | Edmondson (1999) | empirical | voice と報復イベントによるステップごとの $\psi$ 更新． |
+| [`climate_silence`](mechanisms/climate-silence.ja.md) | PostStep | Morrison & Milliken (2000) | aggregation | ステップ終了時に $C(t)$ を再計算し，PostStep の変化を反映した公開値とする． |
+| [`org_learning`](mechanisms/org-learning.ja.md) | PostStep | Argyris (1977) | calibration | 顕在条件下で voicing するときのダブルループ知識バンプ．それ以外では暗黙知の減衰． |
 | [`policy`](mechanisms/policy-mechanism.ja.md) | Decision | MARL (§14.1) | learnable | 学習済み RL ポリシーをドロップイン型 Decision メカニズムとして利用する（ライブラリ専用）． |
 | [`hegselmann_krause`](mechanisms/hegselmann-krause.ja.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | ε 以内の意見の選択された平均へ向かう同期的な有界信頼更新（ライブラリ専用）． |
 | [`deffuant`](mechanisms/deffuant.ja.md) | Interaction | Deffuant et al. (2000) | bounded-confidence | ペアの有界信頼更新：ε 以内の2エージェントが率 μ で収束する（ライブラリ専用）． |
@@ -50,9 +67,11 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`group_conformity`](mechanisms/group-conformity.ja.md) | Interaction | DeGroot (1974) | within-group averaging | 各エージェントが自グループの平均意見へ向けて割合 α だけ移動し，グループは独立に収束する（ライブラリ専用）． |
 
 最後の8行は，汎用の（非 HR）[`socsim-mechanisms`](architecture.ja.md#クレートワークスペース)クレートの
-メンバーであり，HR ライフサイクルクレートとは区別される再利用可能でドメイン非依存な社会ダイナミクスの構成要素
+メンバーであり，HR ライフサイクルクレートおよび組織的沈黙クレートとは区別される再利用可能でドメイン非依存な社会ダイナミクスの構成要素
 （意見ダイナミクス，ネットワーク伝播，文化伝播）です．
 すべて**ライブラリ専用**（`ModulePack` ／シナリオ TOML 登録なし）です．
+中央 9 行の組織的沈黙メカニズムはいずれも [`organizational-silence`](packs/organizational-silence.ja.md) パックから提供されます
+（`pack-organizational-silence-llm` フィーチャ下では LLM 版 `voice_decision` も追加）．
 
 **Kind** は2種類を区別します．*empirical* はメタ分析から得られた固定相関 ρ で，チューニングできません．
 一方の *tunable* は月次ダイナミクスのペースを制御するキャリブレーションスケールです．

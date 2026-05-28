@@ -53,16 +53,25 @@
 
 | メカニズム | フェーズ | 種別 | 役割 |
 |---|---|---|---|
-| `issue_salience` | Environment | scenario-driven | σ(t) を更新．実行途中のトリガーイベント用のステップ関数ショック（`shock_t`，`shock_delta`）に対応． |
-| `retaliation_event` | Environment | stochastic | 毎ステップ確率 `p_retaliate` で，最近の voicer（フォールバックは任意のエージェント）を1名選び，本人と隣接者を「報復された」と印付け，`retaliation` イベントを記録（Kish-Gephart 2009）． |
-| `fear_appraisal` | Decision | empirical | このステップの報復集合と上司開放性から各従業員の fear を更新．穏やかな風土ではステップごとの小さな減衰によりベースラインへ回帰（Kish-Gephart 2009）． |
-| `voice_decision_rule` | Decision | mixed | ルールベースのロジスティック voice／silence 決定．silence の場合は支配的な抑制要因に応じて動機 ∈ {`acquiescent`, `defensive`, `prosocial`} を割り当て（Van Dyne 2003）． |
-| `silence_spiral` | Interaction | empirical | 各従業員の隣接沈黙比 ρ_i をスナップショットし，`epsilon · ρ · 0.05` だけ psych_safety を下方に押す．ρ_i のスナップショットは次ステップへのスパイラル効果の運搬役（Noelle-Neumann 1974）． |
-| `prefalse_cascade` | Interaction | mixed | 反復的な voice 反転カスケード．`private_concern < 0` の silent エージェントは，隣接 voice 比が個別の `voice_threshold` を超えると Voice に反転し，不動点まで繰り返す．反転総数が母集団の `cascade_threshold`（デフォルト 5%）を超えると `cascade` イベントを記録（Kuran 1995 / Granovetter 1978）． |
-| `org_performance` | Reward | aggregation | マクロ集約を再計算し，`silence_rate`，`climate_of_silence`，`voice_volume`，`knowledge_stock`，`org_performance`，`opinion_clusters`，`n_employees` を記録．現在 silent なエージェントの (acquiescent, defensive, prosocial) 内訳を `motive_mix` イベントとして発火． |
-| `psafety_update` | PostStep | empirical | voice したエージェントには `psafety_learn` 分 ψ を上げ，報復されたエージェントには `psafety_learn` 分 ψ を下げる（Edmondson 1999）． |
-| `climate_silence` | PostStep | aggregation | C(t) を再計算し，カスケードや他の Reward／PostStep 変更を反映したステップ終了時点の世界に対応する値を公開． |
-| `org_learning` | PostStep | optional intervention | Argyris (1977) ダブルループ学習．少なくとも1名が voice し*かつ* σ(t) > `salience_floor` の場合，各 voicer のチームに `learning_rate` 分の `knowledge_stock` 増加．それ以外では全 stock が `decay_rate`（≈ 1%/step）で減衰し，沈黙の風土で更新されない暗黙知を表現． |
+| [`issue_salience`](../mechanisms/issue-salience.ja.md) | Environment | scenario-driven | σ(t) を更新．実行途中のトリガーイベント用のステップ関数ショック（`shock_t`，`shock_delta`）に対応． |
+| [`retaliation_event`](../mechanisms/retaliation-event.ja.md) | Environment | stochastic | 毎ステップ確率 `p_retaliate` で，最近の voicer（フォールバックは任意のエージェント）を1名選び，本人と隣接者を「報復された」と印付け，`retaliation` イベントを記録（Kish-Gephart 2009）． |
+| [`fear_appraisal`](../mechanisms/fear-appraisal.ja.md) | Decision | empirical | このステップの報復集合と上司開放性から各従業員の fear を更新．穏やかな風土ではステップごとの小さな減衰によりベースラインへ回帰（Kish-Gephart 2009）． |
+| [`voice_decision_rule`](../mechanisms/voice-decision-rule.ja.md) | Decision | mixed | ルールベースのロジスティック voice／silence 決定．silence の場合は支配的な抑制要因に応じて動機 ∈ {`acquiescent`, `defensive`, `prosocial`} を割り当て（Van Dyne 2003）．LLM 変種 `voice_decision` はページを共有（§2.1）． |
+| [`silence_spiral`](../mechanisms/silence-spiral.ja.md) | Interaction | empirical | 各従業員の隣接沈黙比 ρ_i をスナップショットし，`epsilon · ρ · 0.05` だけ psych_safety を下方に押す．ρ_i のスナップショットは次ステップへのスパイラル効果の運搬役（Noelle-Neumann 1974）． |
+| [`prefalse_cascade`](../mechanisms/prefalse-cascade.ja.md) | Interaction | mixed | 反復的な voice 反転カスケード．`private_concern < 0` の silent エージェントは，隣接 voice 比が個別の `voice_threshold` を超えると Voice に反転し，不動点まで繰り返す．反転総数が母集団の `cascade_threshold`（デフォルト 5%）を超えると `cascade` イベントを記録（Kuran 1995 / Granovetter 1978）． |
+| [`org_performance`](../mechanisms/org-performance.ja.md) | Reward | aggregation | マクロ集約を再計算し，`silence_rate`，`climate_of_silence`，`voice_volume`，`knowledge_stock`，`org_performance`，`opinion_clusters`，`n_employees` を記録．現在 silent なエージェントの (acquiescent, defensive, prosocial) 内訳を `motive_mix` イベントとして発火．（注：リファレンスページは hr-lifecycle のボディを文書化．silence ボディは本行と下記の注で要約．） |
+| [`psafety_update`](../mechanisms/psafety-update.ja.md) | PostStep | empirical | voice したエージェントには `psafety_learn` 分 ψ を上げ，報復されたエージェントには `psafety_learn` 分 ψ を下げる（Edmondson 1999）． |
+| [`climate_silence`](../mechanisms/climate-silence.ja.md) | PostStep | aggregation | C(t) を再計算し，カスケードや他の Reward／PostStep 変更を反映したステップ終了時点の世界に対応する値を公開． |
+| [`org_learning`](../mechanisms/org-learning.ja.md) | PostStep | optional intervention | Argyris (1977) ダブルループ学習．少なくとも1名が voice し*かつ* σ(t) > `salience_floor` の場合，各 voicer のチームに `learning_rate` 分の `knowledge_stock` 増加．それ以外では全 stock が `decay_rate`（≈ 1%/step）で減衰し，沈黙の風土で更新されない暗黙知を表現． |
+
+> **`org_performance` の注意．** リファレンスページ
+> [`mechanisms/org-performance.ja.md`](../mechanisms/org-performance.ja.md) は
+> hr-lifecycle のボディ（生産性合計，在職期間平均，離職率，チーム平均 θ 再計算）を文書化しています．
+> **organizational-silence パック**が同名で登録するボディは別物です：
+> `silence_rate`，`climate_of_silence`，`voice_volume`，`knowledge_stock`，
+> `org_performance`，`opinion_clusters`，`n_employees` を記録し，
+> 毎ステップ `motive_mix` イベントを発火します．2つのボディが共存できるのは，
+> それぞれのパックが自分の World 型に対する `Registry<W>` へ `org_performance` を登録するからです．
 
 完全な方程式・パラメータの既定値・引用は [`crates/socsim-packs/src/organizational_silence/mechanisms.rs`](../../crates/socsim-packs/src/organizational_silence/mechanisms.rs) と [`calibration.rs`](../../crates/socsim-packs/src/organizational_silence/calibration.rs) にあります．
 

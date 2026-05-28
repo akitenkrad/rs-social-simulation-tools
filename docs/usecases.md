@@ -44,6 +44,57 @@ t               clusters         max_delta              mean            spread  
 
 The `clusters`/`variance`/`spread`/`mean` series shows opinions coalescing into progressively fewer clusters over time as agents reach local consensus. Raise the `epsilon` (confidence-radius) parameter to drive the population toward full consensus (a single cluster).
 
+### Running the organisational-silence baseline
+
+The third bundled pack models the emergence of a climate of silence on a hierarchical Watts–Strogatz organisation, with calibrated logistic voice decisions, a Granovetter/Kuran threshold cascade, the Noelle-Neumann spiral, and a mid-run salience shock at month 24. See the [organizational-silence pack](packs/organizational-silence.md) for the world model and the [`voice_decision_rule`](mechanisms/voice-decision-rule.md) page for the per-agent decision rule.
+
+Build the CLI with the `pack-organizational-silence` feature (default), then run the bundled scenario for one seed:
+
+```sh
+cargo build --release -p socsim-cli --features pack-organizational-silence
+./target/release/socsim run scenarios/org_silence_baseline.toml --seeds 0..1
+```
+
+```
+Running 'org_silence_baseline' (pack=organizational-silence, t_max=60, seeds=[0], parallel=false)
+
+Seed 0 — 122 events recorded
+
+t       climate_of_silence   knowledge_stock       n_employees  opinion_clusters   org_performance      silence_rate      voice_volume
+10                0.1000           36.5407           40.0000            7.0000           32.8866            0.5500            0.4500
+20                0.0250           33.0467           40.0000            7.0000           32.2206            0.5250            0.4750
+30                0.0250           39.7446           40.0000            7.0000           38.7510            0.2500            0.7500
+40                0.0250           54.8446           40.0000            7.0000           53.4735            0.2250            0.7750
+50                0.0500           69.0446           40.0000            7.0000           65.5923            0.3500            0.6500
+60                0.0000           83.1946           40.0000            7.0000           83.1946            0.3000            0.7000
+```
+
+`silence_rate` is around 0.55 before the salience shock at $t = 24$ and drops to roughly 0.22–0.35 in the post-shock regime — the lifted $\sigma$ tilts marginal agents toward Voice and the cascade amplifies the shift. The `org_performance` metric rises with `knowledge_stock` once `org_learning`'s on-branch keeps firing under the post-shock salience. The recorded events captured by `org_performance`, `prefalse_cascade`, and `retaliation_event` are emitted into the JSONL run log alongside the metrics. A quick peek (replace `head` with `grep -c` to count by kind):
+
+```sh
+grep '"type":"event"' runs/org_silence_baseline_0.jsonl | head -4
+```
+
+```
+{"kind":"cascade","payload":{"fraction":0.175,"size":7},"t":1,"type":"event"}
+{"kind":"motive_mix","payload":{"acquiescent":9,"defensive":5,"no_motive":0,"prosocial":0},"t":1,"type":"event"}
+{"kind":"cascade","payload":{"fraction":0.175,"size":7},"t":2,"type":"event"}
+{"kind":"motive_mix","payload":{"acquiescent":12,"defensive":5,"no_motive":0,"prosocial":1},"t":2,"type":"event"}
+```
+
+`motive_mix` fires every step from `org_performance` with the breakdown over currently-silent agents; `cascade` fires from `prefalse_cascade` whenever the per-tick flip mass exceeds `cascade_threshold` (default 5 %); `retaliation` fires from `retaliation_event` at a Bernoulli rate of `p_retaliate = 0.05` (about two to four times across the 60-step seed-0 run).
+
+#### Try an LLM-driven decision layer
+
+The same world and mechanism stack can swap the logistic `voice_decision_rule` for the LLM-driven `voice_decision`. Build with the LLM feature, then run the bundled LLM scenario:
+
+```sh
+cargo build --release -p socsim-cli --features pack-organizational-silence-llm
+./target/release/socsim run scenarios/org_silence_llm.toml
+```
+
+The LLM scenario uses `temperature = 0`, `seed = 42`, and a JSON-file-backed prompt cache (`runs/silence_cache.json`), so a warm cache turns the run into a deterministic oracle. A live run requires either a reachable local Ollama or an `OPENAI_API_KEY` environment variable — see the [organisational-silence pack page §3.1](packs/organizational-silence.md#31-llm-variant-voice_decision) for the backend assembly details and the [`voice_decision_rule` page §2.1](mechanisms/voice-decision-rule.md#21-llm-variant-voice_decision) for the per-call prompt schema. Cross-paradigm comparison (rule vs LLM) then reduces to a same-seed, two-scenario diff.
+
 ---
 
 ## 2. Multi-seed reproducibility check
