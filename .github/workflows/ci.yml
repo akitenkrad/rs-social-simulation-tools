@@ -22,12 +22,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Check out the branch (not the detached SHA) so the badge step can
-          # push back on `main`. `ref_name` is the branch for push events and
-          # `<pr>/merge` for pull_request events (both safe to check out; only
-          # the `main` push runs the badge step). We avoid `github.head_ref`,
-          # whose value is attacker-controllable on forked PRs.
-          ref: ${{ github.ref_name }}
+          # On `push` events to `main` we explicitly check out the branch
+          # (not a detached SHA) so the badge step can `git push` back.  On
+          # `pull_request` events we fall through to actions/checkout's
+          # default (the PR's merge ref resolved from `github.ref` =
+          # `refs/pull/<n>/merge`); an empty string disables the explicit
+          # `ref:` and triggers that default.  We deliberately avoid
+          # `github.head_ref` (attacker-controllable on forked PRs) and
+          # `github.ref_name` (which resolves to `<pr>/merge` on
+          # `pull_request` events and is not a fetchable branch ref —
+          # closes issue #49).  The badge step is gated to main pushes, so
+          # PR runs never need write access.
+          ref: ${{ github.event_name == 'push' && github.ref_name || '' }}
 
       - uses: dtolnay/rust-toolchain@stable
 
