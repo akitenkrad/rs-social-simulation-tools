@@ -416,7 +416,7 @@ fn collect_jsonl_files(path: &Path) -> Result<Vec<PathBuf>> {
 fn parse_jsonl_to_run_result(path: &Path, content: &str) -> Result<socsim_runner::RunResult> {
     use std::collections::HashMap;
     let mut series: HashMap<String, Vec<(u64, f64)>> = HashMap::new();
-    let mut event_count = 0usize;
+    let mut events: Vec<socsim_log::EventRow> = Vec::new();
 
     for (lineno, line) in content.lines().enumerate() {
         if line.trim().is_empty() {
@@ -441,7 +441,14 @@ fn parse_jsonl_to_run_result(path: &Path, content: &str) -> Result<socsim_runner
                 series.entry(key).or_default().push((t, value));
             }
             Some("event") => {
-                event_count += 1;
+                let t = v.get("t").and_then(|x| x.as_u64()).unwrap_or(0);
+                let kind = v
+                    .get("kind")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                let payload = v.get("payload").cloned().unwrap_or(serde_json::Value::Null);
+                events.push(socsim_log::EventRow { t, kind, payload });
             }
             _ => {}
         }
@@ -462,10 +469,12 @@ fn parse_jsonl_to_run_result(path: &Path, content: &str) -> Result<socsim_runner
         }
     }
 
+    let event_count = events.len();
     Ok(socsim_runner::RunResult {
         seed,
         series,
         final_metrics,
+        events,
         event_count,
     })
 }
@@ -518,6 +527,19 @@ fn write_jsonl_log(scenario: &Scenario, result: &socsim_runner::RunResult) -> Re
             });
             writeln!(writer, "{}", serde_json::to_string(&obj)?)?;
         }
+    }
+
+    // Write event rows in the schema documented by `socsim_log::JsonlRecorder`.
+    // Events are emitted after metrics so existing consumers that filter on
+    // `type == "metric"` see no behavioural change.
+    for ev in &result.events {
+        let obj = serde_json::json!({
+            "type": "event",
+            "t": ev.t,
+            "kind": ev.kind,
+            "payload": ev.payload,
+        });
+        writeln!(writer, "{}", serde_json::to_string(&obj)?)?;
     }
 
     Ok(())
@@ -581,5 +603,111 @@ fn print_summary_table(summary: &socsim_runner::Summary) {
             "{:<20}  {:>10.4}  {:>10.4}  {:>10.4}  {:>10.4}  {:>5}",
             m.key, m.mean, m.std, m.min, m.max, m.n
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::fs;
+
+    /// Build a minimal scenario with a temp-dir log path.
+    fn scenario_with_log(log_template: &str) -> socsim_config::Scenario {
+        let toml = format!(
+            r#"
+[simulation]
+name        = "events_jsonl_test"
+module_pack = "hr-lifecycle"
+t_max       = 1
+seed        = 0
+scheduler   = "sequential"
+
+[world]
+
+[[mechanism]]
+name  = "org_performance"
+phase = "reward"
+
+[output]
+log_path = "{log_template}"
+"#
+        );
+        socsim_config::Scenario::parse(&toml).expect("test scenario must parse")
+    }
+
+    #[test]
+    fn write_jsonl_log_emits_metric_and_event_rows() {
+        let tmpdir = std::env::temp_dir().join("socsim_jsonl_events_test");
+        let _ = fs::remove_dir_all(&tmpdir);
+        fs::create_dir_all(&tmpdir).unwrap();
+        let log_template = format!("{}/{{name}}_{{seed}}.jsonl", tmpdir.to_str().unwrap());
+
+        let scenario = scenario_with_log(&log_template);
+
+        let mut series: HashMap<String, Vec<(u64, f64)>> = HashMap::new();
+        series.insert("alpha".to_owned(), vec![(0, 1.5), (1, 2.5)]);
+        let mut final_metrics: HashMap<String, f64> = HashMap::new();
+        final_metrics.insert("alpha".to_owned(), 2.5);
+        let events = vec![
+            socsim_log::EventRow {
+                t: 0,
+                kind: "spawn".to_owned(),
+                payload: serde_json::json!({ "agent_id": 7 }),
+            },
+            socsim_log::EventRow {
+                t: 1,
+                kind: "shock".to_owned(),
+                payload: serde_json::json!({ "magnitude": 0.42 }),
+            },
+        ];
+        let event_count = events.len();
+
+        let result = socsim_runner::RunResult {
+            seed: 0,
+            series,
+            final_metrics,
+            events,
+            event_count,
+        };
+
+        write_jsonl_log(&scenario, &result).expect("write_jsonl_log");
+
+        let path = tmpdir.join("events_jsonl_test_0.jsonl");
+        let content = fs::read_to_string(&path).expect("read back log");
+
+        let lines: Vec<&str> = content.lines().collect();
+        let by_type: Vec<serde_json::Value> = lines
+            .iter()
+            .map(|l| serde_json::from_str(l).expect("each line is JSON"))
+            .collect();
+
+        let metric_lines: Vec<_> = by_type
+            .iter()
+            .filter(|v| v.get("type").and_then(|x| x.as_str()) == Some("metric"))
+            .collect();
+        let event_lines: Vec<_> = by_type
+            .iter()
+            .filter(|v| v.get("type").and_then(|x| x.as_str()) == Some("event"))
+            .collect();
+
+        assert_eq!(metric_lines.len(), 2, "two metric rows expected");
+        assert_eq!(event_lines.len(), 2, "two event rows expected");
+
+        // Event schema must match `socsim_log::JsonlRecorder`'s.
+        let spawn_ev = event_lines
+            .iter()
+            .find(|v| v.get("kind").and_then(|x| x.as_str()) == Some("spawn"))
+            .expect("spawn event present");
+        assert_eq!(spawn_ev.get("t").and_then(|x| x.as_u64()), Some(0));
+        assert_eq!(
+            spawn_ev
+                .get("payload")
+                .and_then(|p| p.get("agent_id"))
+                .and_then(|x| x.as_u64()),
+            Some(7)
+        );
+
+        let _ = fs::remove_dir_all(&tmpdir);
     }
 }

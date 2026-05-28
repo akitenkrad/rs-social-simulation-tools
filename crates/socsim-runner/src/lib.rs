@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use socsim_config::{Registry, Scenario};
 use socsim_core::{Result, SocsimError, WorldState};
 use socsim_engine::{RandomActivationScheduler, SequentialScheduler, SimulationBuilder};
-use socsim_log::InMemoryRecorder;
+use socsim_log::{EventRow, InMemoryRecorder};
 
 // ── WorldFactory ──────────────────────────────────────────────────────────────
 
@@ -45,7 +45,15 @@ pub struct RunResult {
     /// Final (last-recorded) value for each metric key.
     pub final_metrics: HashMap<String, f64>,
 
-    /// Total event count recorded during the run.
+    /// All events recorded during the run, in the order the mechanisms emitted
+    /// them.  Consumers that previously only inspected `event_count` keep
+    /// working unchanged; callers that need the payloads (e.g. CLI JSONL log
+    /// writers, downstream analysis) can iterate this directly.
+    #[serde(default)]
+    pub events: Vec<EventRow>,
+
+    /// Total event count recorded during the run (equals `events.len()`,
+    /// retained for API compatibility).
     pub event_count: usize,
 }
 
@@ -128,12 +136,14 @@ where
         }
     }
 
-    let event_count = rec.events().len();
+    let events: Vec<EventRow> = rec.events().to_vec();
+    let event_count = events.len();
 
     Ok(RunResult {
         seed,
         series,
         final_metrics,
+        events,
         event_count,
     })
 }
@@ -401,6 +411,7 @@ mod tests {
             seed: 0,
             series: HashMap::new(),
             final_metrics,
+            events: Vec::new(),
             event_count: 0,
         }];
         let s = summarize(&results);
@@ -418,6 +429,7 @@ mod tests {
                 seed,
                 series: HashMap::new(),
                 final_metrics: fm,
+                events: Vec::new(),
                 event_count: 0,
             }
         };
