@@ -53,6 +53,11 @@
 //! mechanisms self-stop on saturation; the Axelrod mechanism's absorbing state
 //! can be tested with [`culture::is_absorbing`].
 //!
+//! For bounded-confidence experiments that need a deterministic initial
+//! distribution (paper §3 Property IV / Fig. 4–8 style "ε-profile" runs), the
+//! free helper [`regular_profile`] returns the equispaced sweep `x_i = i/(n−1)`
+//! so each replication does not have to re-derive it.
+//!
 //! # Usage (library mode)
 //! ```ignore
 //! use socsim_mechanisms::{HegselmannKrauseMechanism, MeanOperator};
@@ -83,7 +88,8 @@ pub use group::GroupConformityMechanism;
 pub use means::{apply_mean, parse_mean, MeanOperator};
 #[cfg(feature = "opinion-dynamics")]
 pub use opinion::{
-    DeffuantMechanism, HegselmannKrauseMechanism, LorenzMechanism, SocialJudgementMechanism,
+    regular_profile, DeffuantMechanism, HegselmannKrauseMechanism, LorenzMechanism,
+    SocialJudgementMechanism,
 };
 #[cfg(feature = "opinion-dynamics")]
 pub use updates::{

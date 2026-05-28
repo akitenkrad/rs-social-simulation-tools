@@ -402,3 +402,100 @@ impl<W: ScalarOpinions + Neighbors> Mechanism<W> for LorenzMechanism {
         Ok(())
     }
 }
+
+// ── Initial profiles ────────────────────────────────────────────────────────
+
+/// Equispaced "ε-profile" initializer for bounded-confidence opinion models:
+/// returns `x_i = i / (n − 1)` for `i = 0, …, n−1`.
+///
+/// This is the canonical *regular profile* used throughout the BC literature
+/// (Hegselmann & Krause 2002 §3 Property IV / Fig. 4–8): a deterministic,
+/// equispaced sweep of `[0, 1]` with no randomness, useful for the analytic
+/// "consensus iff ε-profile" experiments and for sweeps that need a noise-free
+/// baseline.  Both the `hegselmann2002` and `hegselmann2005` replications
+/// would otherwise re-implement these five lines.
+///
+/// Edge cases:
+/// - `n == 0` ⇒ empty vector.
+/// - `n == 1` ⇒ `[0.5]` (centre of `[0, 1]`; avoids dividing by `n − 1 = 0`).
+/// - `n >= 2` ⇒ `[0/(n-1), 1/(n-1), …, (n-1)/(n-1)]`, spanning `[0.0, 1.0]`.
+///
+/// Random profiles (`Uniform(0, 1)`, `Normal`, `polarized`, …) are
+/// scenario-specific (rng-driven, often with bound-clamping for `MeanOperator::H`/
+/// `MeanOperator::G`) and intentionally left to each callsite.  This helper
+/// covers the one shape that is bit-for-bit identical across BC studies.
+///
+/// # Example
+///
+/// ```
+/// use socsim_mechanisms::regular_profile;
+/// let xs = regular_profile(5);
+/// assert_eq!(xs, vec![0.0, 0.25, 0.5, 0.75, 1.0]);
+/// ```
+pub fn regular_profile(n: usize) -> Vec<f64> {
+    match n {
+        0 => Vec::new(),
+        1 => vec![0.5],
+        _ => {
+            let denom = (n - 1) as f64;
+            (0..n).map(|i| i as f64 / denom).collect()
+        }
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::regular_profile;
+
+    #[test]
+    fn regular_profile_empty() {
+        assert!(regular_profile(0).is_empty());
+    }
+
+    #[test]
+    fn regular_profile_single_agent_is_centred() {
+        assert_eq!(regular_profile(1), vec![0.5]);
+    }
+
+    #[test]
+    fn regular_profile_two_agents_span_the_unit_interval() {
+        assert_eq!(regular_profile(2), vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn regular_profile_five_agents_match_canonical_values() {
+        let xs = regular_profile(5);
+        assert_eq!(xs, vec![0.0, 0.25, 0.5, 0.75, 1.0]);
+    }
+
+    #[test]
+    fn regular_profile_endpoints_are_exact() {
+        // For any n >= 2 the first and last entries must be exactly 0.0 and 1.0
+        // (no floating-point drift on the boundaries).
+        for &n in &[2usize, 3, 10, 100, 625, 1_000] {
+            let xs = regular_profile(n);
+            assert_eq!(xs.len(), n);
+            assert_eq!(xs.first().copied(), Some(0.0), "n = {}", n);
+            assert_eq!(xs.last().copied(), Some(1.0), "n = {}", n);
+        }
+    }
+
+    #[test]
+    fn regular_profile_is_monotone_and_in_range() {
+        let xs = regular_profile(100);
+        assert_eq!(xs.len(), 100);
+        for w in xs.windows(2) {
+            assert!(w[0] < w[1], "non-monotone at {:?}", w);
+        }
+        assert!(xs.iter().all(|&x| (0.0..=1.0).contains(&x)));
+    }
+
+    #[test]
+    fn regular_profile_spacing_is_uniform() {
+        let xs = regular_profile(11);
+        let step = 1.0 / 10.0;
+        for w in xs.windows(2) {
+            assert!((w[1] - w[0] - step).abs() < 1e-12);
+        }
+    }
+}
