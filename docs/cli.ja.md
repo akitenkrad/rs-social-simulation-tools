@@ -4,7 +4,7 @@
 
 `socsim` バイナリは6つのサブコマンドを提供します．`socsim --help` または `socsim <COMMAND> --help` でフラグを確認できます．
 
-このバイナリは **World 多態**です：すべてのシナリオは *モジュールパック* を名前で指定し，そのパックのWorld型へディスパッチされます．現在2つのパック（`hr-lifecycle`，`opinion-dynamics`）を同梱しており，新しいパックは `pack-*` Cargoフィーチャの背後に登録されます．
+このバイナリは **World 多態**です：すべてのシナリオは *モジュールパック* を名前で指定し，そのパックのWorld型へディスパッチされます．現在3つのパック（`hr-lifecycle`，`opinion-dynamics`，`organizational-silence`）を同梱しており，新しいパックは `pack-*` Cargoフィーチャの背後に登録されます．
 
 ```
 socsim <COMMAND>
@@ -149,6 +149,7 @@ socsim list packs
 Available module packs:
   hr-lifecycle
   opinion-dynamics
+  organizational-silence
 ```
 
 ```sh
@@ -175,7 +176,20 @@ Mechanisms by pack:
     lorenz
     opinion_metrics
     social_judgement
+  [organizational-silence]
+    climate_silence
+    fear_appraisal
+    issue_salience
+    org_learning
+    org_performance
+    prefalse_cascade
+    psafety_update
+    retaliation_event
+    silence_spiral
+    voice_decision_rule
 ```
+
+CLI を `--features pack-organizational-silence-llm` でビルドした場合，`[organizational-silence]` ブロックには `voice_decision_rule` の LLM 変種である `voice_decision` のエントリも追加で表示されます．
 
 ---
 

@@ -121,7 +121,7 @@ The full scenario schema and every flag are in the [CLI reference](../cli.md). F
 
 ### 4. (Optional) expose your pack to the `socsim` binary as a `CliPack`
 
-The two shipped packs appear in `socsim list packs` because each is also wrapped in a **`CliPack`** — an object-safe, world-erased adapter the world-polymorphic binary dispatches on. To add your own pack to the CLI you:
+The three shipped packs appear in `socsim list packs` because each is also wrapped in a **`CliPack`** — an object-safe, world-erased adapter the world-polymorphic binary dispatches on. To add your own pack to the CLI you:
 
 1. implement a `struct FooCliPack;` that `impl CliPack` (it owns your concrete world internally and exposes `name`, `starter_toml`, `mechanism_names`, `run_seeds`, `run_sweep`);
 2. add a Cargo feature `pack-foo = ["dep:socsim-foo"]`;

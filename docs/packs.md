@@ -11,16 +11,17 @@ a **starter scenario** TOML you can run immediately.
 
 The `socsim` CLI is **world-polymorphic**: a scenario selects a pack by name
 (`[simulation] module_pack = "..."`), and the binary dispatches to that pack's
-world type without ever naming a concrete world itself. Two packs ship today.
+world type without ever naming a concrete world itself. Three packs ship today.
 
 ![Module packs overview](assets/packs-overview.svg)
 
-## The two bundled packs
+## The three bundled packs
 
 | Pack | World | What it models | Mechanisms | Page |
 |---|---|---|---|---|
 | [`hr-lifecycle`](packs/hr-lifecycle.md) | `HrWorld` | An employee-lifecycle organisation: hiring, learning, peer effects, satisfaction, turnover cascades, knowledge loss | ten, calibrated against published empirical findings | [→ hr-lifecycle](packs/hr-lifecycle.md) |
 | [`opinion-dynamics`](packs/opinion-dynamics.md) | `OpinionWorld` | Bounded-confidence opinion formation on a social network (consensus, clustering, polarisation) | the `socsim-mechanisms` opinion family, reused via capability traits | [→ opinion-dynamics](packs/opinion-dynamics.md) |
+| [`organizational-silence`](packs/organizational-silence.md) | `SilenceWorld` | Hierarchical employees on a small-world network: heterogeneous silence motives, fear, psychological safety, supervisor openness, retaliation events, threshold cascades | ten (plus an LLM variant), calibrated against organizational-behaviour findings | [→ organizational-silence](packs/organizational-silence.md) |
 
 List them at any time from the CLI:
 
@@ -45,9 +46,12 @@ Every pack is defined by two traits and a starter TOML:
    generic [`socsim-runner`](architecture.md) functions for it, so the CLI
    binary stays free of any one domain model.
 
-Both packs are gated behind a Cargo feature of the same name
-(`pack-hr-lifecycle`, `pack-opinion-dynamics`), both on by default, so a
-downstream binary can compile in only the packs it needs. See the
+All bundled packs are gated behind a Cargo feature of the same name
+(`pack-hr-lifecycle`, `pack-opinion-dynamics`, `pack-organizational-silence`),
+all on by default, so a downstream binary can compile in only the packs it
+needs. The `organizational-silence` pack additionally offers an
+`pack-organizational-silence-llm` feature that adds the LLM-driven
+`voice_decision` mechanism alongside the rule-based `voice_decision_rule`. See the
 [architecture overview](architecture.md#two-usage-paths-scenario-cli-vs-library-mode)
 for how the pack layer sits between scenarios and the engine, and the
 [T5 — A scenario pack](tutorials/05-scenario-pack.md) tutorial for a hands-on
@@ -68,10 +72,11 @@ the starter scenario, and the metrics it records.
 
 - [**hr-lifecycle**](packs/hr-lifecycle.md) — the calibrated employee-lifecycle reference module (`HrWorld`, ten mechanisms).
 - [**opinion-dynamics**](packs/opinion-dynamics.md) — bounded-confidence opinion dynamics (`OpinionWorld`).
+- [**organizational-silence**](packs/organizational-silence.md) — climate-of-silence emergence on a hierarchical network (`SilenceWorld`, ten rule-based mechanisms + an optional LLM variant).
 
 ## Adding a new pack
 
-The CLI registry is designed so new packs slot in beside the existing two
+The CLI registry is designed so new packs slot in beside the existing three
 without touching the run/sweep/validate/list pipeline:
 
 1. Implement a concrete `World` + its mechanisms (or reuse the
@@ -90,4 +95,4 @@ end.
 - [Mechanism catalog](mechanisms.md) — the individual mechanisms a pack composes.
 - [CLI reference](cli.md) — `init`, `run`, `validate`, `list`, `sweep`, `summarize`.
 - [Architecture](architecture.md) — crate graph, the 6-phase tick loop, calibration philosophy.
-- [Use cases & recipes](usecases.md) — runnable workflows for both packs.
+- [Use cases & recipes](usecases.md) — runnable workflows for each bundled pack.

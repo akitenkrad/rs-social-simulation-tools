@@ -58,6 +58,7 @@ socsim list packs
 Available module packs:
   hr-lifecycle
   opinion-dynamics
+  organizational-silence
 ```
 
 And the mechanisms each pack registers:
@@ -86,9 +87,23 @@ Mechanisms by pack:
     lorenz
     opinion_metrics
     social_judgement
+  [organizational-silence]
+    climate_silence
+    fear_appraisal
+    issue_salience
+    org_learning
+    org_performance
+    prefalse_cascade
+    psafety_update
+    retaliation_event
+    silence_spiral
+    voice_decision_rule
 ```
 
 A scenario's `[[mechanism]]` blocks may only name mechanisms from its pack.
+(With `--features pack-organizational-silence-llm`, the
+`[organizational-silence]` block also lists `voice_decision`, the LLM variant
+of `voice_decision_rule`.)
 
 ### 3. Run the opinion-dynamics scenario and watch clusters shrink
 

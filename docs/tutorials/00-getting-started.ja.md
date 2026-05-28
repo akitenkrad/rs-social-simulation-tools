@@ -58,6 +58,7 @@ socsim list packs
 Available module packs:
   hr-lifecycle
   opinion-dynamics
+  organizational-silence
 ```
 
 各パックが登録するメカニズム：
@@ -86,9 +87,20 @@ Mechanisms by pack:
     lorenz
     opinion_metrics
     social_judgement
+  [organizational-silence]
+    climate_silence
+    fear_appraisal
+    issue_salience
+    org_learning
+    org_performance
+    prefalse_cascade
+    psafety_update
+    retaliation_event
+    silence_spiral
+    voice_decision_rule
 ```
 
-シナリオの `[[mechanism]]` ブロックは，そのパックのメカニズムしか指定できません．
+シナリオの `[[mechanism]]` ブロックは，そのパックのメカニズムしか指定できません．（`--features pack-organizational-silence-llm` でビルドした場合，`[organizational-silence]` ブロックには `voice_decision_rule` の LLM 変種である `voice_decision` も追加で表示されます．）
 
 ### 3. opinion-dynamics シナリオを実行しクラスタが減るのを見る
 
