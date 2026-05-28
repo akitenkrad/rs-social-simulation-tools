@@ -175,6 +175,21 @@ sim.run()?;
 `HegselmannKrauseMechanism::new(0.2, MeanOperator::Power(2.0))`．収束で停止させるには，
 `ConvergenceMechanism::new(1e-9)` も追加します．
 
+論文 §3 Property IV / Fig. 4–8（および非対称版 Fig. 10–13）の "ε-プロファイル" 走査で
+用いられる等間隔初期分布 `x_i = i/(n − 1)` は，BC 文献では正典的な初期化です．本クレートは
+フリーヘルパ `regular_profile(n) -> Vec<f64>` として公開しており，各再現実装で同じ五行を
+書き直す必要はありません：
+
+```rust
+use socsim_mechanisms::regular_profile;
+
+let opinions = regular_profile(625);    // [0.0, 1/624, …, 1.0]; n=1 では [0.5]; n=0 では []
+let world = OpinionWorld { clock: SimClock::default(), opinions };
+```
+
+乱数初期分布はシナリオ依存（H/G 平均のための開区間クランプ，分極化混合など）であり，
+ドライバ側に委ねます．
+
 ## 9. 決定論性と RNG
 
 算術・幾何・調和・べき平均（A/G/H/P）に対しては**決定論的**です．更新は固定スナップショットを読み取り，
