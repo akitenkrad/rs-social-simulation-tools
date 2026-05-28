@@ -36,12 +36,14 @@ pub const ATTITUDE_MAX: f64 = crate::updates::ATTITUDE_MAX;
 
 // ── HegselmannKrauseMechanism ───────────────────────────────────────────────
 
-/// Hegselmann–Krause bounded-confidence update (synchronous).
+/// Hegselmann–Krause bounded-confidence update (synchronous, symmetric or
+/// asymmetric).
 ///
 /// On each step this mechanism, for every agent `i`:
 /// 1. takes a snapshot of all agents' opinions (so the update is synchronous);
-/// 2. collects, from `neighbors_of(i)` ∪ `{i}`, those opinions `x_j` with
-///    `|x_i − x_j| ≤ ε` (the confidence set `I(i)`);
+/// 2. collects, from `neighbors_of(i)` ∪ `{i}`, those opinions `x_j` whose
+///    signed gap `x_j − x_i` falls in the per-side window `[−ε_l, ε_r]` (the
+///    confidence set `I(i)`);
 /// 3. aggregates them with the configured [`MeanOperator`] via
 ///    [`apply_mean`](crate::means::apply_mean);
 /// 4. batch-writes the new opinions.
@@ -49,27 +51,85 @@ pub const ATTITUDE_MAX: f64 = crate::updates::ATTITUDE_MAX;
 /// Because every new opinion is computed from the *same* start-of-step
 /// snapshot, the result is independent of agent activation order — exactly the
 /// synchronous (simultaneous) update of the `hegselmann2005` reference.
+///
+/// # Symmetric vs asymmetric ε
+///
+/// By default the window is symmetric (`ε_l = ε_r = epsilon`), matching
+/// Hegselmann & Krause (2002) §4.1 and the 2005 generalisation: an agent is
+/// pulled toward neighbours within `|x_i − x_j| ≤ ε`.  Construct it with
+/// [`HegselmannKrauseMechanism::new`].
+///
+/// For the **asymmetric** variant of HK 2002 §4.2 / Fig. 10–13 — where `ε_l`
+/// (left tolerance for *smaller* opinions) and `ε_r` (right tolerance for
+/// *larger* opinions) differ, producing one-sided splits and a final mean that
+/// drifts toward the wider side — construct it with
+/// [`HegselmannKrauseMechanism::with_asymmetric`].  The symmetric code path is
+/// preserved bit-identically when both per-side overrides are unset, so
+/// upgrading an existing call site is non-breaking.
 #[derive(Clone, Copy, Debug)]
 pub struct HegselmannKrauseMechanism {
-    /// Symmetric confidence bound ε.
+    /// Symmetric confidence bound ε.  Used as the fallback when one or both
+    /// of [`epsilon_left`](Self::epsilon_left) /
+    /// [`epsilon_right`](Self::epsilon_right) are `None`.
     pub epsilon: f64,
+    /// Override for the **left** tolerance (signed gap `x_j − x_i < 0`).  When
+    /// `None`, the symmetric [`epsilon`](Self::epsilon) is used.  Setting this
+    /// to `Some(ε_l)` activates the asymmetric variant of HK 2002 §4.2.
+    pub epsilon_left: Option<f64>,
+    /// Override for the **right** tolerance (signed gap `x_j − x_i > 0`).  When
+    /// `None`, the symmetric [`epsilon`](Self::epsilon) is used.  Setting this
+    /// to `Some(ε_r)` activates the asymmetric variant of HK 2002 §4.2.
+    pub epsilon_right: Option<f64>,
     /// Averaging operator applied to the confidence set.
     pub mean: MeanOperator,
 }
 
 impl HegselmannKrauseMechanism {
-    /// Create a Hegselmann–Krause mechanism with confidence bound `epsilon` and
-    /// the given averaging operator.
+    /// Create a **symmetric** Hegselmann–Krause mechanism with confidence
+    /// bound `epsilon` and the given averaging operator.  Equivalent to
+    /// `[−ε, ε]` on the signed gap; the canonical HK 2002 / 2005 form.
     pub fn new(epsilon: f64, mean: MeanOperator) -> Self {
-        Self { epsilon, mean }
+        Self {
+            epsilon,
+            epsilon_left: None,
+            epsilon_right: None,
+            mean,
+        }
+    }
+
+    /// Create an **asymmetric** Hegselmann–Krause mechanism (HK 2002 §4.2 /
+    /// Fig. 10–13): the confidence window is `[−epsilon_left, epsilon_right]`
+    /// on the signed gap `x_j − x_i`.  When `epsilon_left == epsilon_right`,
+    /// the result is bit-identical to [`HegselmannKrauseMechanism::new`] with
+    /// `epsilon = epsilon_left` (the same code path).
+    ///
+    /// Sets [`epsilon`](Self::epsilon) to `epsilon_left` so symmetric
+    /// fallbacks and diagnostics still report a representative value.
+    pub fn with_asymmetric(epsilon_left: f64, epsilon_right: f64, mean: MeanOperator) -> Self {
+        Self {
+            epsilon: epsilon_left,
+            epsilon_left: Some(epsilon_left),
+            epsilon_right: Some(epsilon_right),
+            mean,
+        }
+    }
+
+    /// `true` when the mechanism uses different left / right tolerances (i.e.
+    /// at least one override is set and the resolved pair is unequal).
+    pub fn is_asymmetric(&self) -> bool {
+        let l = self.epsilon_left.unwrap_or(self.epsilon);
+        let r = self.epsilon_right.unwrap_or(self.epsilon);
+        l != r
     }
 }
 
 impl Default for HegselmannKrauseMechanism {
-    /// ε = 0.2 with the arithmetic mean — the canonical HK setting.
+    /// ε = 0.2 (symmetric) with the arithmetic mean — the canonical HK setting.
     fn default() -> Self {
         Self {
             epsilon: 0.2,
+            epsilon_left: None,
+            epsilon_right: None,
             mean: MeanOperator::Arithmetic,
         }
     }
@@ -91,6 +151,12 @@ impl<W: ScalarOpinions + Neighbors> Mechanism<W> for HegselmannKrauseMechanism {
         // copy for the synchronous update).
         let prev: Vec<f64> = ids.iter().map(|&id| ctx.world.opinion(id)).collect();
 
+        // Resolve the per-side window once per step.  When both overrides are
+        // unset the window is `[−epsilon, epsilon]`, which makes the membership
+        // test below `−ε ≤ x_j − x_i ≤ ε`, i.e. exactly `|x_i − x_j| ≤ ε`.
+        let eps_l = self.epsilon_left.unwrap_or(self.epsilon);
+        let eps_r = self.epsilon_right.unwrap_or(self.epsilon);
+
         // Reusable buffers to avoid per-agent heap churn.
         let mut conf_set: Vec<f64> = Vec::with_capacity(ids.len());
         let mut conf_ids: Vec<AgentId> = Vec::with_capacity(ids.len());
@@ -102,20 +168,22 @@ impl<W: ScalarOpinions + Neighbors> Mechanism<W> for HegselmannKrauseMechanism {
             // Build the confidence set in **agent-id order** with `x_i` at its
             // natural position: collect the agent's own id together with its
             // neighbour ids, deduplicate, sort, then include each opinion within
-            // ε of `x_i` in that order.  This makes `apply_mean`'s floating-point
-            // summation order bit-identical to an id-ordered implementation
-            // (e.g. the `hegselmann2005` reference); the mean is mathematically
-            // the same, this only fixes ulp-level summation order.
+            // the per-side window of `x_i` in that order.  This makes
+            // `apply_mean`'s floating-point summation order bit-identical to an
+            // id-ordered implementation (e.g. the `hegselmann2005` reference);
+            // the mean is mathematically the same, this only fixes ulp-level
+            // summation order.
             conf_ids.clear();
             conf_ids.push(id);
             conf_ids.extend(ctx.world.neighbors_of(id));
             conf_ids.sort_unstable();
             conf_ids.dedup();
             for &cid in &conf_ids {
-                // `x_i` itself is always within ε of itself, so it is included
-                // at its natural id-ordered position.
+                // `x_i` itself is always within window of itself (gap 0), so it
+                // is included at its natural id-ordered position.
                 let xj = ctx.world.opinion(cid);
-                if (xi - xj).abs() <= self.epsilon {
+                let diff = xj - xi;
+                if -eps_l <= diff && diff <= eps_r {
                     conf_set.push(xj);
                 }
             }

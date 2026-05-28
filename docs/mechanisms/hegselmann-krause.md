@@ -109,11 +109,39 @@ literature HK is normally the *only* opinion updater in a run.
 
 | Param | Type | Default | Meaning |
 |---|---|---|---|
-| `epsilon` (ε) | `f64` | `0.2` | Symmetric confidence bound. Larger ε → fewer, larger clusters (→ consensus). |
+| `epsilon` (ε) | `f64` | `0.2` | Symmetric confidence bound. Larger ε → fewer, larger clusters (→ consensus). Used as the fallback when neither per-side override is set. |
+| `epsilon_left` (ε_l) | `Option<f64>` | `None` | Per-side override for the left tolerance (signed gap `x_j − x_i < 0`). When `None`, `epsilon` is used. Set via [`with_asymmetric`](#asymmetric-variant) to enable the HK 2002 §4.2 / Fig. 10–13 variant. |
+| `epsilon_right` (ε_r) | `Option<f64>` | `None` | Per-side override for the right tolerance (signed gap `x_j − x_i > 0`). |
 | `mean` | `MeanOperator` | `Arithmetic` | Averaging operator over the confidence set: `Arithmetic` (A), `Geometric` (G), `Harmonic` (H), `Power(p)` (P_p), `Random` (R). |
 
-There is no ModulePack and therefore no scenario-TOML param block; both fields are
+There is no ModulePack and therefore no scenario-TOML param block; all fields are
 constructor arguments.
+
+### Asymmetric variant
+
+HK 2002 §4.2 generalises the bounded-confidence window from `|x_i − x_j| ≤ ε` to a
+per-side window on the signed gap:
+
+$$I(i, x) = \{\, j \in N(i) \cup \{i\} \;:\; -\varepsilon_l \le x_j - x_i \le \varepsilon_r \,\}.$$
+
+When `ε_l ≠ ε_r`, the dynamics gain a directional bias: the final mean opinion
+drifts toward the wider side, and **one-sided splits** appear (some agents include
+others in their confidence set without the reverse holding). This reproduces paper
+§4.2 / Fig. 10–13.
+
+```rust
+// HK 2002 §4.2: agents look further to the right than to the left,
+// so the population's mean drifts upward.
+let hk = HegselmannKrauseMechanism::with_asymmetric(
+    /* eps_l */ 0.05,
+    /* eps_r */ 0.25,
+    MeanOperator::Arithmetic,
+);
+```
+
+When `eps_l == eps_r`, the asymmetric code path is bit-identical to
+[`HegselmannKrauseMechanism::new`] — upgrading an existing call site to use the
+per-side knobs is non-breaking.
 
 ## 8. How to apply
 
