@@ -146,8 +146,8 @@ pub struct Team {
 /// network, the simulation clock, and four macro variables tracked across
 /// the run.  `Clone`/`Serialize`/`Deserialize` are derived so
 /// [`Snapshot<SilenceWorld>`](socsim_engine::Snapshot) save/resume works
-/// out of the box.
-#[derive(Clone, Serialize, Deserialize)]
+/// out of the box; `Debug` is derived for ad-hoc introspection.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SilenceWorld {
     /// Simulation clock.
     pub clock: SimClock,

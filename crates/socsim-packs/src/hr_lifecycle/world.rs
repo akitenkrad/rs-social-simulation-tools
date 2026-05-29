@@ -95,7 +95,7 @@ pub struct Team {
 ///
 /// Holds the employee roster, team aggregate states, the inter-agent social
 /// network, and the simulation clock.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HrWorld {
     /// Simulation clock.
     pub clock: SimClock,
