@@ -68,7 +68,7 @@ pub use petgraph::{Directed as DirectedTy, Undirected as UndirectedTy};
 /// (petgraph's internal `NodeIndex`es are *not* persisted) and is rebuilt on
 /// load, so snapshots stay stable across petgraph versions.  For weighted
 /// networks (`E: Serialize`) each edge additionally carries its payload.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Network<E = (), Ty = Undirected>
 where
     Ty: petgraph::EdgeType,
@@ -2059,5 +2059,54 @@ mod tests {
         e1.sort();
         e2.sort();
         assert_eq!(e1, e2);
+    }
+
+    // ── Debug derive (#58) ────────────────────────────────────────────────────
+
+    #[test]
+    fn debug_derived_on_all_aliases() {
+        fn assert_debug<T: std::fmt::Debug>(_: &T) {}
+
+        let mut rng = SimRng::from_seed(0);
+        let ids = ids(5);
+
+        let undirected: SocialNetwork = SocialNetwork::erdos_renyi(&ids, 0.5, &mut rng);
+        let directed: DiSocialNetwork = DiSocialNetwork::erdos_renyi_directed(&ids, 0.5, &mut rng);
+        let mut weighted: WeightedNetwork<f64> = WeightedNetwork::empty();
+        let mut di_weighted: DiWeightedNetwork<f64> = DiWeightedNetwork::empty();
+        for &id in &ids {
+            weighted.add_node(id);
+            di_weighted.add_node(id);
+        }
+        weighted.add_edge_weighted(ids[0], ids[1], 0.5);
+        di_weighted.add_edge_weighted(ids[0], ids[1], 0.5);
+
+        assert_debug(&undirected);
+        assert_debug(&directed);
+        assert_debug(&weighted);
+        assert_debug(&di_weighted);
+
+        let _ = format!("{undirected:?}");
+        let _ = format!("{directed:?}");
+        let _ = format!("{weighted:?}");
+        let _ = format!("{di_weighted:?}");
+    }
+
+    #[test]
+    fn debug_propagates_to_containing_struct() {
+        #[derive(Debug)]
+        #[allow(dead_code)] // fields are exercised via the derived Debug formatter
+        struct Holder {
+            net: SocialNetwork,
+            tag: &'static str,
+        }
+        let mut rng = SimRng::from_seed(0);
+        let h = Holder {
+            net: SocialNetwork::erdos_renyi(&ids(3), 0.5, &mut rng),
+            tag: "ok",
+        };
+        let s = format!("{h:?}");
+        assert!(s.contains("Holder"));
+        assert!(s.contains("tag: \"ok\""));
     }
 }
