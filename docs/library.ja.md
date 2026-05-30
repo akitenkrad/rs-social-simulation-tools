@@ -475,7 +475,7 @@ let comps = net.connected_components();
 
 ネットワークを `WorldState` に保持し，各エージェントに連続的な意見を持たせ，`Interaction` フェーズで近傍から更新します．これは**限定信頼（bounded-confidence）DeGroot** モデルです：各エージェントは，いまも信頼している近傍（信頼半径 `epsilon` 以内）の平均意見に向かって割合 `mu` だけ移動します．
 
-> `socsim-mechanisms` クレートは，`ScalarOpinions + Neighbors` に対して汎用な意見力学メカニズム（`HegselmannKrauseMechanism` / `DeffuantMechanism` / `SocialJudgementMechanism` / `LorenzMechanism`）と，ネットワーク伝播（`SiContagionMechanism` / `ThresholdContagionMechanism`）・`AxelrodMechanism` を同梱します．外部ブロードキャストの注入などで**独自のメカニズム内**でメッセージ集合から意見を更新する**ハイブリッドモデル**向けには，素のメッセージ集合 Δ 関数 `socsim_mechanisms::{bounded_confidence_update, hk_update, social_judgement_update, lorenz_update}` も公開しており，standalone メカニズムを採用せずに更新式だけを再利用できます．論文流の ε-プロファイル走査向けの初期分布は，フリーヘルパ `socsim_mechanisms::regular_profile(n)`（等間隔 `x_i = i/(n−1)`）でカバーします．以下の実例は仕組みを示すため限定信頼の更新をゼロから組み立てています．
+> `socsim-mechanisms` クレートは，`ScalarOpinions + Neighbors` に対して汎用な意見力学メカニズム（`HegselmannKrauseMechanism` / `DeffuantMechanism` / `SocialJudgementMechanism` / `LorenzMechanism`）と，ネットワーク伝播（`SiContagionMechanism` / `ThresholdContagionMechanism`，およびエージェントごとの閾値を用いるバリアント `PerAgentThresholdContagionMechanism`）・`AxelrodMechanism` を同梱します．外部ブロードキャストの注入などで**独自のメカニズム内**でメッセージ集合から意見を更新する**ハイブリッドモデル**向けには，素のメッセージ集合 Δ 関数 `socsim_mechanisms::{bounded_confidence_update, hk_update, social_judgement_update, lorenz_update}` も公開しており，standalone メカニズムを採用せずに更新式だけを再利用できます．論文流の ε-プロファイル走査向けの初期分布は，フリーヘルパ `socsim_mechanisms::regular_profile(n)`（等間隔 `x_i = i/(n−1)`）でカバーします．以下の実例は仕組みを示すため限定信頼の更新をゼロから組み立てています．
 
 ```rust,ignore
 use socsim_core::{AgentId, Mechanism, Phase, Result, SimClock, SimRng, StepContext, WorldState};
