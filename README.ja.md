@@ -6,7 +6,7 @@
 
 ![Rust 2021](https://img.shields.io/badge/Rust-2021-orange)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
-![tests: 307 passing](https://img.shields.io/badge/tests-307%20passing-brightgreen)
+![tests: 311 passing](https://img.shields.io/badge/tests-311%20passing-brightgreen)
 
 `socsim` はRustで書かれた，コンポーザブルなエージェントベース社会シミュレーションプラットフォームです．トレイトベースのメカニズムシステム，シードされたChaCha20 RNGによる決定論的再現性，ソーシャルネットワーク層，空間グリッドのプリミティブ，保存・再開のためのWorld状態スナップショット，オプションの学習ポリシー（MARL），オプションのLLMエージェント層（Ollama/OpenAI，プロンプトキャッシュ付き），結果出力ヘルパ，再利用可能な観測メトリクスライブラリ，そしてシナリオの実行・パラメータスイープ・集計のためのCLIを，15クレートのワークスペースとして提供します．CLIは **World 多態**です：シナリオは名前で *モジュールパック* を選択し，現在3つのパックを同梱しています — 文献に基づくキャリブレーションパラメータを持つ10メカニズムの参考実装 **HRライフサイクル** モジュール，ソーシャルネットワーク上で有界信頼コンセンサスモデルを実行する **opinion-dynamics** パック，そして階層的なネットワーク上で沈黙の風土の創発をモデル化し，LLM／ルールベースの voice 決定を切り替えられる **`organizational-silence`** パックです．再利用可能でドメイン非依存なメカニズムは汎用の **`socsim-mechanisms`** カタログに収録され，意見ダイナミクス，ネットワーク伝播，文化伝播，グループダイナミクスの4つのフィーチャファミリにわたる8メカニズムを提供します．
 
