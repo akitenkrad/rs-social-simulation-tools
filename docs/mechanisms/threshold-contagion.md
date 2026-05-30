@@ -39,15 +39,34 @@ acting before that individual joins. Small shifts in the threshold distribution 
 produce large differences in the eventual size of the cascade, explaining why
 seemingly similar crowds reach very different outcomes.
 
-socsim uses a single, homogeneous fractional threshold θ. For an inactive agent `i`
-with degree $d_i$ and active-neighbour count $a_i$ at the start of the step (both read
-from the snapshot), `i` activates iff
+socsim's default `threshold_contagion` uses a single, homogeneous fractional threshold
+θ. For an inactive agent `i` with degree $d_i$ and active-neighbour count $a_i$ at the
+start of the step (both read from the snapshot), `i` activates iff
 
 $$\frac{a_i}{\max(d_i, 1)} \;\ge\; \theta,$$
 
 where the $\max(d_i, 1)$ guards against division by zero for isolated agents. The
 update is fully deterministic — no randomness is involved. The implementation is
 ported from the `granovetter1973` reference's threshold branch.
+
+### Heterogeneous (per-agent) thresholds
+
+Granovetter's central claim is that it is the *distribution* of individual thresholds,
+not a single global one, that decides whether a cascade ignites. The companion
+mechanism `PerAgentThresholdContagionMechanism` captures this: it replaces the global θ
+with a per-agent threshold θ_i, so agent `i` activates iff
+
+$$\frac{a_i}{\max(d_i, 1)} \;\ge\; \theta_i.$$
+
+θ_i is supplied by the world through the additional `ActivationThreshold` capability
+trait (`fn activation_threshold(&self, id) -> f64`), read once per step from the
+start-of-step world. Everything else — the synchronous snapshot round, the batch
+write, the saturation `request_stop`, and full determinism (the RNG is untouched) — is
+shared verbatim with the global-θ mechanism, so the two agree exactly when every θ_i
+equals the global θ. The per-agent mechanism is a zero-sized unit struct
+(`PerAgentThresholdContagionMechanism::new()`); the thresholds live in the world, not
+the mechanism. It operates over any world implementing `BinaryState + Neighbors +
+ActivationThreshold`.
 
 ## 3. Data flow
 
@@ -95,7 +114,9 @@ threshold-crossing along edges *is* the interaction here.
 | `theta` (θ) | `f64` | `0.5` | Activation threshold: the fraction of active neighbours required. Smaller θ → easier, wider cascades. |
 
 There is no ModulePack and therefore no scenario-TOML param block; the single field
-is a constructor argument.
+is a constructor argument. The heterogeneous-threshold variant
+`PerAgentThresholdContagionMechanism` has **no parameters** — each agent's θ_i is read
+from the world via the `ActivationThreshold` capability trait.
 
 ## 8. How to apply
 

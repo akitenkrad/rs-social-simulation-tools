@@ -20,7 +20,8 @@ pub use socsim_rng::{derive_seed, SimRng};
 
 pub mod opinion;
 pub use opinion::{
-    BinaryState, CultureVectors, GroupId, GroupMembership, Neighbors, ScalarOpinions,
+    ActivationThreshold, BinaryState, CultureVectors, GroupId, GroupMembership, Neighbors,
+    ScalarOpinions,
 };
 
 // ── AgentId ──────────────────────────────────────────────────────────────────
@@ -384,6 +385,57 @@ mod tests {
         bb.insert("x", 1u8);
         bb.clear();
         assert_eq!(bb.get::<u8>("x"), None);
+    }
+
+    #[test]
+    fn activation_threshold_reads_per_agent_theta() {
+        use crate::{ActivationThreshold, BinaryState, Neighbors};
+
+        // Minimal world exercising the ActivationThreshold capability alongside
+        // its BinaryState + Neighbors siblings (the bound the per-agent contagion
+        // path requires).
+        struct W {
+            clock: SimClock,
+            active: Vec<bool>,
+            thetas: Vec<f64>,
+        }
+        impl WorldState for W {
+            fn agent_ids(&self) -> Vec<AgentId> {
+                (0..self.active.len() as u64).map(AgentId).collect()
+            }
+            fn clock(&self) -> &SimClock {
+                &self.clock
+            }
+            fn clock_mut(&mut self) -> &mut SimClock {
+                &mut self.clock
+            }
+        }
+        impl BinaryState for W {
+            fn is_active(&self, id: AgentId) -> bool {
+                self.active[id.0 as usize]
+            }
+            fn set_active(&mut self, id: AgentId, active: bool) {
+                self.active[id.0 as usize] = active;
+            }
+        }
+        impl Neighbors for W {
+            fn neighbors_of(&self, _id: AgentId) -> Vec<AgentId> {
+                Vec::new()
+            }
+        }
+        impl ActivationThreshold for W {
+            fn activation_threshold(&self, id: AgentId) -> f64 {
+                self.thetas[id.0 as usize]
+            }
+        }
+
+        let w = W {
+            clock: SimClock::new(1),
+            active: vec![false, true],
+            thetas: vec![0.25, 0.75],
+        };
+        assert_eq!(w.activation_threshold(AgentId(0)), 0.25);
+        assert_eq!(w.activation_threshold(AgentId(1)), 0.75);
     }
 
     #[test]

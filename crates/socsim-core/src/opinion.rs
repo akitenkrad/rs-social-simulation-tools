@@ -2,7 +2,9 @@
 //!
 //! These traits let *general* (domain-agnostic) social-dynamics mechanisms — the
 //! opinion-dynamics family (Hegselmann–Krause, Deffuant, Social Judgement,
-//! Lorenz), the network-contagion family (SI, Granovetter threshold), and the
+//! Lorenz), the network-contagion family (SI, Granovetter threshold — global θ
+//! via [`BinaryState`] + [`Neighbors`], or per-agent θ_i via the additional
+//! [`ActivationThreshold`] capability), and the
 //! cultural-dissemination family (Axelrod) in `socsim-mechanisms` — operate
 //! over any [`WorldState`] that can expose the relevant per-agent state and name
 //! each agent's influence set.
@@ -81,6 +83,26 @@ pub trait CultureVectors: WorldState {
 
     /// Overwrite agent `id`'s feature `f` with `value`.
     fn set_feature(&mut self, id: AgentId, f: usize, value: u32);
+}
+
+/// A world that supplies a *per-agent activation threshold* θ_i.
+///
+/// This is the capability the heterogeneous-threshold contagion path operates
+/// on: in Granovetter's (1978) threshold model each individual carries its *own*
+/// threshold — the fraction of contacts that must already be active before that
+/// individual joins — and it is precisely this heterogeneity (a distribution of
+/// thresholds rather than a single global θ) that drives the model's tipping
+/// behaviour.  A world implements this trait to expose each agent's θ_i; the
+/// mechanism reads it via [`activation_threshold`](ActivationThreshold::activation_threshold)
+/// in place of a single global θ.
+///
+/// Pair it with [`BinaryState`] and [`Neighbors`] to drive a per-agent threshold
+/// cascade.  The returned value has the same meaning as the global θ — a
+/// fraction of active neighbours, typically in `[0, 1]` — but the trait imposes
+/// no range; the world owns the threshold distribution.
+pub trait ActivationThreshold: WorldState {
+    /// Fraction of active neighbours required to activate agent `id`.
+    fn activation_threshold(&self, id: AgentId) -> f64;
 }
 
 /// Stable identifier for a group/partition of agents.
