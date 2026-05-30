@@ -8,7 +8,8 @@
 //! ([`ScalarOpinions`](socsim_core::ScalarOpinions),
 //! [`BinaryState`](socsim_core::BinaryState),
 //! [`CultureVectors`](socsim_core::CultureVectors), each paired with
-//! [`Neighbors`](socsim_core::Neighbors); and
+//! [`Neighbors`](socsim_core::Neighbors); the per-agent threshold path additionally
+//! reads [`ActivationThreshold`](socsim_core::ActivationThreshold); and
 //! [`GroupMembership`](socsim_core::GroupMembership) paired with
 //! [`ScalarOpinions`](socsim_core::ScalarOpinions)).
 //!
@@ -28,8 +29,12 @@
 //! - **Network contagion** ([`contagion`] module) — binary-state diffusion:
 //!   - [`SiContagionMechanism`] — SI per-edge β infection; math from
 //!     `granovetter1973`.
-//!   - [`ThresholdContagionMechanism`] — Granovetter (1978) threshold; math from
-//!     `granovetter1973`.
+//!   - [`ThresholdContagionMechanism`] — Granovetter (1978) threshold with a
+//!     single global θ; math from `granovetter1973`.
+//!   - [`PerAgentThresholdContagionMechanism`] — Granovetter (1978)
+//!     heterogeneous-threshold variant: each agent uses its own θ_i, supplied by
+//!     the world's [`ActivationThreshold`](socsim_core::ActivationThreshold)
+//!     capability.
 //! - **Cultural dissemination** ([`culture`] module):
 //!   - [`AxelrodMechanism`] — Axelrod (1997) feature copying; math from
 //!     `wang2025`.
@@ -79,7 +84,9 @@ pub mod opinion;
 pub mod updates;
 
 #[cfg(feature = "contagion")]
-pub use contagion::{SiContagionMechanism, ThresholdContagionMechanism};
+pub use contagion::{
+    PerAgentThresholdContagionMechanism, SiContagionMechanism, ThresholdContagionMechanism,
+};
 #[cfg(feature = "cultural")]
 pub use culture::{axelrod_event, is_absorbing, AxelrodMechanism};
 #[cfg(feature = "group-dynamics")]
@@ -174,8 +181,8 @@ impl<W: ScalarOpinions> Mechanism<W> for ConvergenceMechanism {
 mod tests {
     use super::*;
     use socsim_core::{
-        AgentId, BinaryState, Blackboard, CultureVectors, Neighbors, NullRecorder, ScalarOpinions,
-        SimClock, SimRng, StepContext, WorldState,
+        ActivationThreshold, AgentId, BinaryState, Blackboard, CultureVectors, Neighbors,
+        NullRecorder, ScalarOpinions, SimClock, SimRng, StepContext, WorldState,
     };
 
     // ── topology ─────────────────────────────────────────────────────────────
@@ -320,6 +327,63 @@ mod tests {
     impl Neighbors for ContagionWorld {
         fn neighbors_of(&self, id: AgentId) -> Vec<AgentId> {
             neighbors(&self.topology, self.active.len(), id)
+        }
+    }
+
+    // ── per-agent-threshold fixture world (heterogeneous Granovetter) ──────────
+
+    /// Like [`ContagionWorld`] but additionally carries a per-agent activation
+    /// threshold θ_i, exercising the [`ActivationThreshold`] capability and the
+    /// [`PerAgentThresholdContagionMechanism`].
+    struct ThresholdWorld {
+        clock: SimClock,
+        active: Vec<bool>,
+        thresholds: Vec<f64>,
+        topology: Topology,
+    }
+
+    impl ThresholdWorld {
+        fn new(active: Vec<bool>, thresholds: Vec<f64>, topology: Topology) -> Self {
+            assert_eq!(active.len(), thresholds.len());
+            Self {
+                clock: SimClock::new(10_000),
+                active,
+                thresholds,
+                topology,
+            }
+        }
+        fn n_active(&self) -> usize {
+            self.active.iter().filter(|&&a| a).count()
+        }
+    }
+
+    impl WorldState for ThresholdWorld {
+        fn agent_ids(&self) -> Vec<AgentId> {
+            (0..self.active.len() as u64).map(AgentId).collect()
+        }
+        fn clock(&self) -> &SimClock {
+            &self.clock
+        }
+        fn clock_mut(&mut self) -> &mut SimClock {
+            &mut self.clock
+        }
+    }
+    impl BinaryState for ThresholdWorld {
+        fn is_active(&self, id: AgentId) -> bool {
+            self.active[id.0 as usize]
+        }
+        fn set_active(&mut self, id: AgentId, active: bool) {
+            self.active[id.0 as usize] = active;
+        }
+    }
+    impl Neighbors for ThresholdWorld {
+        fn neighbors_of(&self, id: AgentId) -> Vec<AgentId> {
+            neighbors(&self.topology, self.active.len(), id)
+        }
+    }
+    impl ActivationThreshold for ThresholdWorld {
+        fn activation_threshold(&self, id: AgentId) -> f64 {
+            self.thresholds[id.0 as usize]
         }
     }
 
@@ -849,6 +913,85 @@ mod tests {
             let mut world = ContagionWorld::ring(active);
             let mut rng = SimRng::from_seed(99);
             let mut th = ThresholdContagionMechanism::new(0.5);
+            run(&mut th, &mut world, &mut rng, 100);
+            runs.push(world.active);
+        }
+        assert_eq!(runs[0], runs[1]);
+    }
+
+    // ── Per-agent (heterogeneous) threshold contagion ──────────────────────────
+
+    #[test]
+    fn per_agent_threshold_activates_only_agents_meeting_their_own_theta() {
+        // 5-agent ring (degree 2); seed agent 0. Heterogeneous θ_i lets the two
+        // low-θ neighbours of the seed cascade while the two high-θ agents stall,
+        // even though they end up with the *same* active-neighbour fraction.
+        //
+        //   ring edges: 0↔1, 1↔2, 2↔3, 3↔4, 4↔0
+        //   θ = [0.0, 0.5, 1.0, 1.0, 0.5],  seed {0}
+        //
+        //   Round 1 (snapshot {0}):
+        //     agent 1: nb {0,2}, a=1, d=2 → 0.5 ≥ θ_1=0.5  → activates
+        //     agent 4: nb {3,0}, a=1, d=2 → 0.5 ≥ θ_4=0.5  → activates
+        //     agents 2,3: a=0 → no
+        //     → active {0,1,4}
+        //   Round 2 (snapshot {0,1,4}):
+        //     agent 2: nb {1,3}, a=1, d=2 → 0.5 ≥ θ_2=1.0? no → stalls
+        //     agent 3: nb {2,4}, a=1, d=2 → 0.5 ≥ θ_3=1.0? no → stalls
+        //     no new activation → request_stop
+        //   Final active set: {0,1,4}.
+        let active = vec![true, false, false, false, false];
+        let thresholds = vec![0.0, 0.5, 1.0, 1.0, 0.5];
+        let mut world = ThresholdWorld::new(active, thresholds, Topology::Adjacency(ring_adj(5)));
+        let mut rng = SimRng::from_seed(0);
+        let mut th = PerAgentThresholdContagionMechanism::new();
+        run(&mut th, &mut world, &mut rng, 100);
+
+        assert_eq!(
+            world.active,
+            vec![true, true, false, false, true],
+            "low-θ neighbours of the seed activate; high-θ (θ=1.0) agents stall"
+        );
+        assert_eq!(world.n_active(), 3);
+    }
+
+    #[test]
+    fn per_agent_threshold_matches_global_when_thetas_uniform() {
+        // With every θ_i equal to a single value, the per-agent mechanism must
+        // reproduce the global-θ mechanism's trajectory bit-for-bit (the cascade
+        // logic is shared; only the θ source differs).
+        let n = 12;
+        let mut active = vec![false; n];
+        active[0] = true;
+        active[6] = true;
+
+        let mut global_world = ContagionWorld::ring(active.clone());
+        let mut global_rng = SimRng::from_seed(99);
+        let mut global = ThresholdContagionMechanism::new(0.5);
+        run(&mut global, &mut global_world, &mut global_rng, 100);
+
+        let mut per_world =
+            ThresholdWorld::new(active, vec![0.5; n], Topology::Adjacency(ring_adj(n)));
+        let mut per_rng = SimRng::from_seed(99);
+        let mut per = PerAgentThresholdContagionMechanism::new();
+        run(&mut per, &mut per_world, &mut per_rng, 100);
+
+        assert_eq!(
+            global_world.active, per_world.active,
+            "uniform θ_i must match the global-θ path exactly"
+        );
+    }
+
+    #[test]
+    fn per_agent_threshold_is_deterministic() {
+        let mut runs = Vec::new();
+        for _ in 0..2 {
+            let active = vec![true, false, false, false, false, false];
+            let thresholds = vec![0.0, 0.5, 0.5, 1.0, 0.5, 1.0];
+            let mut world =
+                ThresholdWorld::new(active, thresholds, Topology::Adjacency(ring_adj(6)));
+            let mut rng = SimRng::from_seed(7);
+            let mut th = PerAgentThresholdContagionMechanism::new();
             run(&mut th, &mut world, &mut rng, 100);
             runs.push(world.active);
         }
