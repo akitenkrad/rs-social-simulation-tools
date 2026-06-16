@@ -1,0 +1,24 @@
+[package]
+name        = "socsim-datasets"
+description = "Survey dataset schemas, metadata/registry, and optional acquisition for socsim replications (ANES/CES). Data is never vendored — fetched from source URLs on demand. Engine-free."
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# Network acquisition: download from source URLs, atomic cache, sha256 + row-count verify, raw->CSV convert.
+acquire = ["dep:ureq", "dep:sha2", "dep:anyhow", "dep:csv", "dep:tempfile"]
+
+[dependencies]
+socsim-survey = { path = "../socsim-survey" }
+serde    = { workspace = true }
+ureq     = { workspace = true, optional = true }
+sha2     = { workspace = true, optional = true }
+anyhow   = { workspace = true, optional = true }
+csv      = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

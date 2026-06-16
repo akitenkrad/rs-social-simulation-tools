@@ -17,6 +17,7 @@ socsim-engine       = { path = "../socsim-engine" }
 socsim-log          = { path = "../socsim-log" }
 socsim-runner       = { path = "../socsim-runner" }
 socsim-packs        = { path = "../socsim-packs", optional = true, default-features = false }
+socsim-datasets     = { path = "../socsim-datasets" }
 clap.workspace      = true
 serde_json.workspace = true
 anyhow.workspace    = true
@@ -28,3 +29,5 @@ pack-hr-lifecycle              = ["dep:socsim-packs", "socsim-packs/hr-lifecycle
 pack-opinion-dynamics          = ["dep:socsim-packs", "socsim-packs/opinion-dynamics"]
 pack-organizational-silence    = ["dep:socsim-packs", "socsim-packs/organizational-silence"]
 pack-organizational-silence-llm = ["pack-organizational-silence", "socsim-packs/organizational-silence-llm"]
+# Enable on-demand dataset acquisition (network download) for `socsim datasets fetch`.
+datasets-acquire = ["socsim-datasets/acquire"]

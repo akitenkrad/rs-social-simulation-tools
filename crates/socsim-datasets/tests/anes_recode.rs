@@ -1,4 +1,3 @@
-#![cfg(feature = "anes")]
 //! Ported sun2024 `common/anes.rs` recode tests + distribution tests.
 //!
 //! These ports are the parity guarantee: identical sample records must produce
@@ -6,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use socsim_survey::anes::{anes_2012, anes_2016, anes_2020, OUTCOME_DEM, OUTCOME_REP};
+use socsim_datasets::anes::{anes_2012, anes_2016, anes_2020, OUTCOME_DEM, OUTCOME_REP};
 use socsim_survey::{
     actual_outcome, demo_label, estimate_distributions, recode_row, AgeBins, CategoryDist, Record,
     SurveySchema,

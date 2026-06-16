@@ -155,9 +155,9 @@ impl OutcomeMap {
 /// A full survey-year schema: the variable set + outcome recode.
 ///
 /// This is the config that replaces a per-year hard-coded recode. Build one
-/// with [`SurveySchema::builder`] (or, with the optional `anes` feature, use the
-/// built-in `crate::anes` schemas). The variable *set* is whatever the schema
-/// declares, so newer surveys extend by declaring their own [`DemoVar`]s.
+/// with [`SurveySchema::builder`]; the canonical dataset-specific schemas (ANES,
+/// CES) live in the `socsim-datasets` crate. The variable *set* is whatever the
+/// schema declares, so newer surveys extend by declaring their own [`DemoVar`]s.
 #[derive(Debug, Clone)]
 pub struct SurveySchema {
     /// Human label for the survey-year (e.g. `"ANES 2020"`).

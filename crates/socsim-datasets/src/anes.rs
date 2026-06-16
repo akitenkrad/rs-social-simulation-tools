@@ -15,14 +15,19 @@
 //! The two outcome labels are `"Biden"` (Democratic slot, code 1) and
 //! `"Trump"` (Republican slot, code 2), matching sun2024's `Vote` enum.
 //!
+//! Per-year provenance/acquisition metadata lives in the [`ANES_2012`],
+//! [`ANES_2016`], [`ANES_2020`] [`DatasetMeta`] consts (also reachable via
+//! [`meta`]).
+//!
 //! # CES 2022 (not yet shipped)
 //!
 //! No CES schema lives here: the CES 2022 V-variable column names and codes are
-//! not available and must not be fabricated. Declare a CES schema the same way
-//! these ANES builders do (see [`crate::SurveySchema::builder`] for a worked
-//! `// TODO(gong2026)` skeleton); CES is complete once gong2026 wires its data.
+//! not available and must not be fabricated. See [`crate::ces`] for the CES 2022
+//! stub (metadata only); its schema is complete once gong2026 wires its data.
 
-use crate::schema::{AgeBins, DemoVar, OutcomeMap, SurveySchema, ValMap};
+use socsim_survey::{AgeBins, DemoVar, OutcomeMap, SurveySchema, ValMap};
+
+use crate::registry::{DataFile, DatasetMeta, Source};
 
 /// The Democratic-slot outcome label (ANES vote code 1).
 pub const OUTCOME_DEM: &str = "Biden";
@@ -187,6 +192,97 @@ pub fn anes(year: u16) -> Option<SurveySchema> {
         2012 => Some(anes_2012()),
         2016 => Some(anes_2016()),
         2020 => Some(anes_2020()),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Registry metadata.
+//
+// The raw ANES Time Series microdata is license-gated: it is distributed from
+// electionstudies.org and requires a free account plus a data-use agreement. It
+// is therefore declared as `Source::Manual` (not auto-downloadable) with the
+// data-center URL. We do not fabricate Dataverse fileIDs or sha256 values; the
+// only known row count is ANES 2012 = 5914 (from the existing Python
+// converter's example invocation).
+// ---------------------------------------------------------------------------
+
+/// Standard ANES Time Series citation/access note (account + data-use agreement
+/// required to obtain the microdata).
+const ANES_LICENSE: &str =
+    "American National Election Studies microdata: a free electionstudies.org \
+     account and acceptance of the ANES data-use agreement are required to \
+     obtain the raw files. Do not redistribute the raw data.";
+
+const ANES_2012_FILES: &[DataFile] = &[DataFile {
+    logical_name: "anes_2012.csv",
+    source: Source::Manual {
+        instructions_url: "https://electionstudies.org/data-center/",
+    },
+    sha256: None,
+    expect_rows: Some(5914),
+}];
+
+const ANES_2016_FILES: &[DataFile] = &[DataFile {
+    logical_name: "anes_2016.csv",
+    source: Source::Manual {
+        instructions_url: "https://electionstudies.org/data-center/",
+    },
+    sha256: None,
+    expect_rows: None,
+}];
+
+const ANES_2020_FILES: &[DataFile] = &[DataFile {
+    logical_name: "anes_2020.csv",
+    source: Source::Manual {
+        instructions_url: "https://electionstudies.org/data-center/",
+    },
+    sha256: None,
+    expect_rows: None,
+}];
+
+/// Provenance/acquisition metadata for the ANES 2012 Time Series study.
+pub const ANES_2012: DatasetMeta = DatasetMeta {
+    key: "anes-2012",
+    name: "ANES 2012 Time Series Study",
+    doi: None,
+    source_url: "https://electionstudies.org/data-center/",
+    citation: "American National Election Studies. ANES 2012 Time Series Study. \
+               Ann Arbor, MI: University of Michigan and Stanford University.",
+    license: ANES_LICENSE,
+    files: ANES_2012_FILES,
+};
+
+/// Provenance/acquisition metadata for the ANES 2016 Time Series study.
+pub const ANES_2016: DatasetMeta = DatasetMeta {
+    key: "anes-2016",
+    name: "ANES 2016 Time Series Study",
+    doi: None,
+    source_url: "https://electionstudies.org/data-center/",
+    citation: "American National Election Studies. ANES 2016 Time Series Study. \
+               Ann Arbor, MI: University of Michigan and Stanford University.",
+    license: ANES_LICENSE,
+    files: ANES_2016_FILES,
+};
+
+/// Provenance/acquisition metadata for the ANES 2020 Time Series study.
+pub const ANES_2020: DatasetMeta = DatasetMeta {
+    key: "anes-2020",
+    name: "ANES 2020 Time Series Study",
+    doi: None,
+    source_url: "https://electionstudies.org/data-center/",
+    citation: "American National Election Studies. ANES 2020 Time Series Study. \
+               Ann Arbor, MI: University of Michigan and Stanford University.",
+    license: ANES_LICENSE,
+    files: ANES_2020_FILES,
+};
+
+/// Registry metadata for a supported ANES year (2012 / 2016 / 2020).
+pub fn meta(year: u16) -> Option<&'static DatasetMeta> {
+    match year {
+        2012 => Some(&ANES_2012),
+        2016 => Some(&ANES_2016),
+        2020 => Some(&ANES_2020),
         _ => None,
     }
 }

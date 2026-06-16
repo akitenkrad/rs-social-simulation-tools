@@ -20,19 +20,19 @@
 //! exactly the [`DemoVar`]s it covers (keyed by a stable snake_case string), so
 //! a newer survey can add or drop variables without touching this crate.
 //!
-//! # Built-in ANES presets (optional `anes` feature)
+//! # Dataset-specific schemas live in `socsim-datasets`
 //!
-//! Built-in ANES 2012 / 2016 / 2020 schema builders (`anes::anes_2012`,
-//! `anes::anes_2016`, `anes::anes_2020`) ship behind the optional **`anes`
-//! feature** (disabled by default). They declare the exact V-variable column
-//! names and value maps for those years, plus the eight ANES demographic
-//! [`DemoVar`] constants. The default build is the generic engine only.
+//! Built-in dataset schemas (ANES 2012 / 2016 / 2020, CES, …), their
+//! provenance/registry metadata, and optional acquisition now live in the
+//! `socsim-datasets` crate. This crate is the generic, config-driven engine
+//! only.
 //!
 //! # Extension point
 //!
 //! The [`SurveySchema`] struct *is* the extension API: a new survey schema
-//! (e.g. CES 2022) is declared exactly the way the built-in ANES builders are —
-//! see the [`SurveySchema::builder`] doc example. Provide the survey's real
+//! (e.g. CES 2022) is declared exactly the way the ANES builders in
+//! `socsim-datasets` are — see the [`SurveySchema::builder`] doc example.
+//! Provide the survey's real
 //! column names and value codes and build a schema; no change to this crate is
 //! needed.
 //!
@@ -43,9 +43,6 @@
 
 mod distribution;
 mod schema;
-
-#[cfg(feature = "anes")]
-pub mod anes;
 
 pub use distribution::{estimate_distributions, CategoryDist, Distributions, OutcomeDistribution};
 pub use schema::{
