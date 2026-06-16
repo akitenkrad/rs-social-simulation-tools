@@ -379,6 +379,7 @@ for row in rec.metrics() {
 Rather than reimplementing common summary statistics, the **`socsim-metrics`** crate provides them as a reusable, library-only layer. Metrics are pure observation functions (no RNG, no state mutation), so they never affect a model's reproducibility.
 
 - **Zero-dependency numeric core** (`socsim_metrics::stats`, always compiled): `mean`, `variance`, `std_dev`, `spread`, `min_max`, `gini`, `shannon_entropy`, `hhi`, `simpson_diversity`, `distinct_clusters(values, tol)`, `bimodality_coefficient`, `polarization`, `extremeness`, `max_abs_delta` / `mean_abs_delta`, `num_distinct` / `largest_share`. Each documents its exact formula.
+- **Zero-dependency distribution comparison** (`socsim_metrics::distribution`, always compiled): `kl_divergence(p, q)` (Kullback–Leibler divergence in nats; inputs treated as weights and normalized internally, epsilon-smoothed to guard against `log(0)`) and `chi_square_homogeneity(observed, expected)` returning `(statistic, p_value)` — the Pearson `χ²` statistic plus an upper-tail p-value from a hand-rolled regularized upper incomplete gamma (also exposed directly as `chi_square_sf`). Canonical distribution-comparison statistics for matching simulated against observed distributions.
 - **`core` feature** (→ `socsim-core`): extractors that read a `W: ScalarOpinions` directly (`opinion_mean`, `opinion_variance`, `opinion_spread`, `opinion_clusters`, …) plus a generic `MetricsMechanism<W>` that records a configurable set of named metrics each `PostStep`.
 - **`network` feature** (→ `socsim-net`): `mean_degree`, `global_clustering_coefficient`, `component_sizes`, `largest_component_fraction`, `cascade_size` / `reach_fraction`.
 - **`spatial` feature** (→ `socsim-grid`): `segregation_index`, `local_similarity` over a label accessor.
@@ -674,6 +675,8 @@ let cfg = llm_config(&settings);   // LlmConfig::deterministic() + temperature +
 
 All eleven bundled LLM replications use this harness rather than a per-model client module. (The lower-level `build_live_client(cache_path: Option<&Path>)` is still available if you need it directly.)
 
+Two helpers cover the model-output edge cases. The live Ollama/OpenAI backends reject a blank (whitespace-only) completion with `LlmError::EmptyResponse { endpoint, model }` — useful for reasoning/harmony models that can spend their whole `num_predict` budget on a hidden thinking trace and return no visible answer, so a caller can retry or raise the budget instead of silently propagating an empty string. And `extract_first_choice(text, &vocab)` maps free-text output back to a discrete label given a `&[(label, &[synonyms])]` table: it matches on word boundaries (tolerant of leading markdown/punctuation and full-sentence answers), the earliest-occurring synonym wins, and ties at the same position break to the longest synonym; it returns `None` when no label is mentioned.
+
 **Confine the call to a `Decision`-phase mechanism.** `LlmClient::complete` is synchronous, so it slots straight into `apply`:
 
 ```rust,ignore
@@ -696,7 +699,7 @@ impl Mechanism<MyWorld> for LlmDecision {
 }
 ```
 
-A warm `PromptCache` (plus `temperature = 0`) replays identical responses, so a re-run is pseudo-deterministic on top of the seed-deterministic core.
+A warm `PromptCache` (plus `temperature = 0`) replays identical responses, so a re-run is pseudo-deterministic on top of the seed-deterministic core. When `apply_choice` needs to turn the model's prose into a discrete label, `socsim_llm::extract_first_choice(&resp.text, &vocab)` does the robust parsing for you.
 
 **Write outputs.** `socsim-results` provides the timestamped-run + `latest`-symlink convention without any `Recorder`:
 

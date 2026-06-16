@@ -379,6 +379,7 @@ for row in rec.metrics() {
 よくある要約統計を再実装する代わりに，**`socsim-metrics`** クレートが再利用可能なライブラリ専用の層として提供します．メトリクスは純粋な観測関数（RNG も状態変更もなし）なので，モデルの再現性に一切影響しません．
 
 - **依存ゼロの数値コア**（`socsim_metrics::stats`，常にコンパイルされる）：`mean`，`variance`，`std_dev`，`spread`，`min_max`，`gini`，`shannon_entropy`，`hhi`，`simpson_diversity`，`distinct_clusters(values, tol)`，`bimodality_coefficient`，`polarization`，`extremeness`，`max_abs_delta` / `mean_abs_delta`，`num_distinct` / `largest_share`．各関数が正確な式を doc コメントに明示している．
+- **依存ゼロの分布比較**（`socsim_metrics::distribution`，常にコンパイルされる）：`kl_divergence(p, q)`（Kullback–Leibler ダイバージェンス，単位は nat；入力は重みとして扱い内部で正規化し，`log(0)` を避けるため epsilon でスムージング）と，`(statistic, p_value)` を返す `chi_square_homogeneity(observed, expected)` —— Pearson の `χ²` 統計量と，手書きの正則化上側不完全ガンマ関数による上側裾の p 値（`chi_square_sf` として直接も公開）．シミュレーション分布と観測分布を突き合わせるための正準的な分布比較統計．
 - **`core` feature**（→ `socsim-core`）：`W: ScalarOpinions` から直接読む抽出器（`opinion_mean`，`opinion_variance`，`opinion_spread`，`opinion_clusters` 等）と，毎 `PostStep` に名前付きメトリクス集合を記録する汎用 `MetricsMechanism<W>`．
 - **`network` feature**（→ `socsim-net`）：`mean_degree`，`global_clustering_coefficient`，`component_sizes`，`largest_component_fraction`，`cascade_size` / `reach_fraction`．
 - **`spatial` feature**（→ `socsim-grid`）：ラベルアクセサ越しの `segregation_index`，`local_similarity`．
@@ -674,6 +675,8 @@ let cfg = llm_config(&settings);   // LlmConfig::deterministic() + temperature +
 
 同梱の11本の LLM 再現実装はすべて，モデルごとのクライアントモジュールではなくこのハーネスを使っています．（低レベルの `build_live_client(cache_path: Option<&Path>)` も直接使えます．）
 
+モデル出力のエッジケースに対応する補助が2つあります．ライブの Ollama/OpenAI バックエンドは空（空白のみ）の応答を `LlmError::EmptyResponse { endpoint, model }` で拒否します —— `num_predict` バジェットを丸ごと隠れた思考トレースに費やして可視の回答を返さないことがある reasoning/harmony 系モデルで有用で，呼び出し側は黙って空文字列を伝播させる代わりにリトライやバジェット増加を選べます．また `extract_first_choice(text, &vocab)` は，`&[(label, &[synonyms])]` 表を与えると自由文出力を離散ラベルへ写像します：単語境界でマッチし（先頭の markdown/句読点や全文回答に寛容），最も早く出現したシノニムが勝ち，同位置のタイは最長シノニムでブレークします；どのラベルにも言及がなければ `None` を返します．
+
 **呼び出しを `Decision` フェーズのメカニズムに閉じ込める．** `LlmClient::complete` は同期的なので，そのまま `apply` に差し込めます：
 
 ```rust,ignore
@@ -696,7 +699,7 @@ impl Mechanism<MyWorld> for LlmDecision {
 }
 ```
 
-ウォームな `PromptCache`（加えて `temperature = 0`）が同一のレスポンスを再生するので，再実行はシード決定論的なコアの上で疑似決定論的になります．
+ウォームな `PromptCache`（加えて `temperature = 0`）が同一のレスポンスを再生するので，再実行はシード決定論的なコアの上で疑似決定論的になります．`apply_choice` でモデルの散文を離散ラベルに変換する必要があるときは，`socsim_llm::extract_first_choice(&resp.text, &vocab)` が堅牢なパースを代行します．
 
 **出力を書き出す．** `socsim-results` は `Recorder` なしで，タイムスタンプ付き実行 + `latest` シンボリックリンクの規約を提供します：
 
