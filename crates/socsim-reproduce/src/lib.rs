@@ -1,19 +1,20 @@
 //! Paper-anchor PASS/off reproduction harness for socsim (engine-free).
 //!
-//! This crate generalizes sun2024's `rss/reproduce.rs` into a **paper-agnostic**
-//! offline-verification harness. The idea is unchanged from sun2024: a
-//! reproduction run does **not** re-run generation; it reads cached observed
-//! values and compares them against the paper's reference values
-//! ("anchors"), emitting a machine-readable PASS / off / NO_DATA summary.
+//! A **paper-agnostic** offline-verification harness: a reproduction run does
+//! **not** re-run generation; it reads cached observed values and compares them
+//! against a paper's reference values ("anchors"), emitting a machine-readable
+//! PASS / off / NO_DATA summary.
 //!
 //! The crate ships the *mechanics* — the [`Anchor`] shape, the
 //! [`compare_anchor`] classification (tolerance / upper-bound), the
 //! [`ReproduceRow`] output rows, the [`build_rows`] join, the CSV writers, and a
 //! generic [`find_latest`] directory scanner — but it ships **no** anchor
 //! values. Each paper supplies its own `&[Anchor]` slice plus an observation
-//! lookup closure, so sun2024's Study A anchors stay in sun2024. The
-//! classification logic here is byte-for-byte the same as sun2024's, so a later
-//! migration of sun2024 onto this crate is bit-parity.
+//! lookup closure, so a paper's reference values stay in the paper's own crate.
+//!
+//! Originally extracted from the sun2024 replication; the comparison and CSV
+//! semantics are preserved so a replication can migrate onto this crate without
+//! changing its outputs.
 //!
 //! Depends on [`socsim_results`] for the CSV writer (and shares its
 //! timestamped-results-dir conventions); it pulls in no engine crate.
@@ -28,16 +29,16 @@
 //!     study: "A",
 //!     table_or_fig: "Table 1",
 //!     condition: "overall",
-//!     metric: "rss_biden_rate",
+//!     metric: "outcome_rate",
 //!     paper_value: 0.5743,
 //!     tolerance: 0.02,
 //!     upper_bound: false,
-//!     note: "RSS 10-iteration mean Biden rate",
+//!     note: "mean outcome rate over 10 iterations",
 //! }];
 //!
 //! // The paper supplies an observation lookup (here: a fixed value).
 //! let rows = build_rows(ANCHORS, |a| match a.metric {
-//!     "rss_biden_rate" => Some(0.574),
+//!     "outcome_rate" => Some(0.574),
 //!     _ => None,
 //! });
 //!
@@ -55,10 +56,9 @@ use socsim_results::{write_csv, WriteError};
 
 /// One paper reference value to verify against an observed value.
 ///
-/// Ported field-for-field from sun2024's `Anchor`. `tolerance` is "observed
-/// within this band of `paper_value` passes" for centred metrics; for
-/// upper-bound metrics (KL gates etc.) set [`Anchor::upper_bound`] and
-/// `tolerance` holds the upper bound itself.
+/// `tolerance` is "observed within this band of `paper_value` passes" for
+/// centred metrics; for upper-bound metrics (KL gates etc.) set
+/// [`Anchor::upper_bound`] and `tolerance` holds the upper bound itself.
 #[derive(Debug, Clone, Copy)]
 pub struct Anchor {
     /// Study label (e.g. `"A"`).
@@ -105,8 +105,6 @@ impl AnchorStatus {
 
 /// Classify one anchor against an observed value (`None` = no data).
 ///
-/// Identical logic to sun2024's `compare_anchor` (the parity contract):
-///
 /// - `upper_bound`: PASS when `observed < tolerance` (strict less-than; the
 ///   bound itself is *off*).
 /// - otherwise: PASS when `|observed - paper_value| <= tolerance`.
@@ -130,12 +128,10 @@ pub fn compare_anchor(anchor: &Anchor, observed: Option<f64>) -> AnchorStatus {
 
 /// One reproduction summary row (the CSV output unit).
 ///
-/// Ported from sun2024's `ReproduceRow`. Numeric columns are pre-formatted as
-/// fixed 6-decimal strings (`{:.6}`) so [`socsim_results::write_csv`] emits
-/// **byte-identical** output to sun2024's hand-rolled `write_reproduce_summary`
-/// (`reproduce.rs`): `paper_value` / `tolerance` are always `{:.6}`, and
-/// `observed_value` is `{:.6}` when present or the **empty string** when the
-/// observation is missing (sun2024's `.map(|v| format!("{v:.6}")).unwrap_or_default()`).
+/// Numeric columns are pre-formatted as fixed 6-decimal strings (`{:.6}`) so
+/// [`socsim_results::write_csv`] emits stable, byte-deterministic output:
+/// `paper_value` / `tolerance` are always `{:.6}`, and `observed_value` is
+/// `{:.6}` when present or the **empty string** when the observation is missing.
 ///
 /// The original `f64` / `Option<f64>` are still available via
 /// [`ReproduceRow::paper_value`], [`ReproduceRow::observed_value`], and
@@ -182,19 +178,17 @@ impl ReproduceRow {
     }
 }
 
-/// Format an observed value the way sun2024 does: `{:.6}` or empty when `None`.
+/// Format an observed value: `{:.6}` or the empty string when `None`.
 fn fmt_observed(observed: Option<f64>) -> String {
     observed.map(|v| format!("{v:.6}")).unwrap_or_default()
 }
 
 /// Join a paper's anchors against an observation lookup, classifying each.
 ///
-/// Generalizes sun2024's `build_rows`: rather than baking in sun2024's Study A
-/// anchors and `StudyAObserved`, the caller passes its own `anchors` slice plus
-/// an `observed` closure mapping each anchor to its observed value (`None` =
-/// no data). The per-anchor classification is [`compare_anchor`], unchanged.
-/// Numeric columns are stored pre-formatted `{:.6}` for byte-parity (see
-/// [`ReproduceRow`]).
+/// The caller passes its own `anchors` slice plus an `observed` closure mapping
+/// each anchor to its observed value (`None` = no data). The per-anchor
+/// classification is [`compare_anchor`]. Numeric columns are stored
+/// pre-formatted `{:.6}` for byte-deterministic output (see [`ReproduceRow`]).
 pub fn build_rows<F>(anchors: &[Anchor], observed: F) -> Vec<ReproduceRow>
 where
     F: Fn(&Anchor) -> Option<f64>,
@@ -219,9 +213,9 @@ where
 
 /// A row of the canonical paper-anchors table (observation-independent).
 ///
-/// Mirrors sun2024's `write_paper_anchors` columns and formatting:
 /// `paper_value` / `tolerance` are pre-formatted `{:.6}` strings for
-/// byte-parity, and `comparison` is `"upper_bound"` or `"tolerance"`.
+/// byte-deterministic output, and `comparison` is `"upper_bound"` or
+/// `"tolerance"`.
 #[derive(Debug, Clone, Serialize)]
 struct AnchorRow {
     study: String,
@@ -236,9 +230,8 @@ struct AnchorRow {
 
 /// Write `reproduce_summary.csv` (the PASS/off comparison) to `path`.
 ///
-/// Uses [`socsim_results::write_csv`]; column layout matches sun2024's
-/// `write_reproduce_summary` (study, table_or_fig, condition, metric,
-/// paper_value, observed_value, tolerance, status).
+/// Uses [`socsim_results::write_csv`]; columns are study, table_or_fig,
+/// condition, metric, paper_value, observed_value, tolerance, status.
 pub fn write_reproduce_summary(
     rows: &[ReproduceRow],
     path: impl AsRef<Path>,
@@ -249,7 +242,7 @@ pub fn write_reproduce_summary(
 /// Write `paper_anchors.csv` (the canonical reference table) to `path`.
 ///
 /// Observation-independent — always writable. Uses
-/// [`socsim_results::write_csv`]; matches sun2024's `write_paper_anchors`.
+/// [`socsim_results::write_csv`].
 pub fn write_paper_anchors(anchors: &[Anchor], path: impl AsRef<Path>) -> Result<(), WriteError> {
     let rows: Vec<AnchorRow> = anchors
         .iter()
@@ -275,8 +268,8 @@ pub fn write_paper_anchors(anchors: &[Anchor], path: impl AsRef<Path>) -> Result
 /// Scan `results_root` for the newest timestamped run directory satisfying
 /// `predicate`.
 ///
-/// Generalizes sun2024's `find_latest_study_a`: real subdirectories (the
-/// `latest` symlink is excluded) are visited in **descending name order**
+/// Real subdirectories (the `latest` symlink is excluded) are visited in
+/// **descending name order**
 /// (newest timestamp first), and the first whose path satisfies `predicate` is
 /// returned. The predicate receives the candidate directory path so a paper can
 /// require e.g. a particular sidecar file or a `config.json` field. Returns

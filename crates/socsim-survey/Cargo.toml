@@ -6,6 +6,12 @@ version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Opt-in built-in ANES 2012/2016/2020 schema builders (the `anes` module).
+# Disabled by default: the crate ships as the generic, config-driven recode engine.
+anes = []
+
 [dependencies]
 serde.workspace = true
 csv.workspace   = true

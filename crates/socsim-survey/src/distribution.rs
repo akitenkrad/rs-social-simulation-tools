@@ -1,9 +1,7 @@
 //! Empirical category distributions over recoded survey records.
 //!
-//! Ported from sun2024's `rss/distribution.rs` (`CategoryDist`,
-//! `DemoDistributions::estimate`, `VoteDistribution::estimate`). Each
-//! demographic variable's distribution is normalized over *its own* non-missing
-//! sample; outcome counts only count non-missing outcomes.
+//! Each demographic variable's distribution is normalized over *its own*
+//! non-missing sample; outcome counts only count non-missing outcomes.
 
 use std::collections::HashMap;
 
@@ -12,9 +10,9 @@ use crate::Record;
 
 /// One variable's empirical distribution (category label -> probability).
 ///
-/// `labels` preserves a stable order (sorted, matching sun2024's
-/// `from_counts`); `probs` is aligned with `labels` and sums to 1 (or all-zero
-/// when the variable has no non-missing observations).
+/// `labels` preserves a stable (sorted) order; `probs` is aligned with `labels`
+/// and sums to 1 (or all-zero when the variable has no non-missing
+/// observations).
 #[derive(Debug, Clone)]
 pub struct CategoryDist {
     /// Category labels in stable (sorted) order.
@@ -26,8 +24,7 @@ pub struct CategoryDist {
 impl CategoryDist {
     /// Build an empirical distribution from a label -> count map.
     ///
-    /// Labels are sorted for stability (sun2024 parity); an empty total yields
-    /// all-zero probs.
+    /// Labels are sorted for stability; an empty total yields all-zero probs.
     pub fn from_counts(counts: &HashMap<String, u64>) -> Self {
         let mut labels: Vec<String> = counts.keys().cloned().collect();
         labels.sort();
@@ -44,10 +41,9 @@ impl CategoryDist {
     }
 }
 
-/// Empirical outcome (vote) distribution: per-outcome-label counts.
+/// Empirical outcome distribution: per-outcome-label counts.
 ///
-/// Ports sun2024's `VoteDistribution`, but generalized to arbitrary outcome
-/// labels declared by the schema (not hard-coded Biden/Trump).
+/// Outcome labels are arbitrary, declared by the schema (not hard-coded).
 #[derive(Debug, Clone, Default)]
 pub struct OutcomeDistribution {
     /// Outcome label -> count (non-missing outcomes only).
@@ -82,7 +78,7 @@ impl OutcomeDistribution {
 pub struct Distributions {
     /// Variable key (e.g. `"race"`) -> empirical category distribution.
     pub demos: HashMap<String, CategoryDist>,
-    /// Empirical outcome (vote) distribution.
+    /// Empirical outcome distribution.
     pub outcome: OutcomeDistribution,
 }
 
@@ -95,11 +91,9 @@ impl Distributions {
 
 /// Estimate the empirical [`Distributions`] over a slice of raw records.
 ///
-/// Generic port of sun2024's `DemoDistributions::estimate` +
-/// `VoteDistribution::estimate`: each variable is recoded per record, counts
-/// are accumulated per variable (missing values skipped), and each variable is
-/// normalized over its own non-missing sample. Outcome counts use
-/// [`actual_outcome`].
+/// Each variable is recoded per record, counts are accumulated per variable
+/// (missing values skipped), and each variable is normalized over its own
+/// non-missing sample. Outcome counts use [`actual_outcome`].
 pub fn estimate_distributions(records: &[Record], schema: &SurveySchema) -> Distributions {
     let mut per_var: HashMap<String, HashMap<String, u64>> = HashMap::new();
     for v in &schema.vars {
