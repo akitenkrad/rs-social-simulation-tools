@@ -1,4 +1,5 @@
-//! Ollama backend (`/api/chat`), gated behind the `ollama` feature.
+//! Ollama backend (`/api/chat` or `/api/generate`), gated behind the `ollama`
+//! feature.
 
 use serde_json::json;
 
@@ -6,6 +7,41 @@ use crate::client::{
     reject_blank_response, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse, TokenLogprob,
     DEFAULT_TOP_LOGPROBS,
 };
+
+/// Which Ollama API surface an [`OllamaClient`] talks to.
+///
+/// Ollama exposes two single-turn generation endpoints with different request
+/// and response shapes:
+///
+/// - [`Chat`](OllamaApi::Chat) → `/api/chat`, a role-structured chat completion
+///   (`messages: [{role, content}, …]`, answer in `message.content`).  This is
+///   the default and matches the historical behaviour.
+/// - [`Generate`](OllamaApi::Generate) → `/api/generate`, a completion-style
+///   endpoint (`prompt` plus an optional top-level `system` string, answer in
+///   `response`).
+///
+/// A client picks **one** endpoint for its whole lifetime (a replication runs
+/// against a single endpoint), selected via [`OllamaClient::with_api`].  Both
+/// endpoints share identical `options` semantics (`temperature` / `seed` /
+/// `num_predict`) via [`OllamaClient::build_options`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OllamaApi {
+    /// The role-structured `/api/chat` endpoint (the default).
+    #[default]
+    Chat,
+    /// The completion-style `/api/generate` endpoint.
+    Generate,
+}
+
+impl OllamaApi {
+    /// The path this API surface lives at (`/api/chat` or `/api/generate`).
+    fn path(self) -> &'static str {
+        match self {
+            OllamaApi::Chat => "/api/chat",
+            OllamaApi::Generate => "/api/generate",
+        }
+    }
+}
 
 /// A synchronous [`LlmClient`] for a local/remote [Ollama](https://ollama.com)
 /// server.
@@ -15,29 +51,60 @@ use crate::client::{
 /// or take an explicit host/model with [`OllamaClient::new`].  Requests
 /// `stream = false` and threads `temperature` / `seed` through
 /// `options`.
+///
+/// Defaults to the [`Chat`](OllamaApi::Chat) endpoint (`/api/chat`); call
+/// [`with_api`](OllamaClient::with_api) to select the completion-style
+/// [`Generate`](OllamaApi::Generate) endpoint (`/api/generate`) instead.
 pub struct OllamaClient {
     host: String,
     model: String,
     endpoint: String,
+    api: OllamaApi,
 }
 
 impl OllamaClient {
     /// Build a client for `model` on `host` (e.g. `http://localhost:11434`).
+    ///
+    /// Defaults to the [`Chat`](OllamaApi::Chat) endpoint; chain
+    /// [`with_api`](Self::with_api) to switch to `/api/generate`.
     pub fn new(host: impl Into<String>, model: impl Into<String>) -> Self {
         let host = host.into();
-        let endpoint = format!("{}/api/chat", host.trim_end_matches('/'));
+        let api = OllamaApi::default();
+        let endpoint = Self::endpoint_for(&host, api);
         Self {
             host,
             model: model.into(),
             endpoint,
+            api,
         }
     }
 
     /// Build a client from `OLLAMA_HOST` / `OLLAMA_MODEL` (with defaults).
+    ///
+    /// Defaults to the [`Chat`](OllamaApi::Chat) endpoint.
     pub fn from_env() -> Self {
         let host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".into());
         let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.1".into());
         Self::new(host, model)
+    }
+
+    /// Select which Ollama API surface this client talks to (builder style),
+    /// recomputing the [`endpoint`](Self::endpoint) to `/api/chat` or
+    /// `/api/generate` accordingly.
+    pub fn with_api(mut self, api: OllamaApi) -> Self {
+        self.endpoint = Self::endpoint_for(&self.host, api);
+        self.api = api;
+        self
+    }
+
+    /// The Ollama API surface this client talks to.
+    pub fn api(&self) -> OllamaApi {
+        self.api
+    }
+
+    /// Compute the full endpoint URL for `host` and `api`.
+    fn endpoint_for(host: &str, api: OllamaApi) -> String {
+        format!("{}{}", host.trim_end_matches('/'), api.path())
     }
 
     /// The configured host.
@@ -73,6 +140,57 @@ impl OllamaClient {
             None => json!([{ "role": "user", "content": prompt }]),
         }
     }
+
+    /// Build the request body for the selected [`api`](Self::api).
+    ///
+    /// - [`Chat`](OllamaApi::Chat) → `{model, stream:false, messages, options}`
+    ///   (byte-identical to the historical body).
+    /// - [`Generate`](OllamaApi::Generate) →
+    ///   `{model, prompt, system?, stream:false, options}`, where the top-level
+    ///   `system` string is present **only when `config.system` is `Some`**.
+    ///
+    /// Both share [`build_options`](Self::build_options), so
+    /// `temperature` / `seed` (honouring `omit_seed`) / `num_predict`
+    /// (`max_tokens`) are identical across the two endpoints.
+    fn build_body(&self, prompt: &str, config: &LlmConfig) -> serde_json::Value {
+        match self.api {
+            OllamaApi::Chat => json!({
+                "model": self.model,
+                "stream": false,
+                "messages": Self::build_messages(prompt, config),
+                "options": Self::build_options(config),
+            }),
+            OllamaApi::Generate => {
+                let mut body = json!({
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": false,
+                    "options": Self::build_options(config),
+                });
+                if let Some(system) = &config.system {
+                    body["system"] = json!(system);
+                }
+                body
+            }
+        }
+    }
+
+    /// Extract the completion text for the selected [`api`](Self::api): the
+    /// chat endpoint returns it under `message.content`, the generate endpoint
+    /// under a top-level `response` string.
+    fn response_text(&self, value: &serde_json::Value) -> Option<String> {
+        match self.api {
+            OllamaApi::Chat => value
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .map(str::to_string),
+            OllamaApi::Generate => value
+                .get("response")
+                .and_then(|r| r.as_str())
+                .map(str::to_string),
+        }
+    }
 }
 
 impl LlmClient for OllamaClient {
@@ -85,12 +203,7 @@ impl LlmClient for OllamaClient {
     }
 
     fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError> {
-        let body = json!({
-            "model": self.model,
-            "stream": false,
-            "messages": Self::build_messages(prompt, config),
-            "options": Self::build_options(config),
-        });
+        let body = self.build_body(prompt, config);
 
         let resp = ureq::post(&self.endpoint)
             .send_json(body)
@@ -102,16 +215,13 @@ impl LlmClient for OllamaClient {
             message: format!("decoding response: {e}"),
         })?;
 
-        let text = value
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_str())
+        let text = self
+            .response_text(&value)
             .ok_or_else(|| LlmError::Backend {
                 endpoint: self.endpoint.clone(),
                 status: 0,
-                message: format!("missing message.content in response: {value}"),
-            })?
-            .to_string();
+                message: format!("missing response text in response: {value}"),
+            })?;
 
         // A successful call that produced no visible text (e.g. a reasoning
         // model that consumed its whole `num_predict` budget on a hidden
@@ -142,14 +252,13 @@ impl LlmClient for OllamaClient {
         config: &LlmConfig,
     ) -> Result<LlmResponse, LlmError> {
         let top_logprobs = config.top_logprobs.unwrap_or(DEFAULT_TOP_LOGPROBS).max(1);
-        let body = json!({
-            "model": self.model,
-            "stream": false,
-            "messages": Self::build_messages(prompt, config),
-            "options": Self::build_options(config),
-            "logprobs": true,
-            "top_logprobs": top_logprobs,
-        });
+        // Start from the endpoint-appropriate base body (chat messages vs
+        // generate prompt/system), then add the logprob request fields the same
+        // way for both — Ollama accepts `logprobs` / `top_logprobs` on
+        // `/api/generate` exactly as on `/api/chat`.
+        let mut body = self.build_body(prompt, config);
+        body["logprobs"] = json!(true);
+        body["top_logprobs"] = json!(top_logprobs);
 
         let resp = ureq::post(&self.endpoint)
             .send_json(body)
@@ -161,12 +270,7 @@ impl LlmClient for OllamaClient {
             message: format!("decoding response: {e}"),
         })?;
 
-        let text = value
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_str())
-            .unwrap_or_default()
-            .to_string();
+        let text = self.response_text(&value).unwrap_or_default();
 
         let logprobs = parse_logprobs(&value);
 
@@ -191,11 +295,14 @@ impl LlmClient for OllamaClient {
 }
 
 /// Parse the first generation position's `top_logprobs` out of an Ollama
-/// `/api/chat` response into [`TokenLogprob`]s, or `None` if absent.
+/// `/api/chat` or `/api/generate` response into [`TokenLogprob`]s, or `None`
+/// if absent.
 ///
 /// Ollama exposes per-position logprobs under either a top-level `logprobs`
-/// array or `message.logprobs` depending on version; we try both.  Each
-/// position carries a `top_logprobs` list of `{token, bytes, logprob}`.
+/// array or `message.logprobs` depending on version/endpoint; we try both.
+/// `/api/generate` reports them under the top-level `logprobs` array, which the
+/// first lookup covers.  Each position carries a `top_logprobs` list of
+/// `{token, bytes, logprob}`.
 fn parse_logprobs(value: &serde_json::Value) -> Option<Vec<TokenLogprob>> {
     let positions = value
         .get("logprobs")
@@ -256,6 +363,108 @@ mod tests {
         let c = OllamaClient::new("http://localhost:11434/", "llama3.1");
         assert_eq!(c.endpoint(), "http://localhost:11434/api/chat");
         assert_eq!(c.model(), "llama3.1");
+        // Default API surface is Chat (backward compat).
+        assert_eq!(c.api(), OllamaApi::Chat);
+    }
+
+    #[test]
+    fn with_api_generate_switches_endpoint() {
+        let c =
+            OllamaClient::new("http://localhost:11434/", "llama3.1").with_api(OllamaApi::Generate);
+        assert_eq!(c.endpoint(), "http://localhost:11434/api/generate");
+        assert_eq!(c.api(), OllamaApi::Generate);
+        // Switching back to Chat restores the chat endpoint.
+        let c = c.with_api(OllamaApi::Chat);
+        assert_eq!(c.endpoint(), "http://localhost:11434/api/chat");
+        assert_eq!(c.api(), OllamaApi::Chat);
+    }
+
+    #[test]
+    fn ollama_api_default_is_chat() {
+        assert_eq!(OllamaApi::default(), OllamaApi::Chat);
+    }
+
+    #[test]
+    fn chat_body_is_byte_unchanged() {
+        // The Chat body must equal the historical `{model, stream, messages,
+        // options}` shape exactly (no new fields), preserving every existing
+        // request byte-for-byte.
+        let c = OllamaClient::new("http://localhost:11434", "m");
+        let cfg = LlmConfig::deterministic().with_seed(7);
+        let body = c.build_body("hi", &cfg);
+        let expected = json!({
+            "model": "m",
+            "stream": false,
+            "messages": [{ "role": "user", "content": "hi" }],
+            "options": { "temperature": 0.0, "seed": 7 },
+        });
+        assert_eq!(body, expected);
+    }
+
+    #[test]
+    fn generate_body_matches_required_shape() {
+        // CRITICAL fidelity test: with temperature=1.0, omit_seed, max_tokens=16,
+        // system=Some, the Generate body must be byte-identical to sun2024's
+        // current request (field presence + names), so swapping in socsim-llm
+        // produces byte-identical generation. NOTE: no "seed" when omit_seed.
+        let c = OllamaClient::new("http://localhost:11434", "m").with_api(OllamaApi::Generate);
+        let cfg = LlmConfig::sampling(1.0) // temperature=1.0, omit_seed=true
+            .with_max_tokens(16)
+            .with_system("s")
+            .allow_blank();
+        let body = c.build_body("p", &cfg);
+        let expected = json!({
+            "model": "m",
+            "system": "s",
+            "prompt": "p",
+            "stream": false,
+            "options": { "temperature": 1.0, "num_predict": 16 },
+        });
+        assert_eq!(body, expected);
+    }
+
+    #[test]
+    fn generate_body_omits_seed_when_omit_seed() {
+        let c = OllamaClient::new("http://h", "m").with_api(OllamaApi::Generate);
+        let cfg = LlmConfig::sampling(1.0); // omit_seed = true
+        let body = c.build_body("p", &cfg);
+        assert!(body["options"].get("seed").is_none(), "{body}");
+        assert_eq!(body["options"]["temperature"], json!(1.0));
+    }
+
+    #[test]
+    fn generate_body_includes_seed_when_not_omitted() {
+        let c = OllamaClient::new("http://h", "m").with_api(OllamaApi::Generate);
+        let cfg = LlmConfig::deterministic().with_seed(9);
+        let body = c.build_body("p", &cfg);
+        assert_eq!(body["options"]["seed"], json!(9));
+    }
+
+    #[test]
+    fn generate_body_includes_system_only_when_some() {
+        let c = OllamaClient::new("http://h", "m").with_api(OllamaApi::Generate);
+        // No system → no top-level "system" field.
+        let no_sys = c.build_body("p", &LlmConfig::deterministic());
+        assert!(no_sys.get("system").is_none(), "{no_sys}");
+        // System present → top-level string field.
+        let with_sys = c.build_body("p", &LlmConfig::deterministic().with_system("you are X"));
+        assert_eq!(with_sys["system"], json!("you are X"));
+    }
+
+    #[test]
+    fn generate_response_text_parses_response_field() {
+        let c = OllamaClient::new("http://h", "m").with_api(OllamaApi::Generate);
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"response": " Donald", "done": true}"#).unwrap();
+        assert_eq!(c.response_text(&value).as_deref(), Some(" Donald"));
+    }
+
+    #[test]
+    fn chat_response_text_parses_message_content() {
+        let c = OllamaClient::new("http://h", "m"); // Chat
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"message": {"content": "hi"}}"#).unwrap();
+        assert_eq!(c.response_text(&value).as_deref(), Some("hi"));
     }
 
     #[test]
