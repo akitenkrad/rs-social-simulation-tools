@@ -18,7 +18,7 @@
 //! [`CachingClient`] / [`PromptCache`] / [`LlmConfig`] / [`LlmError`] / [`LlmClient`]
 //! types, so tests can use them with a [`mock::ScriptedClient`](crate::mock).
 
-use crate::{CachingClient, LlmClient, LlmConfig, PromptCache};
+use crate::{CachingClient, LlmClient, LlmConfig, PromptCache, SharedCachingClient};
 
 /// LLM-layer settings for a replication run.
 ///
@@ -71,6 +71,27 @@ pub fn wrap_client<C: LlmClient + 'static>(backend: C, cache: PromptCache) -> Li
     CachingClient::new(boxed, cache)
 }
 
+/// The shared, **injectable** caching-client type: a [`SharedCachingClient`]
+/// over a type-erased `Box<dyn LlmClient>` backend.
+///
+/// Unlike [`LiveClient`] (whose `complete` takes `&mut self`), this *implements*
+/// [`LlmClient`], so it can be passed through a `&dyn LlmClient` /
+/// `Box<dyn LlmClient>` injection point while still serving from the prompt
+/// cache.  Use it when a run injects its client behind a shared reference.
+pub type SharedLiveClient = SharedCachingClient<Box<dyn LlmClient>>;
+
+/// Wrap any [`LlmClient`] in a cache, producing an injectable
+/// [`SharedLiveClient`] (the [`SharedCachingClient`] sibling of
+/// [`wrap_client`]).  Used in tests and for offline runs that need a
+/// `&dyn LlmClient`.
+pub fn wrap_client_shared<C: LlmClient + 'static>(
+    backend: C,
+    cache: PromptCache,
+) -> SharedLiveClient {
+    let boxed: Box<dyn LlmClient> = Box::new(backend);
+    SharedCachingClient::new(boxed, cache)
+}
+
 /// Build an [`LlmConfig`] from [`LlmSettings`]: the deterministic base config
 /// with the settings' `temperature` and `seed` applied.
 pub fn llm_config(settings: &LlmSettings) -> LlmConfig {
@@ -89,6 +110,20 @@ pub fn build_live_client_from_settings(
     settings: &LlmSettings,
 ) -> Result<LiveClient, crate::LlmError> {
     crate::build_live_client(settings.cache_path.as_deref().map(std::path::Path::new))
+}
+
+/// Build the production «Ollama first → OpenAI fallback + cache» stack as an
+/// **injectable** [`SharedLiveClient`] (the [`build_live_client_from_settings`]
+/// sibling that yields a type implementing [`LlmClient`], usable behind a
+/// `&dyn LlmClient`).
+///
+/// Feature-gated behind `live` to match
+/// [`build_shared_live_client`](crate::build_shared_live_client).
+#[cfg(feature = "live")]
+pub fn build_shared_live_client_from_settings(
+    settings: &LlmSettings,
+) -> Result<SharedLiveClient, crate::LlmError> {
+    crate::build_shared_live_client(settings.cache_path.as_deref().map(std::path::Path::new))
 }
 
 #[cfg(test)]
@@ -159,6 +194,26 @@ mod tests {
             .unwrap();
         assert_eq!(resp2.text, "scripted-answer");
         assert!(resp2.metadata.cache_hit);
+    }
+
+    #[test]
+    fn wrap_client_shared_is_injectable_and_caches() {
+        let backend = ScriptedClient::constant("test-model", "scripted-answer");
+        let client = wrap_client_shared(backend, PromptCache::in_memory());
+        // Usable behind &dyn LlmClient (the friction this closes).
+        let by_dyn: &dyn LlmClient = &client;
+
+        let r1 = by_dyn
+            .complete("anything?", &LlmConfig::deterministic())
+            .unwrap();
+        assert_eq!(r1.text, "scripted-answer");
+        assert!(!r1.metadata.cache_hit);
+
+        let r2 = by_dyn
+            .complete("anything?", &LlmConfig::deterministic())
+            .unwrap();
+        assert_eq!(r2.text, "scripted-answer");
+        assert!(r2.metadata.cache_hit);
     }
 
     #[test]

@@ -1,6 +1,8 @@
 //! The provider-agnostic [`LlmClient`] trait, its configuration, response and
 //! metadata types, and the [`CachingClient`] decorator.
 
+use std::cell::RefCell;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -534,6 +536,112 @@ impl<C: LlmClient> CachingClient<C> {
     }
 }
 
+// ── interior-mutable caching decorator ───────────────────────────────────────
+
+/// An interior-mutable sibling of [`CachingClient`] that **implements
+/// [`LlmClient`]**, so a cache-backed client can be passed through a
+/// `&dyn LlmClient` / `Box<dyn LlmClient>` injection point.
+///
+/// [`CachingClient::complete`] takes `&mut self` because a miss updates the
+/// cache, which means it cannot satisfy `LlmClient::complete(&self, …)`.  This
+/// wrapper moves the cache behind a [`RefCell`] so the `&self` trait method can
+/// still record fresh responses on a miss.  The caching semantics are otherwise
+/// **identical** to [`CachingClient`]: the same `hash(prompt + model)` key (see
+/// [`cache_key`]), the same hit/miss behaviour, and a hit returns
+/// [`CallMetadata`] with `cache_hit = true` and `endpoint = "cache"`.
+///
+/// # Single-threaded by design
+///
+/// [`LlmClient`] is a **synchronous, single-threaded** trait (the socsim engine
+/// drives a synchronous six-phase loop and calls `complete` inline), and the
+/// trait carries no `Send`/`Sync` bound.  A [`RefCell`] therefore suffices and
+/// avoids a [`Mutex`](std::sync::Mutex)'s locking cost and poisoning; the
+/// borrows taken in [`complete`](Self::complete) are short and never overlap, so
+/// no runtime borrow conflict can occur.
+///
+/// Use [`CachingClient`] when an owned `&mut self` decorator is enough; reach for
+/// `SharedCachingClient` only when the cache must live behind a shared
+/// `&dyn LlmClient`.
+pub struct SharedCachingClient<C: LlmClient> {
+    inner: C,
+    cache: RefCell<PromptCache>,
+}
+
+impl<C: LlmClient> SharedCachingClient<C> {
+    /// Wrap `inner` with `cache`.
+    pub fn new(inner: C, cache: PromptCache) -> Self {
+        Self {
+            inner,
+            cache: RefCell::new(cache),
+        }
+    }
+
+    /// Borrow the wrapped backend.
+    pub fn inner(&self) -> &C {
+        &self.inner
+    }
+
+    /// Borrow the interior-mutable cache cell (e.g. to persist it via
+    /// [`PromptCache::save`]).
+    pub fn cache(&self) -> &RefCell<PromptCache> {
+        &self.cache
+    }
+
+    /// Consume the wrapper, returning the inner client and the cache.
+    ///
+    /// Useful to recover the [`PromptCache`] after a run (e.g. to save it) once
+    /// the shared client is no longer needed.
+    pub fn into_parts(self) -> (C, PromptCache) {
+        (self.inner, self.cache.into_inner())
+    }
+}
+
+impl<C: LlmClient> LlmClient for SharedCachingClient<C> {
+    fn model(&self) -> &str {
+        self.inner.model()
+    }
+
+    fn endpoint(&self) -> &str {
+        self.inner.endpoint()
+    }
+
+    fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError> {
+        let key = cache_key(prompt, self.inner.model());
+        // Scope the immutable borrow so it is released before the backend call.
+        if let Some(text) = self.cache.borrow().get(&key) {
+            return Ok(LlmResponse {
+                text,
+                metadata: CallMetadata {
+                    model: self.inner.model().to_string(),
+                    endpoint: "cache".to_string(),
+                    temperature: config.temperature,
+                    seed: config.seed,
+                    cache_hit: true,
+                },
+                logprobs: None,
+            });
+        }
+        let resp = self.inner.complete(prompt, config)?;
+        self.cache.borrow_mut().insert(key, resp.text.clone());
+        Ok(resp)
+    }
+
+    /// Request a completion **with** token log-probabilities, delegating to the
+    /// wrapped backend **without** caching.
+    ///
+    /// Mirrors [`CachingClient::complete_with_logprobs`]: the [`PromptCache`]
+    /// only stores response *text*, so it cannot faithfully replay a logprob
+    /// distribution; logprob callers drive their own per-prompt caching when
+    /// needed.
+    fn complete_with_logprobs(
+        &self,
+        prompt: &str,
+        config: &LlmConfig,
+    ) -> Result<LlmResponse, LlmError> {
+        self.inner.complete_with_logprobs(prompt, config)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,6 +841,145 @@ mod tests {
         let json = r#"{"temperature":0.0,"seed":0,"max_tokens":null}"#;
         let c: LlmConfig = serde_json::from_str(json).unwrap();
         assert_eq!(c, LlmConfig::deterministic());
+    }
+
+    #[test]
+    fn shared_caching_client_hit_miss_through_self() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        // Count backend calls so a cache hit is observable as "inner not called".
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_in = Arc::clone(&calls);
+        let backend = ScriptedClient::new("shared-model", move |p| {
+            calls_in.fetch_add(1, Ordering::SeqCst);
+            format!("echo:{p}")
+        });
+        let client = SharedCachingClient::new(backend, PromptCache::in_memory());
+        let cfg = LlmConfig::deterministic();
+
+        // Cold miss: inner is called once.
+        let r1 = client.complete("q", &cfg).unwrap();
+        assert_eq!(r1.text, "echo:q");
+        assert!(!r1.metadata.cache_hit);
+        assert_eq!(r1.metadata.endpoint, "mock://scripted");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Warm hit: same prompt is served from cache, inner NOT called again.
+        let r2 = client.complete("q", &cfg).unwrap();
+        assert_eq!(r2.text, "echo:q");
+        assert!(r2.metadata.cache_hit);
+        assert_eq!(r2.metadata.endpoint, "cache");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Different prompt misses and calls the backend again.
+        let r3 = client.complete("other", &cfg).unwrap();
+        assert_eq!(r3.text, "echo:other");
+        assert!(!r3.metadata.cache_hit);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn shared_caching_client_works_as_dyn_llm_client() {
+        // Store behind &dyn / Box<dyn> LlmClient and call through the trait.
+        let inner = ScriptedClient::constant("dyn-model", "42");
+        let client = SharedCachingClient::new(inner, PromptCache::in_memory());
+        let boxed: Box<dyn LlmClient> = Box::new(client);
+        let by_dyn: &dyn LlmClient = &*boxed;
+
+        assert_eq!(by_dyn.model(), "dyn-model");
+        let r1 = by_dyn.complete("q", &LlmConfig::deterministic()).unwrap();
+        assert!(!r1.metadata.cache_hit);
+        assert_eq!(r1.text, "42");
+        let r2 = by_dyn.complete("q", &LlmConfig::deterministic()).unwrap();
+        assert!(r2.metadata.cache_hit); // cache survives behind &dyn
+        assert_eq!(r2.text, "42");
+    }
+
+    #[test]
+    fn shared_caching_client_delegates_logprobs_without_caching() {
+        // A backend that produces logprobs; the wrapper returns them verbatim
+        // and does not consult/populate the text cache.
+        struct LogprobBackend;
+        impl LlmClient for LogprobBackend {
+            fn model(&self) -> &str {
+                "lp-model"
+            }
+            fn endpoint(&self) -> &str {
+                "mock://logprob"
+            }
+            fn complete(&self, _p: &str, cfg: &LlmConfig) -> Result<LlmResponse, LlmError> {
+                Ok(LlmResponse {
+                    text: "plain".into(),
+                    metadata: CallMetadata {
+                        model: "lp-model".into(),
+                        endpoint: "mock://logprob".into(),
+                        temperature: cfg.temperature,
+                        seed: cfg.seed,
+                        cache_hit: false,
+                    },
+                    logprobs: None,
+                })
+            }
+            fn complete_with_logprobs(
+                &self,
+                _p: &str,
+                cfg: &LlmConfig,
+            ) -> Result<LlmResponse, LlmError> {
+                Ok(LlmResponse {
+                    text: "Donald".into(),
+                    metadata: CallMetadata {
+                        model: "lp-model".into(),
+                        endpoint: "mock://logprob".into(),
+                        temperature: cfg.temperature,
+                        seed: cfg.seed,
+                        cache_hit: false,
+                    },
+                    logprobs: Some(vec![TokenLogprob {
+                        token: " Donald".into(),
+                        bytes: b" Donald".to_vec(),
+                        logprob: -0.1,
+                    }]),
+                })
+            }
+        }
+
+        let client = SharedCachingClient::new(LogprobBackend, PromptCache::in_memory());
+        let cfg = LlmConfig::deterministic();
+        let r = client.complete_with_logprobs("q", &cfg).unwrap();
+        assert_eq!(r.text, "Donald");
+        let lp = r.logprobs.expect("logprobs delegated through");
+        assert_eq!(lp.len(), 1);
+        assert_eq!(lp[0].token, " Donald");
+        // The logprob path must not have populated the text cache: a plain
+        // `complete` for the same prompt is still a miss.
+        let plain = client.complete("q", &cfg).unwrap();
+        assert!(!plain.metadata.cache_hit);
+        assert_eq!(plain.text, "plain");
+    }
+
+    #[test]
+    fn shared_caching_client_uses_same_key_scheme_as_caching_client() {
+        // Parity: a hit is keyed on cache_key(prompt, model) exactly like
+        // CachingClient — pre-seeding the cache under that key yields a hit.
+        let mut cache = PromptCache::in_memory();
+        cache.insert(cache_key("q", "parity-model"), "seeded".into());
+        let client =
+            SharedCachingClient::new(ScriptedClient::constant("parity-model", "fresh"), cache);
+        let r = client.complete("q", &LlmConfig::deterministic()).unwrap();
+        // Served from the seeded entry, not the backend's "fresh".
+        assert!(r.metadata.cache_hit);
+        assert_eq!(r.text, "seeded");
+    }
+
+    #[test]
+    fn shared_caching_client_into_parts_recovers_cache() {
+        let client =
+            SharedCachingClient::new(ScriptedClient::constant("m", "v"), PromptCache::in_memory());
+        client.complete("q", &LlmConfig::deterministic()).unwrap();
+        let (inner, cache) = client.into_parts();
+        assert_eq!(inner.model(), "m");
+        assert_eq!(cache.get_for("q", "m"), Some("v".into()));
     }
 
     #[test]
