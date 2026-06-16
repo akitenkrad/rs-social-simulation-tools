@@ -1,0 +1,15 @@
+[package]
+name        = "socsim-reproduce"
+description = "Paper-anchor PASS/off reproduction harness for socsim (caller-supplied anchors + observation lookup, CSV summaries via socsim-results); engine-free"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+socsim-results = { path = "../socsim-results" }
+serde.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+csv.workspace   = true

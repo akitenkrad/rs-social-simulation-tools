@@ -4488,6 +4488,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "socsim-reproduce"
+version = "0.1.0"
+dependencies = [
+ "csv",
+ "serde",
+ "socsim-results",
+]
+
+[[package]]
 name = "socsim-results"
 version = "0.1.0"
 dependencies = [
@@ -4519,6 +4528,14 @@ dependencies = [
  "socsim-engine",
  "socsim-log",
  "socsim-packs",
+]
+
+[[package]]
+name = "socsim-survey"
+version = "0.1.0"
+dependencies = [
+ "csv",
+ "serde",
 ]
 
 [[package]]
