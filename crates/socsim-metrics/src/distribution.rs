@@ -180,6 +180,152 @@ fn gamma_q_continued_fraction(s: f64, x: f64) -> f64 {
     (-x + s * x.ln() - ln_gamma(s)).exp() * h
 }
 
+// ── Distributional comparison over an ordinal scale ─────────────────────────
+//
+// The functions below compare a "human" distribution `p` against a "predicted"
+// distribution `q` defined over a **common ordinal support** — the integer
+// category positions `0, 1, …, k − 1` of a `k`-point (e.g. Likert) scale, in
+// ascending order.  Both slices must have the same length `k` and are read as
+// **probability masses** over those positions: entry `i` is the mass on
+// category `i`.  They are normalized internally (by their own positive total)
+// so unnormalized counts work too; negative entries are treated as `0`.
+//
+// These port the three distribution-matching metrics from the gong2026
+// replication (MD / SDD / NEMD): a human poll distribution `H` versus an LLM
+// predicted distribution `P`, standardized by the question's `range` so they
+// are comparable across questions of different cardinality.
+
+/// Normalize a slice of masses to a probability distribution summing to `1`.
+///
+/// Negative entries are clamped to `0`; returns `None` if the positive total is
+/// `≤ 0` (an empty or all-zero/all-negative slice).
+fn normalized(p: &[f64]) -> Option<Vec<f64>> {
+    let total: f64 = p.iter().filter(|w| **w > 0.0).sum();
+    if total <= 0.0 {
+        return None;
+    }
+    Some(p.iter().map(|&w| w.max(0.0) / total).collect())
+}
+
+/// Expectation `Σ i · pᵢ` of the ordinal position under probabilities `p`
+/// (i.e. the mean category index, `0`-based).  `p` must already be normalized.
+fn ordinal_mean(p: &[f64]) -> f64 {
+    p.iter()
+        .enumerate()
+        .map(|(i, &pi)| i as f64 * pi)
+        .sum::<f64>()
+}
+
+/// Population standard deviation of the ordinal position under probabilities
+/// `p` (mass-weighted over indices `0..k`).  `p` must already be normalized.
+fn ordinal_std(p: &[f64]) -> f64 {
+    let mu = ordinal_mean(p);
+    let var = p
+        .iter()
+        .enumerate()
+        .map(|(i, &pi)| pi * (i as f64 - mu).powi(2))
+        .sum::<f64>();
+    var.max(0.0).sqrt()
+}
+
+/// **1-D Wasserstein (Earth-Mover's) distance** `W₁(p, q)` between two
+/// distributions on a **shared ordered support**.
+///
+/// For distributions over the ordinal positions `0, 1, …, k − 1` with unit
+/// spacing, the continuous `W₁ = ∫ |F_p(x) − F_q(x)| dx` reduces to the sum of
+/// absolute differences of the cumulative distributions:
+///
+/// ```text
+/// W₁(p, q) = Σⱼ | cumsum(p)ⱼ − cumsum(q)ⱼ |
+/// ```
+///
+/// Both inputs are treated as probability masses over the **same** ordered
+/// categories (entry `i` is the mass on category `i`) and are normalized
+/// internally, so passing raw counts is fine.  The support is assumed to be
+/// equally spaced with unit step; the result is therefore in units of "category
+/// steps" and is symmetric (`W₁(p, q) = W₁(q, p)`).
+///
+/// Edge cases: mismatched lengths, an empty slice, or either side summing to
+/// `≤ 0` → `0.0`.
+pub fn wasserstein_1d(p: &[f64], q: &[f64]) -> f64 {
+    if p.len() != q.len() || p.is_empty() {
+        return 0.0;
+    }
+    let (pn, qn) = match (normalized(p), normalized(q)) {
+        (Some(pn), Some(qn)) => (pn, qn),
+        _ => return 0.0,
+    };
+    let mut cum_p = 0.0;
+    let mut cum_q = 0.0;
+    let mut dist = 0.0;
+    for (pi, qi) in pn.into_iter().zip(qn) {
+        cum_p += pi;
+        cum_q += qi;
+        dist += (cum_p - cum_q).abs();
+    }
+    dist
+}
+
+/// **Normalized Earth-Mover's Distance** `NEMD = W₁(p, q) / Z`.
+///
+/// The [`wasserstein_1d`] distance divided by a normalizer `Z = range`, the
+/// cardinality-based scale of the question (per gong2026: standardize by the
+/// question's range so distances are comparable across scales of different
+/// cardinality).  For a `k`-point ordinal scale the natural `range` is
+/// `k − 1` (the maximum possible `W₁`, attained when all mass shifts from one
+/// end of the scale to the other), which maps `NEMD` onto `[0, 1]`.
+///
+/// `range` must be `> 0`; a non-positive `range` (or any degenerate input that
+/// makes [`wasserstein_1d`] return `0`) → `0.0`.
+pub fn nemd(p: &[f64], q: &[f64], range: f64) -> f64 {
+    if range <= 0.0 {
+        return 0.0;
+    }
+    wasserstein_1d(p, q) / range
+}
+
+/// **Mean Difference** `MD = |μ_p − μ_q| / range`.
+///
+/// `μ` is the expectation of the ordinal position (`0`-based category index)
+/// under each distribution, i.e. the mass-weighted mean over indices `0..k`.
+/// The absolute difference is standardized by `range` (the question's
+/// cardinality-based scale, typically `k − 1`).  Always `≥ 0`.
+///
+/// Edge cases: mismatched lengths, an empty slice, either side summing to
+/// `≤ 0`, or `range ≤ 0` → `0.0`.
+pub fn mean_diff(p: &[f64], q: &[f64], range: f64) -> f64 {
+    if p.len() != q.len() || p.is_empty() || range <= 0.0 {
+        return 0.0;
+    }
+    let (pn, qn) = match (normalized(p), normalized(q)) {
+        (Some(pn), Some(qn)) => (pn, qn),
+        _ => return 0.0,
+    };
+    (ordinal_mean(&pn) - ordinal_mean(&qn)).abs() / range
+}
+
+/// **Standard Deviation Difference** `SDD = (σ_p − σ_q) / range` (**signed**).
+///
+/// `σ` is the population standard deviation of the ordinal position under each
+/// distribution (mass-weighted over indices `0..k`).  The difference is
+/// standardized by `range`.  Following gong2026, the sign is meaningful when
+/// `p` is the human distribution and `q` the LLM prediction: `SDD < 0` means
+/// the LLM **overestimates homogeneity** (its distribution is too concentrated,
+/// `σ_q > σ_p`), `SDD > 0` means it underestimates it.
+///
+/// Edge cases: mismatched lengths, an empty slice, either side summing to
+/// `≤ 0`, or `range ≤ 0` → `0.0`.
+pub fn sd_diff(p: &[f64], q: &[f64], range: f64) -> f64 {
+    if p.len() != q.len() || p.is_empty() || range <= 0.0 {
+        return 0.0;
+    }
+    let (pn, qn) = match (normalized(p), normalized(q)) {
+        (Some(pn), Some(qn)) => (pn, qn),
+        _ => return 0.0,
+    };
+    (ordinal_std(&pn) - ordinal_std(&qn)) / range
+}
+
 /// Natural log of the gamma function via the Lanczos approximation.
 fn ln_gamma(x: f64) -> f64 {
     // Lanczos coefficients (g = 7, n = 9).
@@ -297,6 +443,107 @@ mod tests {
         assert_eq!(chi_square_homogeneity(&[1.0], &[1.0]), (0.0, 1.0)); // df < 1
         assert_eq!(chi_square_homogeneity(&[1.0, 2.0], &[1.0]), (0.0, 1.0)); // mismatch
         assert_eq!(chi_square_sf(-1.0, 2.0), 1.0); // x <= 0
+    }
+
+    #[test]
+    fn wasserstein_identical_is_zero() {
+        approx(
+            wasserstein_1d(&[0.2, 0.3, 0.5], &[0.2, 0.3, 0.5]),
+            0.0,
+            1e-12,
+        );
+        // Different scale, same shape → still 0 (normalized internally).
+        approx(
+            wasserstein_1d(&[1.0, 1.0, 2.0], &[5.0, 5.0, 10.0]),
+            0.0,
+            1e-12,
+        );
+    }
+
+    #[test]
+    fn wasserstein_shifted_point_masses() {
+        // Point mass at position 0 vs point mass at position 3.
+        // cumsum(p) = [1,1,1,1], cumsum(q) = [0,0,0,1];
+        // Σ|diff| = 1+1+1+0 = 3 (the number of unit steps the mass moved).
+        approx(
+            wasserstein_1d(&[1.0, 0.0, 0.0, 0.0], &[0.0, 0.0, 0.0, 1.0]),
+            3.0,
+            1e-12,
+        );
+        // Adjacent point masses → distance 1.
+        approx(
+            wasserstein_1d(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0]),
+            1.0,
+            1e-12,
+        );
+        // Symmetry.
+        approx(
+            wasserstein_1d(&[0.0, 0.0, 0.0, 1.0], &[1.0, 0.0, 0.0, 0.0]),
+            3.0,
+            1e-12,
+        );
+    }
+
+    #[test]
+    fn wasserstein_half_split_example() {
+        // p = [0.5, 0.5, 0], q = [0, 0.5, 0.5].
+        // cumsum(p) = [0.5, 1.0, 1.0], cumsum(q) = [0, 0.5, 1.0];
+        // Σ|diff| = 0.5 + 0.5 + 0 = 1.0.
+        approx(
+            wasserstein_1d(&[0.5, 0.5, 0.0], &[0.0, 0.5, 0.5]),
+            1.0,
+            1e-12,
+        );
+    }
+
+    #[test]
+    fn nemd_normalizes_by_range() {
+        // Endpoint shift on a 4-point scale (k=4, range = k-1 = 3): W1 = 3,
+        // NEMD = 3/3 = 1 (maximal).
+        approx(
+            nemd(&[1.0, 0.0, 0.0, 0.0], &[0.0, 0.0, 0.0, 1.0], 3.0),
+            1.0,
+            1e-12,
+        );
+        // Identical → 0; range guard → 0.
+        approx(nemd(&[0.5, 0.5], &[0.5, 0.5], 1.0), 0.0, 1e-12);
+        approx(nemd(&[1.0, 0.0], &[0.0, 1.0], 0.0), 0.0, 1e-12);
+    }
+
+    #[test]
+    fn mean_diff_known() {
+        // p mean = 0, q mean = 3 on a 4-point scale, range 3 → |0-3|/3 = 1.
+        approx(
+            mean_diff(&[1.0, 0.0, 0.0, 0.0], &[0.0, 0.0, 0.0, 1.0], 3.0),
+            1.0,
+            1e-12,
+        );
+        // p = [0.5,0.5] mean = 0.5, q = [0,1] mean = 1, range 1 → 0.5.
+        approx(mean_diff(&[0.5, 0.5], &[0.0, 1.0], 1.0), 0.5, 1e-12);
+        // Identical → 0; range guard → 0.
+        approx(mean_diff(&[0.2, 0.8], &[0.2, 0.8], 1.0), 0.0, 1e-12);
+        approx(mean_diff(&[1.0, 0.0], &[0.0, 1.0], 0.0), 0.0, 1e-12);
+    }
+
+    #[test]
+    fn sd_diff_sign_and_value() {
+        // p = uniform over {0,1}: σ_p = 0.5. q = point mass: σ_q = 0.
+        // SDD = (0.5 - 0)/1 = +0.5 (LLM underestimates spread).
+        approx(sd_diff(&[0.5, 0.5], &[1.0, 0.0], 1.0), 0.5, 1e-12);
+        // Swap: p concentrated, q spread → SDD negative (overestimates homogeneity).
+        approx(sd_diff(&[1.0, 0.0], &[0.5, 0.5], 1.0), -0.5, 1e-12);
+        // Identical → 0; range guard → 0.
+        approx(sd_diff(&[0.3, 0.7], &[0.3, 0.7], 1.0), 0.0, 1e-12);
+        approx(sd_diff(&[1.0, 0.0], &[0.0, 1.0], 0.0), 0.0, 1e-12);
+    }
+
+    #[test]
+    fn distribution_metrics_edge_cases() {
+        approx(wasserstein_1d(&[], &[]), 0.0, 1e-12);
+        approx(wasserstein_1d(&[1.0, 2.0], &[1.0]), 0.0, 1e-12); // length mismatch
+        approx(wasserstein_1d(&[0.0, 0.0], &[1.0, 1.0]), 0.0, 1e-12); // zero total
+        approx(mean_diff(&[1.0, 2.0], &[1.0], 1.0), 0.0, 1e-12); // mismatch
+        approx(sd_diff(&[0.0, 0.0], &[1.0, 1.0], 1.0), 0.0, 1e-12); // zero total
     }
 
     #[test]
