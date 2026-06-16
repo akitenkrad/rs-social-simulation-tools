@@ -2,7 +2,7 @@
 
 # CLI Reference
 
-The `socsim` binary exposes six subcommands. Run `socsim --help` or `socsim <COMMAND> --help` for flags.
+The `socsim` binary exposes six scenario subcommands plus a `datasets` group for survey dataset acquisition. Run `socsim --help` or `socsim <COMMAND> --help` for flags.
 
 The binary is **world-polymorphic**: every scenario names a *module pack* and is dispatched to that pack's world type. Three packs ship today (`hr-lifecycle`, `opinion-dynamics`, `organizational-silence`); new packs register behind a `pack-*` Cargo feature.
 
@@ -16,6 +16,7 @@ Commands:
   list       List available module packs or mechanisms
   sweep      Run a grid parameter sweep
   summarize  Re-aggregate existing JSONL run logs into a summary
+  datasets   List / show / fetch survey datasets from the registry
   help       Print this message or the help of the given subcommand(s)
 ```
 
@@ -276,6 +277,32 @@ turnover_rate,0.000000,0.000000,0.000000,0.000000,1
 
 ```sh
 socsim summarize runs/ --format json
+```
+
+---
+
+## datasets
+
+Inspect and acquire the survey datasets backing survey replications, from the machine-readable registry in `socsim-datasets`. The subcommand group is **separate** from the world-polymorphic scenario spine and needs no module pack.
+
+```
+socsim datasets <SUBCOMMAND>
+```
+
+| Subcommand | Description |
+|---|---|
+| `datasets list` | List every dataset in the registry: key, name, file count, and acquisition kind (`auto` / `manual`) |
+| `datasets show <KEY>` | Show one dataset's overview (name, key, DOI, source URL, citation, license) and, per file, its acquisition method — for **manual** files the instructions URL + steps; for **auto-downloadable** files the resolved download URL, the exact `socsim datasets fetch …` command, plus any `sha256` / `expect_rows` |
+| `datasets fetch <KEY> [--dest <DIR>] [--force]` | Actually download the dataset's files into `--dest` (default a gitignored `data/` dir), atomic-writing and verifying `sha256` + row counts, skipping cache hits |
+
+`fetch` requires building the CLI with the opt-in **`--features datasets-acquire`** flag. The default CLI build keeps `list` / `show` working, but `fetch` simply tells you to rebuild with that feature. Data is **never vendored** into the repo; license-gated files (raw ANES Time Series microdata, CES 2022) are declared `Source::Manual` and report manual instructions instead of being auto-downloaded.
+
+**Examples**
+
+```sh
+socsim datasets list
+socsim datasets show anes-2020
+cargo run --features datasets-acquire -- datasets fetch anes-2020 --dest data/
 ```
 
 ---

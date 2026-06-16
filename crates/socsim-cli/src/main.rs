@@ -10,6 +10,7 @@
 //! | `list`      | List packs or mechanisms |
 //! | `sweep`     | Grid parameter sweep |
 //! | `summarize` | Re-aggregate existing JSONL logs |
+//! | `datasets`  | List dataset registry, show a dataset's acquisition method, or fetch it |
 //!
 //! # Example
 //!
@@ -21,6 +22,7 @@
 //!     --seeds 0..10 --out runs/sweep/
 //! ```
 
+mod datasets;
 mod packs;
 
 use std::path::{Path, PathBuf};
@@ -113,6 +115,12 @@ enum Commands {
         #[arg(long, default_value = "csv")]
         format: String,
     },
+
+    /// List the dataset registry, show a dataset's acquisition method, or fetch it.
+    Datasets {
+        #[command(subcommand)]
+        cmd: datasets::DatasetsCmd,
+    },
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -137,6 +145,7 @@ fn main() -> Result<()> {
             parallel,
         } => cmd_sweep(&scenario, &param, &seeds, &out, parallel),
         Commands::Summarize { path, format } => cmd_summarize(&path, &format),
+        Commands::Datasets { cmd } => datasets::run(&cmd),
     }
 }
 

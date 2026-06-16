@@ -2,7 +2,7 @@
 
 # CLIリファレンス
 
-`socsim` バイナリは6つのサブコマンドを提供します．`socsim --help` または `socsim <COMMAND> --help` でフラグを確認できます．
+`socsim` バイナリは6つのシナリオ系サブコマンドに加え，サーベイデータセット取得用の `datasets` グループを提供します．`socsim --help` または `socsim <COMMAND> --help` でフラグを確認できます．
 
 このバイナリは **World 多態**です：すべてのシナリオは *モジュールパック* を名前で指定し，そのパックのWorld型へディスパッチされます．現在3つのパック（`hr-lifecycle`，`opinion-dynamics`，`organizational-silence`）を同梱しており，新しいパックは `pack-*` Cargoフィーチャの背後に登録されます．
 
@@ -16,6 +16,7 @@ Commands:
   list       List available module packs or mechanisms
   sweep      Run a grid parameter sweep
   summarize  Re-aggregate existing JSONL run logs into a summary
+  datasets   List / show / fetch survey datasets from the registry
   help       Print this message or the help of the given subcommand(s)
 ```
 
@@ -274,6 +275,32 @@ turnover_rate,0.000000,0.000000,0.000000,0.000000,1
 
 ```sh
 socsim summarize runs/ --format json
+```
+
+---
+
+## datasets
+
+サーベイ replication を支えるサーベイデータセットを，`socsim-datasets` の機械可読レジストリから検査・取得します．このサブコマンドグループは World 多態のシナリオ系統とは**独立**しており，モジュールパックを必要としません．
+
+```
+socsim datasets <SUBCOMMAND>
+```
+
+| サブコマンド | 説明 |
+|---|---|
+| `datasets list` | レジストリ内の全データセットを一覧表示：キー，名称，ファイル数，取得方式（`auto` / `manual`） |
+| `datasets show <KEY>` | 1つのデータセットの概要（名称，キー，DOI，ソース URL，引用，ライセンス）と，ファイルごとの取得方法を表示 —— **manual** ファイルは手順 URL ＋ 手順を，**自動ダウンロード可能**なファイルは解決済みのダウンロード URL，厳密な `socsim datasets fetch …` コマンド，および存在すれば `sha256` / `expect_rows` を表示 |
+| `datasets fetch <KEY> [--dest <DIR>] [--force]` | データセットのファイルを `--dest`（デフォルトは gitignore された `data/` ディレクトリ）へ実際にダウンロードし，アトミックに書き込んで `sha256` ＋ 行数を検証し，キャッシュヒットはスキップ |
+
+`fetch` は CLI をオプトインの **`--features datasets-acquire`** フラグ付きでビルドする必要があります．デフォルトの CLI ビルドでも `list` / `show` は動作しますが，`fetch` はそのフィーチャ付きで再ビルドするよう促すだけです．データはリポジトリに**決して同梱されず**，ライセンス制約のあるファイル（生の ANES Time Series マイクロデータ，CES 2022）は `Source::Manual` として宣言され，自動ダウンロードの代わりに手動手順を提示します．
+
+**例**
+
+```sh
+socsim datasets list
+socsim datasets show anes-2020
+cargo run --features datasets-acquire -- datasets fetch anes-2020 --dest data/
 ```
 
 ---
