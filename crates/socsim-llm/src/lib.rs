@@ -61,16 +61,18 @@ mod openai;
 pub use cache::{cache_key, PromptCache};
 pub use client::{
     CachingClient, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse, MetadataCollector,
-    RunMetadata, TokenLogprob,
+    RunMetadata, SharedCachingClient, TokenLogprob,
 };
 pub use fallback::FallbackClient;
-pub use harness::{llm_config, wrap_client, LiveClient, LlmSettings};
+pub use harness::{
+    llm_config, wrap_client, wrap_client_shared, LiveClient, LlmSettings, SharedLiveClient,
+};
 pub use parse::extract_first_choice;
 
 #[cfg(feature = "live")]
-pub use harness::build_live_client_from_settings;
+pub use harness::{build_live_client_from_settings, build_shared_live_client_from_settings};
 #[cfg(feature = "live")]
-pub use live::build_live_client;
+pub use live::{build_live_client, build_shared_live_client};
 #[cfg(feature = "ollama")]
 pub use ollama::OllamaClient;
 #[cfg(feature = "openai")]
