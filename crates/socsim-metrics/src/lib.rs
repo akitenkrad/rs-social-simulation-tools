@@ -24,7 +24,7 @@
 //!
 //! | Feature   | Module                       | Pulls in       | What you get |
 //! |-----------|------------------------------|----------------|--------------|
-//! | *(none)*  | [`stats`], [`distribution`]  | nothing        | pure numeric primitives over `&[f64]` / `&[u32]`, plus KL divergence & chi-square homogeneity |
+//! | *(none)*  | [`stats`], [`distribution`], [`agreement`] | nothing | pure numeric primitives over `&[f64]` / `&[u32]`, KL divergence & chi-square homogeneity, ordinal distribution-matching (Wasserstein/NEMD/MD/SDD), and contingency-table agreement (tetrachoric, κ, ICC, Cramér's V, prop-test) |
 //! | `core`    | [`opinion`]   | `socsim-core`  | capability-trait extractors + `MetricsMechanism<W>` |
 //! | `network` | [`network`]   | + `socsim-net` | degree / clustering / component / cascade metrics |
 //! | `spatial` | [`spatial`]   | + `socsim-grid`| Schelling-style segregation metrics |
@@ -34,6 +34,7 @@
 //!
 //! [`Recorder`]: socsim_core::Recorder
 
+pub mod agreement;
 pub mod distribution;
 pub mod stats;
 
