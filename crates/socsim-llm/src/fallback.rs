@@ -43,6 +43,24 @@ impl<P: LlmClient, S: LlmClient> LlmClient for FallbackClient<P, S> {
             },
         }
     }
+
+    fn complete_with_logprobs(
+        &self,
+        prompt: &str,
+        config: &LlmConfig,
+    ) -> Result<LlmResponse, LlmError> {
+        match self.primary.complete_with_logprobs(prompt, config) {
+            Ok(resp) => Ok(resp),
+            Err(primary_err) => match self.secondary.complete_with_logprobs(prompt, config) {
+                Ok(resp) => Ok(resp),
+                Err(secondary_err) => Err(LlmError::AllBackendsFailed(format!(
+                    "primary ({}): {primary_err}; secondary ({}): {secondary_err}",
+                    self.primary.endpoint(),
+                    self.secondary.endpoint(),
+                ))),
+            },
+        }
+    }
 }
 
 #[cfg(test)]
