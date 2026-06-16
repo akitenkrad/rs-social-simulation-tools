@@ -74,6 +74,6 @@ pub use harness::{build_live_client_from_settings, build_shared_live_client_from
 #[cfg(feature = "live")]
 pub use live::{build_live_client, build_shared_live_client};
 #[cfg(feature = "ollama")]
-pub use ollama::OllamaClient;
+pub use ollama::{OllamaApi, OllamaClient};
 #[cfg(feature = "openai")]
 pub use openai::OpenAiClient;
