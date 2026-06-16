@@ -13,11 +13,18 @@ use crate::client::{
 /// environment via [`OpenAiClient::from_env`], or take explicit values with
 /// [`OpenAiClient::new`].  `temperature` is sent and `seed` is forwarded
 /// best-effort (OpenAI's `seed` is documented as best-effort determinism).
+///
+/// By default no per-request timeout is set (`None`), preserving the historical
+/// behaviour where a request blocks until the server responds; set one with
+/// [`with_timeout`](OpenAiClient::with_timeout) /
+/// [`with_timeout_secs`](OpenAiClient::with_timeout_secs) so a hung server
+/// surfaces a transport error instead of blocking forever.
 pub struct OpenAiClient {
     api_key: String,
     model: String,
     base_url: String,
     endpoint: String,
+    timeout: Option<std::time::Duration>,
 }
 
 impl OpenAiClient {
@@ -41,6 +48,7 @@ impl OpenAiClient {
             model: model.into(),
             base_url,
             endpoint,
+            timeout: None,
         }
     }
 
@@ -57,6 +65,45 @@ impl OpenAiClient {
     /// The configured base URL.
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Set a per-request overall timeout (builder style).
+    ///
+    /// Applies to every request this client makes; when unset (the default,
+    /// `None`) requests have no timeout and block until the server responds,
+    /// matching the historical behaviour.  A request that exceeds `dur`
+    /// surfaces as an [`LlmError::Transport`].
+    pub fn with_timeout(mut self, dur: std::time::Duration) -> Self {
+        self.timeout = Some(dur);
+        self
+    }
+
+    /// Set a per-request overall timeout in whole seconds (builder style),
+    /// a convenience wrapper over [`with_timeout`](Self::with_timeout) that maps
+    /// `secs` to [`Duration::from_secs`](std::time::Duration::from_secs).
+    pub fn with_timeout_secs(self, secs: u64) -> Self {
+        self.with_timeout(std::time::Duration::from_secs(secs))
+    }
+
+    /// The configured per-request timeout, or `None` when no timeout is set
+    /// (the default).
+    pub fn timeout(&self) -> Option<std::time::Duration> {
+        self.timeout
+    }
+
+    /// Build a `POST` request to this client's endpoint with the
+    /// `Authorization` header set, applying the configured
+    /// [`timeout`](Self::timeout) when one is set.  Factored out so both request
+    /// paths (`complete` / `complete_with_logprobs`) apply the optional timeout
+    /// identically; with no timeout the request is byte- and behaviour-identical
+    /// to the historical `ureq::post(&self.endpoint).set("Authorization", …)`.
+    fn post(&self) -> ureq::Request {
+        let req =
+            ureq::post(&self.endpoint).set("Authorization", &format!("Bearer {}", self.api_key));
+        match self.timeout {
+            Some(dur) => req.timeout(dur),
+            None => req,
+        }
     }
 
     /// Build the request `messages`: an optional `{role: system}` message
@@ -106,8 +153,8 @@ impl LlmClient for OpenAiClient {
         }
         let body = self.build_body(prompt, config);
 
-        let resp = ureq::post(&self.endpoint)
-            .set("Authorization", &format!("Bearer {}", self.api_key))
+        let resp = self
+            .post()
             .send_json(body)
             .map_err(|e| map_ureq_error(&self.endpoint, e))?;
 
@@ -166,8 +213,8 @@ impl LlmClient for OpenAiClient {
         body["logprobs"] = json!(true);
         body["top_logprobs"] = json!(top_logprobs);
 
-        let resp = ureq::post(&self.endpoint)
-            .set("Authorization", &format!("Bearer {}", self.api_key))
+        let resp = self
+            .post()
             .send_json(body)
             .map_err(|e| map_ureq_error(&self.endpoint, e))?;
 
@@ -321,6 +368,28 @@ mod tests {
         // bytes filled from token UTF-8 when API omits them.
         assert_eq!(lp[0].bytes, b"Yes".to_vec());
         assert_eq!(lp[1].bytes, vec![78, 111]);
+    }
+
+    #[test]
+    fn timeout_defaults_to_none() {
+        // Backward-compat: no timeout unless asked for, through every constructor.
+        assert_eq!(OpenAiClient::new("sk", "m").timeout(), None);
+        assert_eq!(
+            OpenAiClient::with_base_url("http://gw", "sk", "m").timeout(),
+            None
+        );
+    }
+
+    #[test]
+    fn with_timeout_sets_the_field() {
+        let c = OpenAiClient::new("sk", "m").with_timeout(std::time::Duration::from_millis(2500));
+        assert_eq!(c.timeout(), Some(std::time::Duration::from_millis(2500)));
+    }
+
+    #[test]
+    fn with_timeout_secs_maps_to_duration() {
+        let c = OpenAiClient::new("sk", "m").with_timeout_secs(45);
+        assert_eq!(c.timeout(), Some(std::time::Duration::from_secs(45)));
     }
 
     /// Live network test — requires a real API key. Ignored by default.
