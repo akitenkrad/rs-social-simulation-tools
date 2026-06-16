@@ -55,11 +55,18 @@ impl OllamaApi {
 /// Defaults to the [`Chat`](OllamaApi::Chat) endpoint (`/api/chat`); call
 /// [`with_api`](OllamaClient::with_api) to select the completion-style
 /// [`Generate`](OllamaApi::Generate) endpoint (`/api/generate`) instead.
+///
+/// By default no per-request timeout is set (`None`), preserving the historical
+/// behaviour where a request blocks until the server responds; set one with
+/// [`with_timeout`](OllamaClient::with_timeout) /
+/// [`with_timeout_secs`](OllamaClient::with_timeout_secs) so a hung server
+/// surfaces a transport error instead of blocking forever.
 pub struct OllamaClient {
     host: String,
     model: String,
     endpoint: String,
     api: OllamaApi,
+    timeout: Option<std::time::Duration>,
 }
 
 impl OllamaClient {
@@ -76,6 +83,7 @@ impl OllamaClient {
             model: model.into(),
             endpoint,
             api,
+            timeout: None,
         }
     }
 
@@ -100,6 +108,43 @@ impl OllamaClient {
     /// The Ollama API surface this client talks to.
     pub fn api(&self) -> OllamaApi {
         self.api
+    }
+
+    /// Set a per-request overall timeout (builder style).
+    ///
+    /// Applies to every request this client makes; when unset (the default,
+    /// `None`) requests have no timeout and block until the server responds,
+    /// matching the historical behaviour.  A request that exceeds `dur`
+    /// surfaces as an [`LlmError::Transport`].
+    pub fn with_timeout(mut self, dur: std::time::Duration) -> Self {
+        self.timeout = Some(dur);
+        self
+    }
+
+    /// Set a per-request overall timeout in whole seconds (builder style),
+    /// a convenience wrapper over [`with_timeout`](Self::with_timeout) that maps
+    /// `secs` to [`Duration::from_secs`](std::time::Duration::from_secs).
+    pub fn with_timeout_secs(self, secs: u64) -> Self {
+        self.with_timeout(std::time::Duration::from_secs(secs))
+    }
+
+    /// The configured per-request timeout, or `None` when no timeout is set
+    /// (the default).
+    pub fn timeout(&self) -> Option<std::time::Duration> {
+        self.timeout
+    }
+
+    /// Build a `POST` request to this client's endpoint, applying the
+    /// configured [`timeout`](Self::timeout) when one is set.  Factored out so
+    /// both request paths (`complete` / `complete_with_logprobs`) apply the
+    /// optional timeout identically; with no timeout the request is byte- and
+    /// behaviour-identical to the historical `ureq::post(&self.endpoint)`.
+    fn post(&self) -> ureq::Request {
+        let req = ureq::post(&self.endpoint);
+        match self.timeout {
+            Some(dur) => req.timeout(dur),
+            None => req,
+        }
     }
 
     /// Compute the full endpoint URL for `host` and `api`.
@@ -205,7 +250,8 @@ impl LlmClient for OllamaClient {
     fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError> {
         let body = self.build_body(prompt, config);
 
-        let resp = ureq::post(&self.endpoint)
+        let resp = self
+            .post()
             .send_json(body)
             .map_err(|e| map_ureq_error(&self.endpoint, e))?;
 
@@ -260,7 +306,8 @@ impl LlmClient for OllamaClient {
         body["logprobs"] = json!(true);
         body["top_logprobs"] = json!(top_logprobs);
 
-        let resp = ureq::post(&self.endpoint)
+        let resp = self
+            .post()
             .send_json(body)
             .map_err(|e| map_ureq_error(&self.endpoint, e))?;
 
@@ -545,6 +592,43 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(r#"{"message": {"content": "x"}}"#).unwrap();
         assert!(parse_logprobs(&value).is_none());
+    }
+
+    #[test]
+    fn timeout_defaults_to_none() {
+        // Backward-compat: no timeout is set unless asked for.
+        let c = OllamaClient::new("http://localhost:11434", "m");
+        assert_eq!(c.timeout(), None);
+        // from_env / with_api also leave the timeout unset.
+        assert_eq!(OllamaClient::from_env().timeout(), None);
+        assert_eq!(
+            OllamaClient::new("http://h", "m")
+                .with_api(OllamaApi::Generate)
+                .timeout(),
+            None
+        );
+    }
+
+    #[test]
+    fn with_timeout_sets_the_field() {
+        let c =
+            OllamaClient::new("http://h", "m").with_timeout(std::time::Duration::from_millis(1500));
+        assert_eq!(c.timeout(), Some(std::time::Duration::from_millis(1500)));
+    }
+
+    #[test]
+    fn with_timeout_secs_maps_to_duration() {
+        let c = OllamaClient::new("http://h", "m").with_timeout_secs(30);
+        assert_eq!(c.timeout(), Some(std::time::Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn with_api_preserves_timeout() {
+        // Selecting an API surface must not drop a previously-set timeout.
+        let c = OllamaClient::new("http://h", "m")
+            .with_timeout_secs(5)
+            .with_api(OllamaApi::Generate);
+        assert_eq!(c.timeout(), Some(std::time::Duration::from_secs(5)));
     }
 
     /// Live network test — requires a running Ollama. Ignored by default.
