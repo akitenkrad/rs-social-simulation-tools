@@ -1,40 +1,40 @@
 //! Config-driven survey recode for socsim (engine-free).
 //!
-//! This crate generalizes the hard-coded, per-year ANES recode used by the
-//! `sun2024` "Random Silicon Sampling" replication into a **data-driven
-//! schema**. A [`SurveySchema`] describes, for one survey-year:
+//! A **data-driven schema** for recoding survey microdata. A [`SurveySchema`]
+//! describes, for one survey-year:
 //!
 //! - the raw CSV column name for each demographic variable, plus a
 //!   per-variable value-code -> canonical-label map ([`ValMap`]);
 //! - an age-binning rule ([`AgeBins`]) for the continuous age column;
-//! - the outcome (vote) column plus a code -> outcome-label map.
+//! - the outcome column plus a code -> outcome-label map.
 //!
 //! Given a schema, the generic [`recode_row`] / [`demo_label`] /
-//! [`actual_outcome`] / [`estimate_distributions`] functions do the work that
-//! sun2024 spelled out per-year in `common/anes.rs`. The match arms become
-//! data: ANES 2012 / 2016 / 2020 ship as built-in schema builders
-//! ([`anes_2012`], [`anes_2016`], [`anes_2020`]) that port the **exact**
-//! V-variable column names and value maps from sun2024 — parity matters, so
-//! none of those mappings are changed here.
+//! [`actual_outcome`] / [`estimate_distributions`] functions do the recoding.
+//! The design generalizes the kind of hard-coded, per-year ANES-style recode a
+//! survey replication would otherwise spell out: each year's match arms become
+//! data declared in a schema.
 //!
 //! # Demographics are extensible
 //!
-//! sun2024 uses 8 demographic variables (race, gender, age, ideology, party id,
-//! political interest, church attendance, discuss politics). A [`SurveySchema`]
-//! declares its own *set* of variables: a schema lists exactly the
-//! [`DemoVar`]s it covers (keyed by a stable snake_case string), so a newer
-//! survey can add or drop variables without touching this crate. The eight ANES
-//! variables are provided as [`DemoVar`] constants for convenience.
+//! A [`SurveySchema`] declares its own *set* of variables: a schema lists
+//! exactly the [`DemoVar`]s it covers (keyed by a stable snake_case string), so
+//! a newer survey can add or drop variables without touching this crate.
 //!
-//! # CES 2022 extension point
+//! # Built-in ANES presets (optional `anes` feature)
 //!
-//! This crate does **not** ship a CES 2022 schema, because the CES V-variable
-//! column names and value codes are not available here and must not be
-//! fabricated. The [`SurveySchema`] struct *is* the extension API: a CES schema
-//! is declared exactly the way the ANES builders are. See the
-//! `// TODO(gong2026): CES 2022 schema` skeleton in [`anes_2020`]'s module
-//! documentation below and the [`SurveySchema::builder`] doc example. CES is
-//! considered complete once `gong2026` wires its real column names and maps.
+//! Built-in ANES 2012 / 2016 / 2020 schema builders (`anes::anes_2012`,
+//! `anes::anes_2016`, `anes::anes_2020`) ship behind the optional **`anes`
+//! feature** (disabled by default). They declare the exact V-variable column
+//! names and value maps for those years, plus the eight ANES demographic
+//! [`DemoVar`] constants. The default build is the generic engine only.
+//!
+//! # Extension point
+//!
+//! The [`SurveySchema`] struct *is* the extension API: a new survey schema
+//! (e.g. CES 2022) is declared exactly the way the built-in ANES builders are —
+//! see the [`SurveySchema::builder`] doc example. Provide the survey's real
+//! column names and value codes and build a schema; no change to this crate is
+//! needed.
 //!
 //! Engine-free: depends only on `std`, `serde`, and `csv`. It pulls in no
 //! `socsim-core` / engine crate.
@@ -44,6 +44,7 @@
 mod distribution;
 mod schema;
 
+#[cfg(feature = "anes")]
 pub mod anes;
 
 pub use distribution::{estimate_distributions, CategoryDist, Distributions, OutcomeDistribution};
@@ -56,15 +57,15 @@ use std::collections::HashMap;
 
 /// A single raw CSV record: column name -> raw cell value.
 ///
-/// This matches sun2024's `load_named_records` representation (ANES `.tab`
-/// files are comma-separated despite the extension, and column sets differ per
-/// year, so records are read as name->value maps rather than fixed structs).
+/// Records are read as name->value maps rather than fixed structs because
+/// survey column sets differ per year (and ANES `.tab` files are comma-separated
+/// despite the extension).
 pub type Record = HashMap<String, String>;
 
 /// Read a header-bearing CSV into a vector of [`Record`]s (column -> value).
 ///
-/// The delimiter is `,` even for `.tab` files, matching sun2024's
-/// `load_named_records`. Returns a [`csv::Error`] on open/parse failure.
+/// The delimiter is `,` even for `.tab` files. Returns a [`csv::Error`] on
+/// open/parse failure.
 pub fn load_named_records<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<Record>, csv::Error> {
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(b',')
@@ -85,9 +86,9 @@ pub fn load_named_records<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<Reco
 
 /// Extract a non-negative integer code from a raw cell (column `key`).
 ///
-/// Ported verbatim from sun2024's `raw_code`: tolerates pandas-float strings
-/// such as `"29.0"` (parses as f64 then rounds), and treats empty cells and
-/// negative codes (ANES missing/non-applicable) as `None`.
+/// Tolerates pandas-float strings such as `"29.0"` (parses as f64 then rounds),
+/// and treats empty cells and negative codes (ANES-style missing/non-applicable)
+/// as `None`.
 pub fn raw_code(rec: &Record, key: &str) -> Option<i64> {
     let v = rec.get(key)?.trim();
     if v.is_empty() {

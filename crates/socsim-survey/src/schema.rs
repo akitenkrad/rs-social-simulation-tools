@@ -35,8 +35,8 @@ impl ValMap {
 ///
 /// Each entry is an inclusive `[lo, hi]` range mapped to a label; the first
 /// matching range wins (ranges are tested in declaration order). Codes outside
-/// every range recode to `None`. This ports sun2024's `age_bin` exactly when
-/// constructed via [`AgeBins::anes_decade`].
+/// every range recode to `None`. [`AgeBins::anes_decade`] gives the standard
+/// decade bins.
 #[derive(Debug, Clone, Default)]
 pub struct AgeBins {
     bins: Vec<(i64, i64, &'static str)>,
@@ -50,8 +50,8 @@ impl AgeBins {
         }
     }
 
-    /// The exact decade bins sun2024 uses (`age_bin`): 18-29, 30-39, 40-49,
-    /// 50-59, 60-69, 70+ (70..=120). Ages outside `[18, 120]` recode to `None`.
+    /// The standard ANES-style decade bins: 18-29, 30-39, 40-49, 50-59,
+    /// 60-69, 70+ (70..=120). Ages outside `[18, 120]` recode to `None`.
     pub fn anes_decade() -> Self {
         AgeBins::new(&[
             (18, 29, "18-29"),
@@ -122,12 +122,13 @@ impl DemoVar {
     }
 }
 
-/// Outcome (vote) recode: raw column + code -> outcome-label map.
+/// Outcome recode: raw column + code -> outcome-label map.
 ///
-/// Ports sun2024's `actual_vote`: in ANES, code `1` is the Democratic slot
-/// (Biden/Clinton/Obama) and code `2` is the Republican slot (Trump/Romney);
-/// any other code (third party, missing) is `None`. The labels are
-/// caller-supplied so a schema can name its own outcome categories.
+/// The labels are caller-supplied so a schema can name its own outcome
+/// categories. Any code absent from the map (and any negative/missing code) is
+/// `None`. For example, in ANES vote recodes code `1` is the Democratic slot
+/// and code `2` the Republican slot, with all other codes (third party,
+/// missing) recoding to `None`.
 #[derive(Debug, Clone)]
 pub struct OutcomeMap {
     /// Raw CSV column holding the outcome code.
@@ -153,43 +154,43 @@ impl OutcomeMap {
 
 /// A full survey-year schema: the variable set + outcome recode.
 ///
-/// This is the config that replaces sun2024's per-year match arms. Build one
-/// with [`SurveySchema::builder`] (or use the built-in [`crate::anes`]
-/// schemas). The variable *set* is whatever the schema declares, so newer
-/// surveys (CES) extend by declaring their own [`DemoVar`]s.
+/// This is the config that replaces a per-year hard-coded recode. Build one
+/// with [`SurveySchema::builder`] (or, with the optional `anes` feature, use the
+/// built-in `crate::anes` schemas). The variable *set* is whatever the schema
+/// declares, so newer surveys extend by declaring their own [`DemoVar`]s.
 #[derive(Debug, Clone)]
 pub struct SurveySchema {
     /// Human label for the survey-year (e.g. `"ANES 2020"`).
     pub name: String,
     /// Demographic variables, in scan order (distribution/sampling order).
     pub vars: Vec<DemoVar>,
-    /// Outcome (vote) recode.
+    /// Outcome recode.
     pub outcome: OutcomeMap,
 }
 
 impl SurveySchema {
     /// Start a [`SurveySchemaBuilder`].
     ///
-    /// # Example: declaring a new survey schema (CES skeleton shape)
+    /// # Example: declaring a new survey schema
     ///
     /// ```
     /// use socsim_survey::{SurveySchema, DemoVar, ValMap, AgeBins, OutcomeMap};
     ///
-    /// // TODO(gong2026): replace these placeholder column names + codes with
-    /// // the real CES 2022 V-variables once the CES data is wired.
-    /// let ces = SurveySchema::builder("CES 2022")
+    /// // Replace the placeholder column names + codes with the target survey's
+    /// // real columns and value codes.
+    /// let schema = SurveySchema::builder("CES 2022")
     ///     .var(DemoVar::valmap(
     ///         "gender",
-    ///         "ces_gender_col", // <- real CES column name goes here
+    ///         "survey_gender_col", // <- real column name goes here
     ///         ValMap::new(&[(1, "man"), (2, "woman")]),
     ///     ))
-    ///     .var(DemoVar::age("age", "ces_age_col", AgeBins::anes_decade()))
+    ///     .var(DemoVar::age("age", "survey_age_col", AgeBins::anes_decade()))
     ///     .outcome(OutcomeMap::new(
-    ///         "ces_vote_col",
+    ///         "survey_vote_col",
     ///         &[(1, "Democrat"), (2, "Republican")],
     ///     ))
     ///     .build();
-    /// assert_eq!(ces.name, "CES 2022");
+    /// assert_eq!(schema.name, "CES 2022");
     /// ```
     pub fn builder(name: impl Into<String>) -> SurveySchemaBuilder {
         SurveySchemaBuilder {
@@ -225,7 +226,7 @@ impl SurveySchemaBuilder {
         self
     }
 
-    /// Set the outcome (vote) recode.
+    /// Set the outcome recode.
     pub fn outcome(mut self, o: OutcomeMap) -> Self {
         self.outcome = Some(o);
         self
@@ -249,9 +250,8 @@ impl SurveySchemaBuilder {
 
 /// One respondent's recoded demographics (variable key -> category label).
 ///
-/// Missing/unmapped variables are simply absent from the map (matching
-/// sun2024's `RecodedRow`, where the distribution estimator normalizes each
-/// variable over its own non-missing sample).
+/// Missing/unmapped variables are simply absent from the map; the distribution
+/// estimator normalizes each variable over its own non-missing sample.
 #[derive(Debug, Clone, Default)]
 pub struct RecodedRow {
     /// Variable key (e.g. `"race"`) -> canonical category label.
@@ -267,15 +267,11 @@ impl RecodedRow {
 
 /// Recode one demographic variable from a raw record (`None` if the schema has
 /// no such variable, or the value is missing/unmapped).
-///
-/// Generic port of sun2024's `demo_label`.
 pub fn demo_label(rec: &Record, schema: &SurveySchema, var_key: &str) -> Option<String> {
     schema.var(var_key)?.recode_label(rec)
 }
 
 /// Recode one raw record into a [`RecodedRow`] (missing variables omitted).
-///
-/// Generic port of sun2024's `recode_row`.
 pub fn recode_row(rec: &Record, schema: &SurveySchema) -> RecodedRow {
     let mut attrs = HashMap::new();
     for v in &schema.vars {
@@ -286,9 +282,7 @@ pub fn recode_row(rec: &Record, schema: &SurveySchema) -> RecodedRow {
     RecodedRow { attrs }
 }
 
-/// Recode the outcome (vote) for one raw record (`None` if missing/unmapped).
-///
-/// Generic port of sun2024's `actual_vote`.
+/// Recode the outcome for one raw record (`None` if missing/unmapped).
 pub fn actual_outcome(rec: &Record, schema: &SurveySchema) -> Option<&'static str> {
     schema.outcome.outcome(rec)
 }
