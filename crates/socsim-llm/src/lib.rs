@@ -61,7 +61,7 @@ mod openai;
 pub use cache::{cache_key, PromptCache};
 pub use client::{
     CachingClient, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse, MetadataCollector,
-    RunMetadata,
+    RunMetadata, TokenLogprob,
 };
 pub use fallback::FallbackClient;
 pub use harness::{llm_config, wrap_client, LiveClient, LlmSettings};

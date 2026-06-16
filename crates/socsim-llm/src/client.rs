@@ -47,6 +47,18 @@ pub enum LlmError {
     /// Every backend in a [`FallbackClient`](crate::FallbackClient) failed.
     #[error("all backends failed: {0}")]
     AllBackendsFailed(String),
+    /// The requested operation is not implemented by this backend.
+    ///
+    /// Returned by the default [`LlmClient::complete_with_logprobs`] impl: a
+    /// client that does not expose token log-probabilities reports it here
+    /// rather than silently degrading to a logprob-free completion.
+    #[error("operation not supported by {endpoint}: {operation}")]
+    Unsupported {
+        /// The endpoint that does not support the operation.
+        endpoint: String,
+        /// A short name for the unsupported operation (e.g. `"logprobs"`).
+        operation: String,
+    },
 }
 
 /// Reject a blank completion: if `text` is empty or whitespace-only, return
@@ -90,7 +102,36 @@ pub struct LlmConfig {
     pub seed: u64,
     /// Optional cap on generated tokens (`None` = backend default).
     pub max_tokens: Option<u32>,
+    /// Optional system prompt.  When `Some`, live chat backends prepend a
+    /// `{role: system, content}` message before the user message; `None`
+    /// (the default) sends only the user message, preserving current behaviour.
+    #[serde(default)]
+    pub system: Option<String>,
+    /// When `true`, live backends do **not** send a `seed`, enabling
+    /// temperature-driven sampling without a pinned seed.  Defaults to `false`
+    /// (the current behaviour: the seed is always emitted).
+    #[serde(default)]
+    pub omit_seed: bool,
+    /// When `true`, an empty/whitespace-only completion is returned as an
+    /// `Ok` response with empty `text` instead of erroring.  Defaults to
+    /// `false` (the current behaviour: a blank response is rejected).
+    #[serde(default)]
+    pub allow_blank: bool,
+    /// Number of top alternatives to request when calling
+    /// [`complete_with_logprobs`](LlmClient::complete_with_logprobs).  `None`
+    /// (the default) uses the backend's sane default (20).  Ignored by the
+    /// plain [`complete`](LlmClient::complete) path.
+    #[serde(default)]
+    pub top_logprobs: Option<u32>,
 }
+
+/// Default `top_logprobs` requested when logprobs are asked for but no explicit
+/// count is set (mirrors argyle2023's `DEFAULT_TOP_LOGPROBS`).
+///
+/// Only used by the live backends, so gated to avoid a dead-code warning in a
+/// network-free default build.
+#[cfg(any(feature = "ollama", feature = "openai"))]
+pub(crate) const DEFAULT_TOP_LOGPROBS: u32 = 20;
 
 impl Default for LlmConfig {
     fn default() -> Self {
@@ -105,7 +146,24 @@ impl LlmConfig {
             temperature: 0.0,
             seed: 0,
             max_tokens: None,
+            system: None,
+            omit_seed: false,
+            allow_blank: false,
+            top_logprobs: None,
         }
+    }
+
+    /// A **sampling** configuration: the deterministic base with `temperature`
+    /// applied and the seed omitted (`omit_seed = true`).
+    ///
+    /// This is the RSS-style setting used to observe a model's sampling
+    /// distribution: a non-zero temperature without a pinned seed.  All other
+    /// fields keep their deterministic defaults; chain the builders below to
+    /// add e.g. a system prompt or blank tolerance.
+    pub fn sampling(temperature: f32) -> Self {
+        Self::deterministic()
+            .with_temperature(temperature)
+            .omit_seed()
     }
 
     /// Set the seed (builder style).
@@ -123,6 +181,34 @@ impl LlmConfig {
     /// Set the max-tokens cap (builder style).
     pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
         self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    /// Set the system prompt (builder style).
+    pub fn with_system(mut self, system: impl Into<String>) -> Self {
+        self.system = Some(system.into());
+        self
+    }
+
+    /// Stop sending a `seed` to the backend (builder style), enabling
+    /// temperature sampling without a pinned seed.
+    pub fn omit_seed(mut self) -> Self {
+        self.omit_seed = true;
+        self
+    }
+
+    /// Tolerate an empty completion (builder style): a blank response is
+    /// returned as `Ok` with empty `text` rather than erroring.
+    pub fn allow_blank(mut self) -> Self {
+        self.allow_blank = true;
+        self
+    }
+
+    /// Set how many top alternatives to request from
+    /// [`complete_with_logprobs`](LlmClient::complete_with_logprobs)
+    /// (builder style).
+    pub fn with_top_logprobs(mut self, n: u32) -> Self {
+        self.top_logprobs = Some(n);
         self
     }
 }
@@ -144,6 +230,22 @@ pub struct CallMetadata {
     pub cache_hit: bool,
 }
 
+/// A single candidate token with its natural-log probability.
+///
+/// Mirrors the shape Ollama / OpenAI return for a generation position: the
+/// surface `token` string (which may include a leading space, e.g. `" Donald"`),
+/// its raw `bytes` (kept so whitespace / multi-byte tokens are judged robustly),
+/// and the natural-log `logprob`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TokenLogprob {
+    /// The token's surface string (may contain a leading space).
+    pub token: String,
+    /// The token's raw bytes.
+    pub bytes: Vec<u8>,
+    /// The natural-log probability of this token.
+    pub logprob: f64,
+}
+
 /// A response together with the [`CallMetadata`] describing how it was
 /// produced.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -152,6 +254,12 @@ pub struct LlmResponse {
     pub text: String,
     /// Provenance of this response.
     pub metadata: CallMetadata,
+    /// Top-K token log-probabilities for the first generated position, when
+    /// requested via [`complete_with_logprobs`](LlmClient::complete_with_logprobs).
+    /// `None` for the plain [`complete`](LlmClient::complete) path (the default),
+    /// preserving the current response shape for existing callers.
+    #[serde(default)]
+    pub logprobs: Option<Vec<TokenLogprob>>,
 }
 
 /// Accumulates [`CallMetadata`] across many calls so a run can report e.g. the
@@ -267,6 +375,31 @@ pub trait LlmClient {
 
     /// Send `prompt` and return the completion plus its [`CallMetadata`].
     fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError>;
+
+    /// Send `prompt` and return the completion **with** the first generated
+    /// position's top-K token log-probabilities in
+    /// [`LlmResponse::logprobs`].
+    ///
+    /// The default implementation returns [`LlmError::Unsupported`]: a backend
+    /// that cannot expose log-probabilities (e.g. the in-memory test clients,
+    /// or a cloud model that does not return them) reports it rather than
+    /// silently producing a logprob-free response.  Backends that support it
+    /// (e.g. [`OllamaClient`](crate::OllamaClient),
+    /// [`OpenAiClient`](crate::OpenAiClient)) override this.
+    ///
+    /// The number of alternatives requested is `config.top_logprobs`, falling
+    /// back to a sane default (20) when unset.
+    fn complete_with_logprobs(
+        &self,
+        prompt: &str,
+        config: &LlmConfig,
+    ) -> Result<LlmResponse, LlmError> {
+        let _ = (prompt, config);
+        Err(LlmError::Unsupported {
+            endpoint: self.endpoint().to_string(),
+            operation: "logprobs".to_string(),
+        })
+    }
 }
 
 // ── forwarding impls ─────────────────────────────────────────────────────────
@@ -291,6 +424,14 @@ impl<T: LlmClient + ?Sized> LlmClient for Box<T> {
     fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError> {
         (**self).complete(prompt, config)
     }
+
+    fn complete_with_logprobs(
+        &self,
+        prompt: &str,
+        config: &LlmConfig,
+    ) -> Result<LlmResponse, LlmError> {
+        (**self).complete_with_logprobs(prompt, config)
+    }
 }
 
 /// Forward [`LlmClient`] through a shared reference, so `&client` is itself an
@@ -307,6 +448,14 @@ impl<T: LlmClient + ?Sized> LlmClient for &T {
 
     fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError> {
         (**self).complete(prompt, config)
+    }
+
+    fn complete_with_logprobs(
+        &self,
+        prompt: &str,
+        config: &LlmConfig,
+    ) -> Result<LlmResponse, LlmError> {
+        (**self).complete_with_logprobs(prompt, config)
     }
 }
 
@@ -361,11 +510,27 @@ impl<C: LlmClient> CachingClient<C> {
                     seed: config.seed,
                     cache_hit: true,
                 },
+                logprobs: None,
             });
         }
         let resp = self.inner.complete(prompt, config)?;
         self.cache.insert(key, resp.text.clone());
         Ok(resp)
+    }
+
+    /// Request a completion **with** token log-probabilities, delegating to the
+    /// wrapped backend.
+    ///
+    /// Unlike [`complete`](Self::complete) this does **not** consult or populate
+    /// the cache: the [`PromptCache`] only stores response *text*, so it cannot
+    /// faithfully replay a logprob distribution.  Logprob callers
+    /// (e.g. argyle2023) drive their own per-prompt caching when needed.
+    pub fn complete_with_logprobs(
+        &self,
+        prompt: &str,
+        config: &LlmConfig,
+    ) -> Result<LlmResponse, LlmError> {
+        self.inner.complete_with_logprobs(prompt, config)
     }
 }
 
@@ -495,6 +660,79 @@ mod tests {
             reject_blank_response("  hello  ".to_string(), "ep", "m").unwrap(),
             "  hello  "
         );
+    }
+
+    #[test]
+    fn default_complete_with_logprobs_is_unsupported() {
+        // A backend that does not override the method reports Unsupported,
+        // carrying its endpoint — it does not silently degrade.
+        let c = ScriptedClient::constant("m", "x");
+        let err = c
+            .complete_with_logprobs("hi", &LlmConfig::deterministic())
+            .unwrap_err();
+        match err {
+            LlmError::Unsupported {
+                endpoint,
+                operation,
+            } => {
+                assert_eq!(endpoint, "mock://scripted");
+                assert_eq!(operation, "logprobs");
+            }
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deterministic_defaults_are_unchanged() {
+        // Backward-compat: the new fields default to current behaviour and the
+        // existing fields keep their values.
+        let c = LlmConfig::deterministic();
+        assert_eq!(c.temperature, 0.0);
+        assert_eq!(c.seed, 0);
+        assert_eq!(c.max_tokens, None);
+        assert_eq!(c.system, None);
+        assert!(!c.omit_seed);
+        assert!(!c.allow_blank);
+        assert_eq!(c.top_logprobs, None);
+    }
+
+    #[test]
+    fn sampling_omits_seed_and_sets_temperature() {
+        let c = LlmConfig::sampling(1.0);
+        assert_eq!(c.temperature, 1.0);
+        assert!(c.omit_seed);
+        // seed value untouched; backends just don't send it.
+        assert_eq!(c.seed, 0);
+    }
+
+    #[test]
+    fn config_builders_compose() {
+        let c = LlmConfig::deterministic()
+            .with_system("sys")
+            .allow_blank()
+            .with_top_logprobs(5);
+        assert_eq!(c.system.as_deref(), Some("sys"));
+        assert!(c.allow_blank);
+        assert_eq!(c.top_logprobs, Some(5));
+    }
+
+    #[test]
+    fn old_llm_response_json_deserializes_without_logprobs() {
+        // A serialized response from before the `logprobs` field must still
+        // deserialize (serde default → None).
+        let json = r#"{"text":"hi","metadata":{"model":"m","endpoint":"e",
+            "temperature":0.0,"seed":0,"cache_hit":false}}"#;
+        let r: LlmResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(r.text, "hi");
+        assert_eq!(r.logprobs, None);
+    }
+
+    #[test]
+    fn old_llm_config_json_deserializes_with_field_defaults() {
+        // A serialized config from before the new fields must still deserialize.
+        let json = r#"{"temperature":0.0,"seed":0,"max_tokens":null}"#;
+        let c: LlmConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(c, LlmConfig::deterministic());
     }
 
     #[test]

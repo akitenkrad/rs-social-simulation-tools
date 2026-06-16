@@ -49,6 +49,7 @@ impl LlmClient for ScriptedClient {
                 seed: config.seed,
                 cache_hit: false,
             },
+            logprobs: None,
         })
     }
 }

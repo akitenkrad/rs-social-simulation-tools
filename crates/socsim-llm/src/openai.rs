@@ -3,7 +3,8 @@
 use serde_json::json;
 
 use crate::client::{
-    reject_blank_response, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse,
+    reject_blank_response, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse, TokenLogprob,
+    DEFAULT_TOP_LOGPROBS,
 };
 
 /// A synchronous [`LlmClient`] for the OpenAI chat-completions API.
@@ -57,6 +58,37 @@ impl OpenAiClient {
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
+
+    /// Build the request `messages`: an optional `{role: system}` message
+    /// (only when `config.system` is `Some`) followed by the user message.
+    /// With no system prompt this matches the previous single-message body.
+    fn build_messages(prompt: &str, config: &LlmConfig) -> serde_json::Value {
+        match &config.system {
+            Some(system) => json!([
+                { "role": "system", "content": system },
+                { "role": "user", "content": prompt },
+            ]),
+            None => json!([{ "role": "user", "content": prompt }]),
+        }
+    }
+
+    /// Build the base request body honouring `temperature`, `seed` (unless
+    /// `config.omit_seed`), `system` and `max_tokens`.  Shared by the plain and
+    /// logprob request paths.
+    fn build_body(&self, prompt: &str, config: &LlmConfig) -> serde_json::Value {
+        let mut body = json!({
+            "model": self.model,
+            "temperature": config.temperature,
+            "messages": Self::build_messages(prompt, config),
+        });
+        if !config.omit_seed {
+            body["seed"] = json!(config.seed);
+        }
+        if let Some(max) = config.max_tokens {
+            body["max_tokens"] = json!(max);
+        }
+        body
+    }
 }
 
 impl LlmClient for OpenAiClient {
@@ -72,15 +104,7 @@ impl LlmClient for OpenAiClient {
         if self.api_key.is_empty() {
             return Err(LlmError::Config("OpenAI api_key is empty".into()));
         }
-        let mut body = json!({
-            "model": self.model,
-            "temperature": config.temperature,
-            "seed": config.seed,
-            "messages": [{ "role": "user", "content": prompt }],
-        });
-        if let Some(max) = config.max_tokens {
-            body["max_tokens"] = json!(max);
-        }
+        let body = self.build_body(prompt, config);
 
         let resp = ureq::post(&self.endpoint)
             .set("Authorization", &format!("Bearer {}", self.api_key))
@@ -108,8 +132,13 @@ impl LlmClient for OpenAiClient {
 
         // A successful call that produced no visible text (e.g. a reasoning
         // model that consumed its whole `max_tokens` budget on a hidden
-        // thinking trace) is surfaced as an error rather than passed through.
-        let text = reject_blank_response(text, &self.endpoint, &self.model)?;
+        // thinking trace) is surfaced as an error rather than passed through —
+        // unless the caller opted into tolerating a blank response.
+        let text = if config.allow_blank {
+            text
+        } else {
+            reject_blank_response(text, &self.endpoint, &self.model)?
+        };
 
         Ok(LlmResponse {
             text,
@@ -120,8 +149,100 @@ impl LlmClient for OpenAiClient {
                 seed: config.seed,
                 cache_hit: false,
             },
+            logprobs: None,
         })
     }
+
+    fn complete_with_logprobs(
+        &self,
+        prompt: &str,
+        config: &LlmConfig,
+    ) -> Result<LlmResponse, LlmError> {
+        if self.api_key.is_empty() {
+            return Err(LlmError::Config("OpenAI api_key is empty".into()));
+        }
+        let top_logprobs = config.top_logprobs.unwrap_or(DEFAULT_TOP_LOGPROBS).max(1);
+        let mut body = self.build_body(prompt, config);
+        body["logprobs"] = json!(true);
+        body["top_logprobs"] = json!(top_logprobs);
+
+        let resp = ureq::post(&self.endpoint)
+            .set("Authorization", &format!("Bearer {}", self.api_key))
+            .send_json(body)
+            .map_err(|e| map_ureq_error(&self.endpoint, e))?;
+
+        let value: serde_json::Value = resp.into_json().map_err(|e| LlmError::Backend {
+            endpoint: self.endpoint.clone(),
+            status: 0,
+            message: format!("decoding response: {e}"),
+        })?;
+
+        let choice = value.get("choices").and_then(|c| c.get(0));
+        let text = choice
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let logprobs = choice.and_then(parse_openai_logprobs);
+
+        Ok(LlmResponse {
+            text,
+            metadata: CallMetadata {
+                model: self.model.clone(),
+                endpoint: self.endpoint.clone(),
+                temperature: config.temperature,
+                seed: config.seed,
+                cache_hit: false,
+            },
+            logprobs,
+        })
+    }
+}
+
+/// Parse the first generated token's top alternatives out of an OpenAI
+/// chat-completions choice (`choice.logprobs.content[0].top_logprobs`) into
+/// [`TokenLogprob`]s, or `None` if absent.
+///
+/// OpenAI returns the token string but not raw bytes for `top_logprobs`
+/// alternatives, so `bytes` is filled from the token's UTF-8 when the API does
+/// not supply a `bytes` array.
+fn parse_openai_logprobs(choice: &serde_json::Value) -> Option<Vec<TokenLogprob>> {
+    let content = choice
+        .get("logprobs")
+        .and_then(|l| l.get("content"))
+        .and_then(|c| c.as_array())?;
+    let first = content.first()?;
+    let tops = first.get("top_logprobs").and_then(|t| t.as_array())?;
+    Some(
+        tops.iter()
+            .map(|t| {
+                let token = t
+                    .get("token")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let bytes = t
+                    .get("bytes")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|b| b.as_u64().map(|n| n as u8))
+                            .collect()
+                    })
+                    .unwrap_or_else(|| token.as_bytes().to_vec());
+                TokenLogprob {
+                    token,
+                    bytes,
+                    logprob: t
+                        .get("logprob")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(f64::NEG_INFINITY),
+                }
+            })
+            .collect(),
+    )
 }
 
 /// Map a `ureq::Error` into an [`LlmError`], preserving the HTTP status when
@@ -158,6 +279,48 @@ mod tests {
         let c = OpenAiClient::new("", "gpt-4o-mini");
         let err = c.complete("hi", &LlmConfig::deterministic()).unwrap_err();
         assert!(matches!(err, LlmError::Config(_)));
+    }
+
+    #[test]
+    fn default_body_emits_seed_and_single_user_message() {
+        let c = OpenAiClient::new("sk", "gpt-4o-mini");
+        let body = c.build_body("hi", &LlmConfig::deterministic().with_seed(5));
+        assert_eq!(body["seed"], json!(5));
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+    }
+
+    #[test]
+    fn omit_seed_drops_seed_and_system_prepends() {
+        let c = OpenAiClient::new("sk", "gpt-4o-mini");
+        let cfg = LlmConfig::sampling(1.0).with_system("be terse");
+        let body = c.build_body("hi", &cfg);
+        assert!(body.get("seed").is_none(), "{body}");
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[0]["content"], "be terse");
+    }
+
+    #[test]
+    fn parses_openai_logprobs() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"logprobs": {"content": [
+                {"token": "Yes", "logprob": -0.1,
+                 "top_logprobs": [
+                   {"token": "Yes", "logprob": -0.1},
+                   {"token": "No",  "logprob": -2.3, "bytes": [78,111]}
+                 ]}
+            ]}}"#,
+        )
+        .unwrap();
+        let lp = parse_openai_logprobs(&value).expect("logprobs");
+        assert_eq!(lp.len(), 2);
+        assert_eq!(lp[0].token, "Yes");
+        // bytes filled from token UTF-8 when API omits them.
+        assert_eq!(lp[0].bytes, b"Yes".to_vec());
+        assert_eq!(lp[1].bytes, vec![78, 111]);
     }
 
     /// Live network test — requires a real API key. Ignored by default.
