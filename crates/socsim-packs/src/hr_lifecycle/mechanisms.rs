@@ -659,7 +659,7 @@ impl Mechanism<HrWorld> for OrgPerformanceMechanism {
 /// [`ModulePack`] that registers all HR lifecycle mechanisms into a
 /// [`Registry<HrWorld>`].
 ///
-/// Call [`HrLifecyclePack.register`] to make all mechanisms available by name,
+/// Call [`HrLifecyclePack::register`] to make all mechanisms available by name,
 /// then build them individually or iterate over all names:
 ///
 /// ```rust,no_run
