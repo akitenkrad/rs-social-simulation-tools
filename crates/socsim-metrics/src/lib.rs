@@ -22,9 +22,9 @@
 //! The crate is organised so that pulling in metrics never forces a dependency
 //! you do not use:
 //!
-//! | Feature   | Module        | Pulls in       | What you get |
-//! |-----------|---------------|----------------|--------------|
-//! | *(none)*  | [`stats`]     | nothing        | pure numeric primitives over `&[f64]` / `&[u32]` |
+//! | Feature   | Module                       | Pulls in       | What you get |
+//! |-----------|------------------------------|----------------|--------------|
+//! | *(none)*  | [`stats`], [`distribution`]  | nothing        | pure numeric primitives over `&[f64]` / `&[u32]`, plus KL divergence & chi-square homogeneity |
 //! | `core`    | [`opinion`]   | `socsim-core`  | capability-trait extractors + `MetricsMechanism<W>` |
 //! | `network` | [`network`]   | + `socsim-net` | degree / clustering / component / cascade metrics |
 //! | `spatial` | [`spatial`]   | + `socsim-grid`| Schelling-style segregation metrics |
@@ -34,6 +34,7 @@
 //!
 //! [`Recorder`]: socsim_core::Recorder
 
+pub mod distribution;
 pub mod stats;
 
 #[cfg(feature = "core")]

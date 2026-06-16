@@ -2,7 +2,9 @@
 
 use serde_json::json;
 
-use crate::client::{CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse};
+use crate::client::{
+    reject_blank_response, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse,
+};
 
 /// A synchronous [`LlmClient`] for the OpenAI chat-completions API.
 ///
@@ -103,6 +105,11 @@ impl LlmClient for OpenAiClient {
                 message: format!("missing choices[0].message.content in response: {value}"),
             })?
             .to_string();
+
+        // A successful call that produced no visible text (e.g. a reasoning
+        // model that consumed its whole `max_tokens` budget on a hidden
+        // thinking trace) is surfaced as an error rather than passed through.
+        let text = reject_blank_response(text, &self.endpoint, &self.model)?;
 
         Ok(LlmResponse {
             text,

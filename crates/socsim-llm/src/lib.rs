@@ -49,6 +49,7 @@ mod client;
 mod fallback;
 mod harness;
 pub mod mock;
+pub mod parse;
 
 #[cfg(feature = "live")]
 mod live;
@@ -64,6 +65,7 @@ pub use client::{
 };
 pub use fallback::FallbackClient;
 pub use harness::{llm_config, wrap_client, LiveClient, LlmSettings};
+pub use parse::extract_first_choice;
 
 #[cfg(feature = "live")]
 pub use harness::build_live_client_from_settings;

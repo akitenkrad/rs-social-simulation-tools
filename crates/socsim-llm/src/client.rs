@@ -32,9 +32,47 @@ pub enum LlmError {
     /// A required configuration value (e.g. an API key) was missing.
     #[error("configuration error: {0}")]
     Config(String),
+    /// The backend returned a successful but **empty** (or whitespace-only)
+    /// response text.  Reasoning/harmony models (e.g. gpt-oss) can spend the
+    /// whole `max_tokens` budget on a hidden thinking trace and emit no visible
+    /// answer; surfacing this as an error lets callers retry or raise the budget
+    /// instead of silently propagating a blank completion.
+    #[error("empty response from {endpoint} (model {model})")]
+    EmptyResponse {
+        /// The endpoint that produced the empty response.
+        endpoint: String,
+        /// The model that produced the empty response.
+        model: String,
+    },
     /// Every backend in a [`FallbackClient`](crate::FallbackClient) failed.
     #[error("all backends failed: {0}")]
     AllBackendsFailed(String),
+}
+
+/// Reject a blank completion: if `text` is empty or whitespace-only, return
+/// [`LlmError::EmptyResponse`] carrying the `endpoint` / `model` context;
+/// otherwise pass `text` through unchanged.
+///
+/// Live backends call this after extracting the response text so a model that
+/// spent its whole token budget on a hidden reasoning trace surfaces as an
+/// error rather than a silent empty string.  Factored out (and unit-tested
+/// below) so the check is exercised without a live server.
+///
+/// Only compiled when a live backend that uses it is enabled, so a
+/// network-free default build does not carry (or warn about) an unused helper.
+#[cfg(any(feature = "ollama", feature = "openai"))]
+pub(crate) fn reject_blank_response(
+    text: String,
+    endpoint: &str,
+    model: &str,
+) -> Result<String, LlmError> {
+    if text.trim().is_empty() {
+        return Err(LlmError::EmptyResponse {
+            endpoint: endpoint.to_string(),
+            model: model.to_string(),
+        });
+    }
+    Ok(text)
 }
 
 // ── config ──────────────────────────────────────────────────────────────────
@@ -433,6 +471,30 @@ mod tests {
         assert_eq!(s.total_calls, 0);
         assert_eq!(s.cache_hits, 0);
         assert_eq!(s.cache_hit_rate, 0.0);
+    }
+
+    #[cfg(any(feature = "ollama", feature = "openai"))]
+    #[test]
+    fn reject_blank_response_flags_empty_and_whitespace() {
+        // Empty string → error carrying endpoint/model context.
+        let err = reject_blank_response(String::new(), "http://h/api/chat", "gpt-oss").unwrap_err();
+        match err {
+            LlmError::EmptyResponse { endpoint, model } => {
+                assert_eq!(endpoint, "http://h/api/chat");
+                assert_eq!(model, "gpt-oss");
+            }
+            other => panic!("expected EmptyResponse, got {other:?}"),
+        }
+        // Whitespace-only (incl. newlines/tabs) → error.
+        assert!(matches!(
+            reject_blank_response("  \n\t ".to_string(), "ep", "m"),
+            Err(LlmError::EmptyResponse { .. })
+        ));
+        // Non-blank text passes through unchanged (not trimmed).
+        assert_eq!(
+            reject_blank_response("  hello  ".to_string(), "ep", "m").unwrap(),
+            "  hello  "
+        );
     }
 
     #[test]
