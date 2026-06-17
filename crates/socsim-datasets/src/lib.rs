@@ -7,7 +7,7 @@
 //! - **Schemas** ([`anes`], [`ces`]): per-survey-year [`socsim_survey::SurveySchema`]
 //!   builders that declare the real raw-column names and value-code -> label
 //!   maps. These are the canonical ANES 2012 / 2016 / 2020 schemas (moved here
-//!   verbatim from `socsim-survey`), plus a CES 2022 stub.
+//!   verbatim from `socsim-survey`), plus the CES 2022 Common Content schema.
 //! - **Registry** ([`registry`]): machine-readable [`DatasetMeta`] / [`DataFile`]
 //!   / [`Source`] records — DOI, source URL, citation, license, and the list of
 //!   files (with their `sha256` / `expect_rows` for verification) for each

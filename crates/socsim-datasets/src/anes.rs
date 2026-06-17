@@ -19,11 +19,10 @@
 //! [`ANES_2016`], [`ANES_2020`] [`DatasetMeta`] consts (also reachable via
 //! [`meta`]).
 //!
-//! # CES 2022 (not yet shipped)
+//! # CES 2022
 //!
-//! No CES schema lives here: the CES 2022 V-variable column names and codes are
-//! not available and must not be fabricated. See [`crate::ces`] for the CES 2022
-//! stub (metadata only); its schema is complete once gong2026 wires its data.
+//! No CES schema lives here; the CES 2022 Common Content schema (native
+//! `race` / `gender4` / `ideo5` codings) lives in [`crate::ces`].
 
 use socsim_survey::{AgeBins, DemoVar, OutcomeMap, SurveySchema, ValMap};
 

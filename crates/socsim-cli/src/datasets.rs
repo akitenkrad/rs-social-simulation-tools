@@ -245,10 +245,12 @@ mod tests {
     }
 
     #[test]
-    fn acquisition_kind_ces_2022_is_manual() {
+    fn acquisition_kind_ces_2022_is_auto() {
+        // CES 2022 Common Content is CC0 and fetched from the Harvard Dataverse
+        // access API, so its single file is auto-downloadable.
         assert_eq!(
             acquisition_kind(&socsim_datasets::ces::CES_2022_META),
-            "manual"
+            "auto"
         );
     }
 
