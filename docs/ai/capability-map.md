@@ -71,7 +71,7 @@ let final_state = sim.world();
 | Opinion / contagion / cultural / group mechanisms | `socsim-mechanisms` | `socsim_mechanisms::{HegselmannKrauseMechanism, DeffuantMechanism, SocialJudgementMechanism, LorenzMechanism, SiContagionMechanism, ThresholdContagionMechanism, PerAgentThresholdContagionMechanism, AxelrodMechanism, GroupConformityMechanism, MeanOperator}` | Reusable catalog over `socsim-core` capability traits; 4 feature families (all default-on). |
 | LLM-agent decisions | `socsim-llm` | `socsim_llm::{LlmClient, LlmConfig, LlmResponse, build_live_client_from_settings, wrap_client, LlmSettings, LiveClient, extract_first_choice, MetadataCollector}` | Confine to `Decision` phase; `features=["live"]` for networking. |
 | Survey microdata recode | `socsim-survey` | `socsim_survey::{SurveySchema, DemoVar, ValMap, AgeBins, OutcomeMap, recode_row, demo_label, actual_outcome, estimate_distributions}` | Generic engine only — schemas live in `socsim-datasets`. |
-| Dataset schemas + registry + download | `socsim-datasets` | `socsim_datasets::{all, by_key, DatasetMeta, DataFile, Source}`; `socsim_datasets::anes::{anes_2012, anes_2016, anes_2020}`; `acquire::{fetch, raw_to_csv}` (feature) | Never vendors data; license-gated files are `Source::Manual`. |
+| Dataset schemas + registry + download | `socsim-datasets` | `socsim_datasets::{all, by_key, DatasetMeta, DataFile, Source}`; `socsim_datasets::anes::{anes_2012, anes_2016, anes_2020}`; `socsim_datasets::ces::ces_2022`; `acquire::{fetch, raw_to_csv}` (feature) | Never vendors data; ANES is license-gated (`Source::Manual`); CES 2022 is CC0/Dataverse (auto). |
 | Reproduction (paper-anchor PASS/off) | `socsim-reproduce` | `socsim_reproduce::{Anchor, AnchorStatus, compare_anchor, build_rows, write_reproduce_summary, write_paper_anchors, find_latest}` | Ships mechanics, **no** anchor values — you supply `&[Anchor]` + lookup. |
 | Reusable metrics (stats / distribution / agreement) | `socsim-metrics` | `socsim_metrics::stats::{mean, variance, gini, …}`, `::distribution::{kl_divergence, chi_square_homogeneity, …}`, `::agreement::{cohen_kappa, tetrachoric, …}`, `::opinion::{MetricsMechanism, …}` (feature `core`) | Default build = zero socsim deps. Keep paper-specific metrics local. |
 | Output dirs + CSV/JSON + `latest` symlink | `socsim-results` | `socsim_results::{timestamp, create_run_dir, refresh_latest_symlink, write_csv, write_json, WriteError}` | Leaf crate; the `results/<ts>/` convention without a `Recorder`. |
@@ -348,11 +348,11 @@ let final_state = sim.world();
   ```
 - **Feature flags** (default = none): `acquire = ["dep:ureq", "dep:sha2", "dep:anyhow", "dep:csv", "dep:tempfile"]` — adds `fetch()` + `raw_to_csv()`.
 - **Key public API** (`crates/socsim-datasets/src/…`):
-  - Registry: `all() -> Vec<&'static DatasetMeta>` (ANES 2012/2016/2020 + CES 2022 stub); `by_key(key) -> Option<&'static DatasetMeta>`.
+  - Registry: `all() -> Vec<&'static DatasetMeta>` (ANES 2012/2016/2020 + CES 2022); `by_key(key) -> Option<&'static DatasetMeta>`.
   - `DatasetMeta { key, name, doi, source_url, citation, license, files }`; `DataFile { logical_name, source, sha256, expect_rows }`; `enum Source { Dataverse { base, file_id }, Url { url }, Manual { instructions_url } }`; `Source::download_url(&self) -> Option<String>` (`None` for `Manual`).
-  - Schemas: `anes::{anes_2012, anes_2016, anes_2020}() -> SurveySchema` (+ `anes(year)`, `meta(year)`).
+  - Schemas: `anes::{anes_2012, anes_2016, anes_2020}() -> SurveySchema` (+ `anes(year)`, `meta(year)`); `ces::ces_2022() -> SurveySchema` (+ `ces(year)`, `meta(year)`) — native CES codings (`race` 8-cat, `gender4` 4-cat, `ideo5` 5-point with code 6 "Not sure" unmapped) + a fixed-coded policy outcome `CC22_332a` (1=support, 2=oppose).
   - feature `acquire`: `acquire::fetch(meta: &DatasetMeta, opts: &FetchOpts) -> anyhow::Result<Vec<PathBuf>>` (download into gitignored `data/`, atomic-write, verify `sha256` + rows, skip cache hits); `acquire::raw_to_csv(input, output, delimiter, strip, expect_rows)`; `FetchOpts { dest, token, force }`.
-  - License-gated files (raw ANES microdata, CES 2022) are declared `Source::Manual` and are **not** auto-downloaded.
+  - License-gated files (raw ANES Time Series microdata) are declared `Source::Manual` and are **not** auto-downloaded. CES 2022 is CC0 1.0 (public domain) and is a `Source::Dataverse` — auto-downloadable, no account / terms.
 
 #### `socsim-reproduce`
 - **Purpose:** paper-anchor PASS/off reproduction harness — reads cached observations, classifies against the paper's reference values.
@@ -414,7 +414,7 @@ let final_state = sim.world();
 - Prefer the harness (`build_live_client_from_settings` / `wrap_client` / `llm_config`) over a per-model `llm.rs`.
 
 **`socsim-datasets` specifics**
-- The crate **never vendors data**. License-gated files (raw ANES Time-Series microdata needs a free electionstudies.org account + data-use agreement; CES 2022 via Harvard Dataverse terms) are `Source::Manual` and are not auto-downloaded — `fetch()` downloads only non-`Manual` sources into a consuming repo's gitignored `data/`.
+- The crate **never vendors data**. The raw ANES Time-Series microdata is license-gated (needs a free electionstudies.org account + data-use agreement), so it is `Source::Manual` and is not auto-downloaded. CES 2022 Common Content is CC0 1.0 (public domain) on the Harvard Dataverse, so it is `Source::Dataverse` and **is** auto-downloaded. `fetch()` downloads only non-`Manual` sources into a consuming repo's gitignored `data/`.
 
 ---
 

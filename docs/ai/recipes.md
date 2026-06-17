@@ -424,8 +424,8 @@ socsim-datasets = { git = "https://github.com/akitenkrad/rs-social-simulation-to
 ```
 
 `socsim-survey` is schema/recode logic (no built-in schemas); `socsim-datasets`
-ships the concrete ANES/CES schema builders (`anes::anes_2020()` etc.) and the
-dataset registry.
+ships the concrete ANES/CES schema builders (`anes::anes_2020()`,
+`ces::ces_2022()`, etc.) and the dataset registry.
 
 **Code.** Grounded in `crates/socsim-datasets/tests/anes_recode.rs` and the
 `socsim-survey` public API.
@@ -490,8 +490,10 @@ pub fn load_named_records<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<Reco
 ```
 
 **Gotchas.**
-- ANES/CES microdata is **license-gated** and not shipped. You must download it
-  yourself (Recipe 5) into `data/` before `load_named_records` will find it.
+- ANES microdata is **license-gated** and not shipped — download it yourself
+  (Recipe 5) into `data/` before `load_named_records` will find it. CES 2022 is
+  CC0 1.0 (public domain) on the Harvard Dataverse and **auto-downloadable** via
+  `fetch` (no account / terms), so it lands in `data/` without a manual step.
 - `load_named_records` always parses with a `,` delimiter, even for `.tab`
   files. `TODO(verify):` this function has no test/call-site in-repo (only its
   definition at `crates/socsim-survey/src/lib.rs`), so treat its CSV contract as
@@ -506,8 +508,9 @@ pub fn load_named_records<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<Reco
 ## Recipe 5 — Acquire a dataset
 
 **When to use.** You need the raw microdata file on disk. socsim knows the
-registry (keys, citations, checksums) but most sources are license-gated and
-must be fetched manually.
+registry (keys, citations, checksums). CES 2022 is CC0 on the Harvard Dataverse
+and auto-downloads; the ANES Time Series sources are license-gated and must be
+fetched manually.
 
 **Dependencies.** For the in-code API, depend on `socsim-datasets` with the
 **`acquire`** feature (the library feature is `acquire`; the CLI exposes the same
@@ -548,8 +551,9 @@ fn main() -> anyhow::Result<()> {
 
     let meta = by_key("anes-2020").expect("known key");
 
-    // All current datasets are Source::Manual, so fetch reports manual instructions
-    // (it does NOT silently fail — it bails with the instructions_url).
+    // The ANES Time Series datasets are Source::Manual, so fetch reports manual
+    // instructions for them (it does NOT silently fail — it bails with the
+    // instructions_url). CES 2022 is Source::Dataverse (CC0) and downloads directly.
     if meta.files.iter().all(|f| matches!(f.source, Source::Manual { .. })) {
         eprintln!("{} is license-gated; download from {}", meta.key, meta.source_url);
     }

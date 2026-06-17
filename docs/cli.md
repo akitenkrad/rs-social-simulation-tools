@@ -295,7 +295,7 @@ socsim datasets <SUBCOMMAND>
 | `datasets show <KEY>` | Show one dataset's overview (name, key, DOI, source URL, citation, license) and, per file, its acquisition method — for **manual** files the instructions URL + steps; for **auto-downloadable** files the resolved download URL, the exact `socsim datasets fetch …` command, plus any `sha256` / `expect_rows` |
 | `datasets fetch <KEY> [--dest <DIR>] [--force]` | Actually download the dataset's files into `--dest` (default a gitignored `data/` dir), atomic-writing and verifying `sha256` + row counts, skipping cache hits |
 
-`fetch` requires building the CLI with the opt-in **`--features datasets-acquire`** flag. The default CLI build keeps `list` / `show` working, but `fetch` simply tells you to rebuild with that feature. Data is **never vendored** into the repo; license-gated files (raw ANES Time Series microdata, CES 2022) are declared `Source::Manual` and report manual instructions instead of being auto-downloaded.
+`fetch` requires building the CLI with the opt-in **`--features datasets-acquire`** flag. The default CLI build keeps `list` / `show` working, but `fetch` simply tells you to rebuild with that feature. Data is **never vendored** into the repo; the license-gated raw ANES Time Series microdata is declared `Source::Manual` and reports manual instructions instead of being auto-downloaded, whereas the CC0 1.0 (public domain) CES 2022 Common Content is a `Source::Dataverse` and is auto-downloadable (`fetch ces-2022` pulls it directly from the Harvard Dataverse, no account / terms).
 
 **Examples**
 
