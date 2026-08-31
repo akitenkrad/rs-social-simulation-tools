@@ -56,7 +56,7 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 60               35.6250           92.3841           41.8100            0.0000
 ```
 
-`socsim` バイナリは World 多態です：シナリオは **モジュールパック**を名前で選択します（`socsim list packs`）．現在3つのパックを同梱しています — 較正済みの `hr-lifecycle` リファレンスモジュール，`socsim-mechanisms` の有界信頼メカニズムをソーシャルネットワーク上で実行する汎用 `opinion-dynamics` パック，そして階層的な組織で沈黙の風土の創発をモデル化する `organizational-silence` パックです：
+`socsim` バイナリは World 多態です：シナリオは **モジュールパック**を名前で選択します（`socsim list packs`）．現在3つのパックを同梱しています — 補正済みの `hr-lifecycle` リファレンスモジュール，`socsim-mechanisms` の有界信頼メカニズムをソーシャルネットワーク上で実行する汎用 `opinion-dynamics` パック，そして階層的な組織で沈黙の風土の創発をモデル化する `organizational-silence` パックです：
 
 ```sh
 socsim run scenarios/opinion_dynamics_baseline.toml
@@ -97,7 +97,7 @@ t              silence_rate   climate_of_silence       voice_volume      org_per
 | [CLIリファレンス](docs/cli.ja.md) | 全サブコマンド，フラグ，JSONL出力形式 |
 | [ユースケース＆レシピ](docs/usecases.ja.md) | 代表的な研究ワークフローのランブック |
 | [ライブラリAPI](docs/library.ja.md) | カスタムメカニズムの実装とライブラリとしての利用 |
-| [Mechanismカタログ](docs/mechanisms.ja.md) | 全19メカニズム：理論，出典，図解，フェーズ上の位置付け，各メカニズムの適用方法 |
+| [Mechanismカタログ](docs/mechanisms.ja.md) | 全28メカニズム：理論，出典，図解，フェーズ上の位置付け，各メカニズムの適用方法 |
 | [モジュールパック](docs/packs.ja.md) | 同梱の3つのパック（`hr-lifecycle`，`opinion-dynamics`，`organizational-silence`）：World のデータモデル，メカニズムの構成，スターターシナリオ，記録されるメトリクス |
 | [アーキテクチャ](docs/architecture.ja.md) | クレート依存グラフ，6フェーズティックループ，キャリブレーション哲学 |
 

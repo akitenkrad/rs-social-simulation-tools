@@ -22,7 +22,7 @@ cargo build --release
 
 ### 1. HRライフサイクルのベースラインを実行する
 
-socsimは [`scenarios/`](../../scenarios) に2つのすぐ実行できるシナリオを同梱しています．較正済みのHRライフサイクルを実行します：
+socsimは [`scenarios/`](../../scenarios) に4つのすぐ実行できるシナリオを同梱しています．補正済みのHRライフサイクルを実行します：
 
 ```sh
 socsim run scenarios/hr_lifecycle_baseline.toml

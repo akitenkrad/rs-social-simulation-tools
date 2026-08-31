@@ -15,7 +15,7 @@
 
 ## 2. 理論と出典
 
-単一の較正出典があるわけではなく，4つのメトリクスはいずれも標準的な HR アナリティクスの集計値である．
+単一の補正出典があるわけではなく，4つのメトリクスはいずれも標準的な HR アナリティクスの集計値である．
 
 $$\text{org\_performance} = \sum_{i} \pi_i, \qquad \text{turnover\_rate} = \frac{\lvert\text{departed\_this\_step}\rvert}{\max(1,\ \text{headcount\_at\_step\_start})}$$
 

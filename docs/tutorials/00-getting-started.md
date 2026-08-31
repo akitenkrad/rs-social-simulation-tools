@@ -22,7 +22,7 @@ This produces `target/release/socsim`. The commands below assume it is on your p
 
 ### 1. Run the HR lifecycle baseline
 
-socsim ships two ready-to-run scenarios in [`scenarios/`](../../scenarios). Run the calibrated HR-lifecycle one:
+socsim ships four ready-to-run scenarios in [`scenarios/`](../../scenarios). Run the calibrated HR-lifecycle one:
 
 ```sh
 socsim run scenarios/hr_lifecycle_baseline.toml

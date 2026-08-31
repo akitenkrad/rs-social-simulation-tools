@@ -3,7 +3,7 @@
 # Voice 決定（ルールおよび LLM）（`voice_decision_rule`，`voice_decision`）
 
 > 各エージェントは，心理的安全性，上司開放性，課題顕在性，fear，
-> 暗黙の発言観，隣接沈黙比をブレンドした較正済みロジスティックを介して
+> 暗黙の発言観，隣接沈黙比をブレンドした補正済みロジスティックを介して
 > Voice か Silence かを決定します．Silence の場合，さらに Van Dyne, Ang & Botero (2003) に従って
 > Acquiescent，Defensive，Prosocial の3つの動機のうち1つを割り当てます．
 > フィーチャゲートされた LLM 兄弟（`voice_decision`）はロジスティックを構造化 JSON プロンプトで置き換え，
@@ -288,7 +288,7 @@ LLM 変種は，(a) `temperature = 0` とウォームな `PromptCache`（毎回�
 
 フロンティアモデルでの `voice_decision`（LLM）への切り替えは，定性的に類似した軌跡を生成しますが，
 動機構成はモデルが最も口に出しやすい動機側に偏ります — 通常は高 `fear` で `Defensive`，
-高 `ivt_strength` で `Acquiescent`．ルールは較正済みベースラインのままであり，LLM 変種は比較対象です．
+高 `ivt_strength` で `Acquiescent`．ルールは補正済みベースラインのままであり，LLM 変種は比較対象です．
 
 ## 11. 参考文献
 

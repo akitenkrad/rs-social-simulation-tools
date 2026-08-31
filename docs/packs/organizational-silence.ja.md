@@ -16,7 +16,7 @@
 - **階層と上司シグナル．** 従業員はチームに所属し，各チームは開放性 `u_k ∈ [-1, 1]` を持つ上司が率います．`u_k` は，従業員が voice を決断する際に読む，最も近接した手がかりです．パックは `supervisor_homogeneity` というノブも提供し，組織全体で同一の上司から一様分散した上司までを補間できます — Sohn (2022) が指摘した「同質な上司シグナルは沈黙の大域的創発を起こりやすくする」という効果を直接検証できます．
 - **閾値カスケードとスパイラル知覚．** Granovetter / Kuran (1995) の選好偽装カスケードは，隣接 voice 比率が個別の閾値を超えた瞬間に多数の silent dissenter を一気に voice へ反転させます．一方，Noelle-Neumann (1974) の沈黙のスパイラルは逆方向に作用し，局所的に沈黙が密な場所では心理的安全性を侵食します．
 
-パックは **LLM／ルールの切り替え**を組み込みのアブレーションとして提供します．シナリオ TOML 内のメカニズム名を1つ変更するだけで，Decision フェーズが較正済みロジスティックルールと LLM 駆動の voice 決定（`voice_decision`）の間で切り替わります．ワールドは，モデルが較正対象としている4つのマクロ変数 — 課題顕在性 σ(t)，沈黙の風土 C(t)，voice volume V(t)，組織業績 Π(t) — を保持しているため，Milliken 2003 の「~85% ever silent」や Detert & Edmondson 2011 の「IVT 高位群で ~50% が沈黙」を再現するには，標準のメトリクス系列を読み取るだけで足ります．
+パックは **LLM／ルールの切り替え**を組み込みのアブレーションとして提供します．シナリオ TOML 内のメカニズム名を1つ変更するだけで，Decision フェーズが補正済みロジスティックルールと LLM 駆動の voice 決定（`voice_decision`）の間で切り替わります．ワールドは，モデルが補正対象としている4つのマクロ変数 — 課題顕在性 σ(t)，沈黙の風土 C(t)，voice volume V(t)，組織業績 Π(t) — を保持しているため，Milliken 2003 の「~85% ever silent」や Detert & Edmondson 2011 の「IVT 高位群で ~50% が沈黙」を再現するには，標準のメトリクス系列を読み取るだけで足ります．
 
 ## 2. ワールド：`SilenceWorld`
 
@@ -299,7 +299,7 @@ cargo run -p socsim-cli --features pack-organizational-silence-llm \
 ## 7. 関連項目
 
 - [Mechanism カタログ](../mechanisms.ja.md) — スパイラル／カスケード／fear-appraisal メカニズムの隣に位置する，より広いカタログ．
-- [hr-lifecycle パック](hr-lifecycle.ja.md) — もう1つの組織系パック（労働力進化，10個の較正済みメカニズム）．
+- [hr-lifecycle パック](hr-lifecycle.ja.md) — もう1つの組織系パック（労働力進化，10個の補正済みメカニズム）．
 - [opinion-dynamics パック](opinion-dynamics.ja.md) — 「ネットワーク上の創発」を扱う兄弟パック．
 - [T5 — シナリオパック](../tutorials/05-scenario-pack.ja.md) — パックをゼロから構築．
 - [ユースケース＆レシピ](../usecases.ja.md) · [CLI リファレンス](../cli.ja.md) · [アーキテクチャ](../architecture.ja.md)

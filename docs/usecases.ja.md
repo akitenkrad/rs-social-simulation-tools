@@ -46,7 +46,7 @@ t               clusters         max_delta              mean            spread  
 
 ### 組織的沈黙ベースラインの実行
 
-3番目の同梱パックは，較正済みロジスティックの voice 決定，Granovetter/Kuran の閾値カスケード，Noelle-Neumann のスパイラル，および月24の実行途中の顕在性ショックを伴う，階層型 Watts–Strogatz 組織上の沈黙の風土の創発をモデル化します．ワールドモデルは[organizational-silence パック](packs/organizational-silence.ja.md)を，エージェントごとの決定ルールは[`voice_decision_rule`](mechanisms/voice-decision-rule.ja.md)ページを参照してください．
+3番目の同梱パックは，補正済みロジスティックの voice 決定，Granovetter/Kuran の閾値カスケード，Noelle-Neumann のスパイラル，および月24の実行途中の顕在性ショックを伴う，階層型 Watts–Strogatz 組織上の沈黙の風土の創発をモデル化します．ワールドモデルは[organizational-silence パック](packs/organizational-silence.ja.md)を，エージェントごとの決定ルールは[`voice_decision_rule`](mechanisms/voice-decision-rule.ja.md)ページを参照してください．
 
 `pack-organizational-silence` フィーチャ（デフォルト）で CLI をビルドし，同梱シナリオを1シードで実行します．
 
