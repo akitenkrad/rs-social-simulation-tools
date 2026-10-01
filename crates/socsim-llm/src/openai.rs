@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::client::{
     reject_blank_response, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse, TokenLogprob,
-    DEFAULT_TOP_LOGPROBS,
+    TokenUsage, DEFAULT_TOP_LOGPROBS,
 };
 
 /// A synchronous [`LlmClient`] for the OpenAI chat-completions API.
@@ -138,6 +138,19 @@ impl OpenAiClient {
     }
 }
 
+/// Extract the token counts OpenAI reports for a successful response.
+fn response_usage(value: &serde_json::Value) -> Option<TokenUsage> {
+    let usage = value.get("usage");
+    Some(TokenUsage {
+        prompt_tokens: usage
+            .and_then(|usage| usage.get("prompt_tokens"))
+            .and_then(serde_json::Value::as_u64),
+        completion_tokens: usage
+            .and_then(|usage| usage.get("completion_tokens"))
+            .and_then(serde_json::Value::as_u64),
+    })
+}
+
 impl LlmClient for OpenAiClient {
     fn model(&self) -> &str {
         &self.model
@@ -163,6 +176,7 @@ impl LlmClient for OpenAiClient {
             status: 0,
             message: format!("decoding response: {e}"),
         })?;
+        let usage = response_usage(&value);
 
         let text = value
             .get("choices")
@@ -189,12 +203,14 @@ impl LlmClient for OpenAiClient {
 
         Ok(LlmResponse {
             text,
+            thinking: None,
             metadata: CallMetadata {
                 model: self.model.clone(),
                 endpoint: self.endpoint.clone(),
                 temperature: config.temperature,
                 seed: config.seed,
                 cache_hit: false,
+                usage,
             },
             logprobs: None,
         })
@@ -223,6 +239,7 @@ impl LlmClient for OpenAiClient {
             status: 0,
             message: format!("decoding response: {e}"),
         })?;
+        let usage = response_usage(&value);
 
         let choice = value.get("choices").and_then(|c| c.get(0));
         let text = choice
@@ -236,12 +253,14 @@ impl LlmClient for OpenAiClient {
 
         Ok(LlmResponse {
             text,
+            thinking: None,
             metadata: CallMetadata {
                 model: self.model.clone(),
                 endpoint: self.endpoint.clone(),
                 temperature: config.temperature,
                 seed: config.seed,
                 cache_hit: false,
+                usage,
             },
             logprobs,
         })
@@ -368,6 +387,35 @@ mod tests {
         // bytes filled from token UTF-8 when API omits them.
         assert_eq!(lp[0].bytes, b"Yes".to_vec());
         assert_eq!(lp[1].bytes, vec![78, 111]);
+    }
+
+    #[test]
+    fn response_maps_reported_token_usage() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"choices":[{"message":{"content":"hi"}}],
+                "usage":{"prompt_tokens":12,"completion_tokens":7}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            response_usage(&value),
+            Some(TokenUsage {
+                prompt_tokens: Some(12),
+                completion_tokens: Some(7),
+            })
+        );
+    }
+
+    #[test]
+    fn response_without_usage_keeps_both_counts_unknown() {
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"choices":[{"message":{"content":"hi"}}]}"#).unwrap();
+        assert_eq!(
+            response_usage(&value),
+            Some(TokenUsage {
+                prompt_tokens: None,
+                completion_tokens: None,
+            })
+        );
     }
 
     #[test]

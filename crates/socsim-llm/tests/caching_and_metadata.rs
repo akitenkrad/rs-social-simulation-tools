@@ -26,8 +26,12 @@ fn cache_hit_miss_and_metadata_rate() {
     assert_eq!(a1.text, "reply-to:alpha");
     assert_eq!(a1.text, a2.text);
     assert!(!a1.metadata.cache_hit);
+    assert_eq!(a1.metadata.usage, None);
+    assert_eq!(a1.thinking, None);
     assert!(a2.metadata.cache_hit);
     assert_eq!(a2.metadata.endpoint, "cache");
+    assert_eq!(a2.metadata.usage, None);
+    assert_eq!(a2.thinking, None);
 
     assert_eq!(collector.total(), 4);
     assert_eq!(collector.cache_hits(), 2);

@@ -8,7 +8,8 @@ socsim's core (`socsim-core`, `socsim-engine`, …) is **deterministic and LLM-f
 
 - **`temperature = 0`** and a fixed **`seed`** are plumbed through `LlmConfig` (Ollama honours `options.seed`; OpenAI is best-effort).
 - A **prompt → response cache** keyed on `hash(prompt + model)` makes a re-run with a warm cache replay identical responses — turning a noisy model into a reproducible oracle.
-- **`CallMetadata`** records model / endpoint / temperature / seed / cache-hit for every call, and `MetadataCollector` aggregates the cache-hit rate for the run's output.
+- **`CallMetadata`** records model / endpoint / temperature / seed / cache-hit and optional backend-reported token usage for every call, and `MetadataCollector` aggregates the cache-hit rate for the run's output.
+- **`LlmResponse`** carries the generated text plus an optional non-blank thinking trace surfaced by Ollama responses.
 
 The crate is **optional and feature-gated**: it is *not* a dependency of `socsim-core` / `socsim-engine`, and the default build pulls in no networking at all.
 

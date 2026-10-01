@@ -217,6 +217,15 @@ impl LlmConfig {
 
 // ── metadata ──────────────────────────────────────────────────────────────────
 
+/// Token counts reported by an LLM backend for one completed call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TokenUsage {
+    /// Prompt tokens evaluated by the backend, when the backend reports it.
+    pub prompt_tokens: Option<u64>,
+    /// Generated tokens (including any thinking tokens), when the backend reports it.
+    pub completion_tokens: Option<u64>,
+}
+
 /// What a single LLM call talked to, for logging into the run's output.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CallMetadata {
@@ -230,6 +239,9 @@ pub struct CallMetadata {
     pub seed: u64,
     /// Whether the response was served from the cache (no backend call).
     pub cache_hit: bool,
+    /// Token counts reported by the backend, or `None` when no backend call ran.
+    #[serde(default)]
+    pub usage: Option<TokenUsage>,
 }
 
 /// A single candidate token with its natural-log probability.
@@ -254,6 +266,9 @@ pub struct TokenLogprob {
 pub struct LlmResponse {
     /// The generated text.
     pub text: String,
+    /// A backend-provided thinking trace, when present and non-blank.
+    #[serde(default)]
+    pub thinking: Option<String>,
     /// Provenance of this response.
     pub metadata: CallMetadata,
     /// Top-K token log-probabilities for the first generated position, when
@@ -505,12 +520,14 @@ impl<C: LlmClient> CachingClient<C> {
         if let Some(text) = self.cache.get(&key) {
             return Ok(LlmResponse {
                 text,
+                thinking: None,
                 metadata: CallMetadata {
                     model: self.inner.model().to_string(),
                     endpoint: "cache".to_string(),
                     temperature: config.temperature,
                     seed: config.seed,
                     cache_hit: true,
+                    usage: None,
                 },
                 logprobs: None,
             });
@@ -611,12 +628,14 @@ impl<C: LlmClient> LlmClient for SharedCachingClient<C> {
         if let Some(text) = self.cache.borrow().get(&key) {
             return Ok(LlmResponse {
                 text,
+                thinking: None,
                 metadata: CallMetadata {
                     model: self.inner.model().to_string(),
                     endpoint: "cache".to_string(),
                     temperature: config.temperature,
                     seed: config.seed,
                     cache_hit: true,
+                    usage: None,
                 },
                 logprobs: None,
             });
@@ -686,6 +705,7 @@ mod tests {
             temperature: 0.0,
             seed: 42,
             cache_hit: false,
+            usage: None,
         });
         collector.record(CallMetadata {
             model: "llama3.1".into(),
@@ -693,6 +713,7 @@ mod tests {
             temperature: 0.0,
             seed: 42,
             cache_hit: false,
+            usage: None,
         });
         collector.record(CallMetadata {
             model: "llama3.1".into(),
@@ -700,6 +721,7 @@ mod tests {
             temperature: 0.0,
             seed: 42,
             cache_hit: true,
+            usage: None,
         });
 
         let s = collector.summary();
@@ -724,6 +746,7 @@ mod tests {
             temperature: 0.0,
             seed: 7,
             cache_hit: true,
+            usage: None,
         });
         let s = collector.summary();
         assert_eq!(s.total_calls, 1);
@@ -832,7 +855,17 @@ mod tests {
             "temperature":0.0,"seed":0,"cache_hit":false}}"#;
         let r: LlmResponse = serde_json::from_str(json).unwrap();
         assert_eq!(r.text, "hi");
+        assert_eq!(r.metadata.usage, None);
+        assert_eq!(r.thinking, None);
         assert_eq!(r.logprobs, None);
+    }
+
+    #[test]
+    fn old_call_metadata_json_deserializes_without_usage() {
+        let json = r#"{"model":"m","endpoint":"e","temperature":0.0,
+            "seed":0,"cache_hit":false}"#;
+        let metadata: CallMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(metadata.usage, None);
     }
 
     #[test]
@@ -911,12 +944,14 @@ mod tests {
             fn complete(&self, _p: &str, cfg: &LlmConfig) -> Result<LlmResponse, LlmError> {
                 Ok(LlmResponse {
                     text: "plain".into(),
+                    thinking: None,
                     metadata: CallMetadata {
                         model: "lp-model".into(),
                         endpoint: "mock://logprob".into(),
                         temperature: cfg.temperature,
                         seed: cfg.seed,
                         cache_hit: false,
+                        usage: None,
                     },
                     logprobs: None,
                 })
@@ -928,12 +963,14 @@ mod tests {
             ) -> Result<LlmResponse, LlmError> {
                 Ok(LlmResponse {
                     text: "Donald".into(),
+                    thinking: None,
                     metadata: CallMetadata {
                         model: "lp-model".into(),
                         endpoint: "mock://logprob".into(),
                         temperature: cfg.temperature,
                         seed: cfg.seed,
                         cache_hit: false,
+                        usage: None,
                     },
                     logprobs: Some(vec![TokenLogprob {
                         token: " Donald".into(),

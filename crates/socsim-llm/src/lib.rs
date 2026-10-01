@@ -15,7 +15,8 @@
 //!   re-run with a warm cache replays identical responses — turning a noisy
 //!   model into a reproducible oracle.
 //! - **[`CallMetadata`]** records model / endpoint / temperature / seed /
-//!   cache-hit for every call so a run can log exactly what it talked to.
+//!   cache-hit and backend-reported token usage for every call, while
+//!   **[`LlmResponse`]** surfaces any non-blank Ollama thinking trace.
 //!
 //! This crate is **optional and feature-gated**: it is *not* a dependency of
 //! `socsim-core` / `socsim-engine`, and the default build pulls in no
@@ -60,9 +61,10 @@ mod openai;
 
 pub use cache::{cache_key, PromptCache};
 pub use client::{
-    CachingClient, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse, MetadataCollector,
-    RunMetadata, SharedCachingClient, TokenLogprob,
+    CachingClient, LlmClient, LlmConfig, LlmError, LlmResponse, MetadataCollector, RunMetadata,
+    SharedCachingClient, TokenLogprob,
 };
+pub use client::{CallMetadata, TokenUsage};
 pub use fallback::FallbackClient;
 pub use harness::{
     llm_config, wrap_client, wrap_client_shared, LiveClient, LlmSettings, SharedLiveClient,

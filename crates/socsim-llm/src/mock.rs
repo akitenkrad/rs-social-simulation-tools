@@ -42,12 +42,14 @@ impl LlmClient for ScriptedClient {
     fn complete(&self, prompt: &str, config: &LlmConfig) -> Result<LlmResponse, LlmError> {
         Ok(LlmResponse {
             text: (self.answer)(prompt),
+            thinking: None,
             metadata: CallMetadata {
                 model: self.model.clone(),
                 endpoint: self.endpoint().to_string(),
                 temperature: config.temperature,
                 seed: config.seed,
                 cache_hit: false,
+                usage: None,
             },
             logprobs: None,
         })
@@ -98,6 +100,8 @@ mod tests {
         assert_eq!(r.text, "echo:hi");
         assert_eq!(r.metadata.model, "m");
         assert!(!r.metadata.cache_hit);
+        assert_eq!(r.metadata.usage, None);
+        assert_eq!(r.thinking, None);
     }
 
     #[test]

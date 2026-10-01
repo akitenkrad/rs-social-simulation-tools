@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::client::{
     reject_blank_response, CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse, TokenLogprob,
-    DEFAULT_TOP_LOGPROBS,
+    TokenUsage, DEFAULT_TOP_LOGPROBS,
 };
 
 /// Which Ollama API surface an [`OllamaClient`] talks to.
@@ -236,6 +236,29 @@ impl OllamaClient {
                 .map(str::to_string),
         }
     }
+
+    /// Extract a non-blank thinking trace from the selected API response.
+    fn response_thinking(&self, value: &serde_json::Value) -> Option<String> {
+        let thinking = match self.api {
+            OllamaApi::Chat => value
+                .get("message")
+                .and_then(|message| message.get("thinking")),
+            OllamaApi::Generate => value.get("thinking"),
+        }
+        .and_then(serde_json::Value::as_str)?;
+
+        (!thinking.trim().is_empty()).then(|| thinking.to_string())
+    }
+}
+
+/// Extract the token counts Ollama reports for a successful response.
+fn response_usage(value: &serde_json::Value) -> Option<TokenUsage> {
+    Some(TokenUsage {
+        prompt_tokens: value
+            .get("prompt_eval_count")
+            .and_then(serde_json::Value::as_u64),
+        completion_tokens: value.get("eval_count").and_then(serde_json::Value::as_u64),
+    })
 }
 
 impl LlmClient for OllamaClient {
@@ -268,6 +291,8 @@ impl LlmClient for OllamaClient {
                 status: 0,
                 message: format!("missing response text in response: {value}"),
             })?;
+        let thinking = self.response_thinking(&value);
+        let usage = response_usage(&value);
 
         // A successful call that produced no visible text (e.g. a reasoning
         // model that consumed its whole `num_predict` budget on a hidden
@@ -281,12 +306,14 @@ impl LlmClient for OllamaClient {
 
         Ok(LlmResponse {
             text,
+            thinking,
             metadata: CallMetadata {
                 model: self.model.clone(),
                 endpoint: self.endpoint.clone(),
                 temperature: config.temperature,
                 seed: config.seed,
                 cache_hit: false,
+                usage,
             },
             logprobs: None,
         })
@@ -320,6 +347,8 @@ impl LlmClient for OllamaClient {
         let text = self.response_text(&value).unwrap_or_default();
 
         let logprobs = parse_logprobs(&value);
+        let thinking = self.response_thinking(&value);
+        let usage = response_usage(&value);
 
         // Logprob callers (argyle2023) request a single token and care about the
         // distribution, not the visible text — tolerate a blank completion by
@@ -329,12 +358,14 @@ impl LlmClient for OllamaClient {
         // success even with empty text.
         Ok(LlmResponse {
             text,
+            thinking,
             metadata: CallMetadata {
                 model: self.model.clone(),
                 endpoint: self.endpoint.clone(),
                 temperature: config.temperature,
                 seed: config.seed,
                 cache_hit: false,
+                usage,
             },
             logprobs,
         })
@@ -512,6 +543,72 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(r#"{"message": {"content": "hi"}}"#).unwrap();
         assert_eq!(c.response_text(&value).as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn chat_response_maps_reported_token_usage() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"message":{"content":"hi"},"prompt_eval_count":12,"eval_count":7}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            response_usage(&value),
+            Some(TokenUsage {
+                prompt_tokens: Some(12),
+                completion_tokens: Some(7),
+            })
+        );
+    }
+
+    #[test]
+    fn chat_response_keeps_missing_prompt_token_count_as_none() {
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"message":{"content":"hi"},"eval_count":7}"#).unwrap();
+        assert_eq!(
+            response_usage(&value),
+            Some(TokenUsage {
+                prompt_tokens: None,
+                completion_tokens: Some(7),
+            })
+        );
+    }
+
+    #[test]
+    fn chat_response_surfaces_non_blank_thinking() {
+        let c = OllamaClient::new("http://h", "m");
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"message":{"content":"answer","thinking":"step..."}}"#)
+                .unwrap();
+        assert_eq!(c.response_thinking(&value).as_deref(), Some("step..."));
+    }
+
+    #[test]
+    fn chat_response_ignores_blank_thinking() {
+        let c = OllamaClient::new("http://h", "m");
+        for json in [
+            r#"{"message":{"content":"answer","thinking":""}}"#,
+            r#"{"message":{"content":"answer","thinking":"  \n\t"}}"#,
+        ] {
+            let value: serde_json::Value = serde_json::from_str(json).unwrap();
+            assert_eq!(c.response_thinking(&value), None);
+        }
+    }
+
+    #[test]
+    fn generate_response_maps_thinking_and_token_usage() {
+        let c = OllamaClient::new("http://h", "m").with_api(OllamaApi::Generate);
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"response":"answer","thinking":"step...","prompt_eval_count":9,"eval_count":4}"#,
+        )
+        .unwrap();
+        assert_eq!(c.response_thinking(&value).as_deref(), Some("step..."));
+        assert_eq!(
+            response_usage(&value),
+            Some(TokenUsage {
+                prompt_tokens: Some(9),
+                completion_tokens: Some(4),
+            })
+        );
     }
 
     #[test]
