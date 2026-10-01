@@ -120,8 +120,9 @@ impl OpenAiClient {
     }
 
     /// Build the base request body honouring `temperature`, `seed` (unless
-    /// `config.omit_seed`), `system` and `max_tokens`.  Shared by the plain and
-    /// logprob request paths.
+    /// `config.omit_seed`), `system` and `max_tokens`.  Ollama-only
+    /// `config.think` is deliberately ignored.  Shared by the plain and logprob
+    /// request paths.
     fn build_body(&self, prompt: &str, config: &LlmConfig) -> serde_json::Value {
         let mut body = json!({
             "model": self.model,
@@ -355,6 +356,18 @@ mod tests {
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["role"], "user");
+    }
+
+    #[test]
+    fn body_never_sends_ollama_think_field() {
+        let c = OpenAiClient::new("sk", "gpt-4o-mini");
+
+        for think in [None, Some(false), Some(true)] {
+            let mut cfg = LlmConfig::deterministic();
+            cfg.think = think;
+            let body = c.build_body("hi", &cfg);
+            assert!(body.get("think").is_none(), "{body}");
+        }
     }
 
     #[test]

@@ -49,8 +49,8 @@ impl OllamaApi {
 /// Reads `OLLAMA_HOST` (default `http://localhost:11434`) and `OLLAMA_MODEL`
 /// (default `llama3.1`) from the environment via [`OllamaClient::from_env`],
 /// or take an explicit host/model with [`OllamaClient::new`].  Requests
-/// `stream = false` and threads `temperature` / `seed` through
-/// `options`.
+/// `stream = false`, threads `temperature` / `seed` through `options`, and
+/// sends the optional thinking-mode flag as top-level `think`.
 ///
 /// Defaults to the [`Chat`](OllamaApi::Chat) endpoint (`/api/chat`); call
 /// [`with_api`](OllamaClient::with_api) to select the completion-style
@@ -188,17 +188,19 @@ impl OllamaClient {
 
     /// Build the request body for the selected [`api`](Self::api).
     ///
-    /// - [`Chat`](OllamaApi::Chat) → `{model, stream:false, messages, options}`
-    ///   (byte-identical to the historical body).
+    /// - [`Chat`](OllamaApi::Chat) → `{model, stream:false, messages, options}`.
     /// - [`Generate`](OllamaApi::Generate) →
     ///   `{model, prompt, system?, stream:false, options}`, where the top-level
     ///   `system` string is present **only when `config.system` is `Some`**.
+    ///
+    /// For either API, top-level `think` is present only when `config.think` is
+    /// `Some`; it is never placed inside `options`.
     ///
     /// Both share [`build_options`](Self::build_options), so
     /// `temperature` / `seed` (honouring `omit_seed`) / `num_predict`
     /// (`max_tokens`) are identical across the two endpoints.
     fn build_body(&self, prompt: &str, config: &LlmConfig) -> serde_json::Value {
-        match self.api {
+        let mut body = match self.api {
             OllamaApi::Chat => json!({
                 "model": self.model,
                 "stream": false,
@@ -217,7 +219,11 @@ impl OllamaClient {
                 }
                 body
             }
+        };
+        if let Some(think) = config.think {
+            body["think"] = json!(think);
         }
+        body
     }
 
     /// Extract the completion text for the selected [`api`](Self::api): the
@@ -480,6 +486,23 @@ mod tests {
     }
 
     #[test]
+    fn chat_body_sends_think_only_when_configured() {
+        let c = OllamaClient::new("http://localhost:11434", "m");
+
+        for think in [None, Some(false), Some(true)] {
+            let mut cfg = LlmConfig::deterministic();
+            cfg.think = think;
+            let body = c.build_body("hi", &cfg);
+
+            assert_eq!(
+                body.get("think").and_then(serde_json::Value::as_bool),
+                think
+            );
+            assert!(body["options"].get("think").is_none(), "{body}");
+        }
+    }
+
+    #[test]
     fn generate_body_matches_required_shape() {
         // CRITICAL fidelity test: with temperature=1.0, omit_seed, max_tokens=16,
         // system=Some, the Generate body must be byte-identical to sun2024's
@@ -499,6 +522,23 @@ mod tests {
             "options": { "temperature": 1.0, "num_predict": 16 },
         });
         assert_eq!(body, expected);
+    }
+
+    #[test]
+    fn generate_body_sends_think_only_when_configured() {
+        let c = OllamaClient::new("http://localhost:11434", "m").with_api(OllamaApi::Generate);
+
+        for think in [None, Some(false), Some(true)] {
+            let mut cfg = LlmConfig::deterministic();
+            cfg.think = think;
+            let body = c.build_body("hi", &cfg);
+
+            assert_eq!(
+                body.get("think").and_then(serde_json::Value::as_bool),
+                think
+            );
+            assert!(body["options"].get("think").is_none(), "{body}");
+        }
     }
 
     #[test]

@@ -7,6 +7,7 @@ Optional LLM helper layer for the [socsim](../../README.md) social-simulation pl
 socsim's core (`socsim-core`, `socsim-engine`, …) is **deterministic and LLM-free**: given a seed, a run reproduces bit-for-bit. Many social simulations want an LLM inside a single phase (usually `Decision` / `Interaction`), which is inherently non-deterministic. This crate confines that non-determinism to one place and *pseudo-determinises* it:
 
 - **`temperature = 0`** and a fixed **`seed`** are plumbed through `LlmConfig` (Ollama honours `options.seed`; OpenAI is best-effort).
+- Optional **`think`** control is sent only to Ollama as a top-level request field: `None` leaves the field absent and preserves the model's default, while `Some(false)` / `Some(true)` explicitly disables / enables thinking. OpenAI ignores it.
 - A **prompt → response cache** keyed on `hash(prompt + model)` makes a re-run with a warm cache replay identical responses — turning a noisy model into a reproducible oracle.
 - **`CallMetadata`** records model / endpoint / temperature / seed / cache-hit and optional backend-reported token usage for every call, and `MetadataCollector` aggregates the cache-hit rate for the run's output.
 - **`LlmResponse`** carries the generated text plus an optional non-blank thinking trace surfaced by Ollama responses.

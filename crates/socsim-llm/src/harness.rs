@@ -22,15 +22,15 @@ use crate::{CachingClient, LlmClient, LlmConfig, PromptCache, SharedCachingClien
 
 /// LLM-layer settings for a replication run.
 ///
-/// This is the shared definition that each replication previously declared
-/// (byte-for-byte identically) in its own `config.rs`.  Field names and default
-/// values are unchanged, so any TOML / config that targeted the per-repo struct
-/// deserialises into this one identically.
+/// This is the shared definition that each replication previously declared in
+/// its own `config.rs`, extended with the optional Ollama `think` control.
+/// Existing TOML remains compatible because the added field defaults to
+/// `None`.
 ///
 /// The provider order is fixed «Ollama first → OpenAI fallback»; model / host /
 /// API key come from the environment (`OLLAMA_HOST` / `OLLAMA_MODEL` /
 /// `OPENAI_API_KEY` / `OPENAI_MODEL`).  `temperature` / `seed` pseudo-determinise
-/// generation.
+/// generation; `think` is honoured by Ollama only.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LlmSettings {
     /// Generation temperature (default `0.0` for reproducibility).
@@ -40,6 +40,10 @@ pub struct LlmSettings {
     /// best-effort).
     #[serde(default)]
     pub seed: u64,
+    /// Ollama thinking-mode control (`None` = use the model's default).
+    /// Ignored by other backends.
+    #[serde(default)]
+    pub think: Option<bool>,
     /// Where to persist the prompt → response cache (`None` = in-memory).
     #[serde(default)]
     pub cache_path: Option<String>,
@@ -50,6 +54,7 @@ impl Default for LlmSettings {
         LlmSettings {
             temperature: 0.0,
             seed: 0,
+            think: None,
             cache_path: None,
         }
     }
@@ -93,11 +98,13 @@ pub fn wrap_client_shared<C: LlmClient + 'static>(
 }
 
 /// Build an [`LlmConfig`] from [`LlmSettings`]: the deterministic base config
-/// with the settings' `temperature` and `seed` applied.
+/// with the settings' `temperature`, `seed`, and optional `think` applied.
 pub fn llm_config(settings: &LlmSettings) -> LlmConfig {
-    LlmConfig::deterministic()
+    let mut config = LlmConfig::deterministic()
         .with_temperature(settings.temperature)
-        .with_seed(settings.seed)
+        .with_seed(settings.seed);
+    config.think = settings.think;
+    config
 }
 
 /// Build the production «Ollama first → OpenAI fallback + cache» client from
@@ -136,6 +143,7 @@ mod tests {
         let s = LlmSettings::default();
         assert_eq!(s.temperature, 0.0);
         assert_eq!(s.seed, 0);
+        assert_eq!(s.think, None);
         assert_eq!(s.cache_path, None);
     }
 
@@ -144,12 +152,14 @@ mod tests {
         let s = LlmSettings {
             temperature: 0.7,
             seed: 42,
+            think: Some(false),
             cache_path: Some("cache.json".to_string()),
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: LlmSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.temperature, s.temperature);
         assert_eq!(back.seed, s.seed);
+        assert_eq!(back.think, s.think);
         assert_eq!(back.cache_path, s.cache_path);
     }
 
@@ -159,11 +169,13 @@ mod tests {
         let toml_src = r#"
             temperature = 0.7
             seed = 42
+            think = true
             cache_path = "results/cache.json"
         "#;
         let s: LlmSettings = toml::from_str(toml_src).unwrap();
         assert_eq!(s.temperature, 0.7);
         assert_eq!(s.seed, 42);
+        assert_eq!(s.think, Some(true));
         assert_eq!(s.cache_path.as_deref(), Some("results/cache.json"));
     }
 
@@ -174,6 +186,7 @@ mod tests {
         let s: LlmSettings = toml::from_str("").unwrap();
         assert_eq!(s.temperature, 0.0);
         assert_eq!(s.seed, 0);
+        assert_eq!(s.think, None);
         assert_eq!(s.cache_path, None);
     }
 
@@ -221,10 +234,12 @@ mod tests {
         let settings = LlmSettings {
             temperature: 0.42,
             seed: 1234,
+            think: Some(false),
             cache_path: None,
         };
         let cfg = llm_config(&settings);
         assert_eq!(cfg.temperature, 0.42);
         assert_eq!(cfg.seed, 1234);
+        assert_eq!(cfg.think, Some(false));
     }
 }

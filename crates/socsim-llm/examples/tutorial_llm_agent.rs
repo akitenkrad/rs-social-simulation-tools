@@ -119,7 +119,10 @@ impl Mechanism<GossipWorld> for GossipDecision {
             }
             // Build a prompt summarising the agent's neighbourhood.
             let nbrs = ctx.world.neighbors_of(id);
-            let spreading = nbrs.iter().filter(|n| prev[n.0 as usize] == "rumor").count();
+            let spreading = nbrs
+                .iter()
+                .filter(|n| prev[n.0 as usize] == "rumor")
+                .count();
             let prompt = format!(
                 "You are agent {i}. Of your {} neighbours, {spreading} are spreading a rumor. \
                  Reply with exactly one word: \"rumor\" to start spreading it, or \"calm\".",
@@ -158,6 +161,7 @@ fn main() {
     let settings = LlmSettings {
         temperature: 0.0,
         seed: 42,
+        think: None,
         cache_path: None, // in-memory cache for this demo
     };
 

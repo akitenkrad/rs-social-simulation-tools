@@ -109,6 +109,11 @@ pub struct LlmConfig {
     /// (the default) sends only the user message, preserving current behaviour.
     #[serde(default)]
     pub system: Option<String>,
+    /// Ollama thinking-mode control.  `None` leaves the field unsent and uses
+    /// the model's default; `Some(b)` sends top-level `"think": b`.  Honoured
+    /// by the Ollama backend only.
+    #[serde(default)]
+    pub think: Option<bool>,
     /// When `true`, live backends do **not** send a `seed`, enabling
     /// temperature-driven sampling without a pinned seed.  Defaults to `false`
     /// (the current behaviour: the seed is always emitted).
@@ -149,6 +154,7 @@ impl LlmConfig {
             seed: 0,
             max_tokens: None,
             system: None,
+            think: None,
             omit_seed: false,
             allow_blank: false,
             top_logprobs: None,
@@ -822,6 +828,7 @@ mod tests {
         assert_eq!(c.seed, 0);
         assert_eq!(c.max_tokens, None);
         assert_eq!(c.system, None);
+        assert_eq!(c.think, None);
         assert!(!c.omit_seed);
         assert!(!c.allow_blank);
         assert_eq!(c.top_logprobs, None);
@@ -873,6 +880,7 @@ mod tests {
         // A serialized config from before the new fields must still deserialize.
         let json = r#"{"temperature":0.0,"seed":0,"max_tokens":null}"#;
         let c: LlmConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(c.think, None);
         assert_eq!(c, LlmConfig::deterministic());
     }
 
