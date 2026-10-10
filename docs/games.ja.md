@@ -8,7 +8,8 @@
 これを毎ステップ，通常の [6フェーズティックループ](architecture.ja.md#6フェーズティックループ) の中で行います．
 
 この crate はライブラリ専用です（`ModulePack` を持たず，`socsim` バイナリには組み込まれていません）．
-このページでは，部品，その状態の置き場所，規則が見てよい情報，実行可能なシミュレーションの組み立て方を説明します．
+このページでは，部品，その状態の置き場所，規則が見てよい情報，実行可能なシミュレーションの組み立て方，
+組込みの学習則と決定の粒度（[学習則と決定の粒度](#学習則と決定の粒度) を参照）を説明します．
 シミュレーションとは別に，古典的なゲームと有限ゲームのソルバー（Nash 均衡，支配，ミニマックス，ロジット QRE）も提供します（[有限ゲームを解く](#有限ゲームを解く) を参照）．
 
 ---
@@ -17,8 +18,8 @@
 
 | feature | 追加されるもの | socsim への依存 |
 |---|---|---|
-| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`），`MatrixGame`，組込みのゲーム（`catalog`），混合戦略（`mixed`），ソルバー（`solve`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
-| `core` | World（`GameWorld`），規則，利得規則，Matching，ビュー，`build_world` | `socsim-core` |
+| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`），`MatrixGame`，組込みのゲーム（`catalog`），混合戦略（`mixed`），ソルバー（`solve`），学習則の計算（`learn`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
+| `core` | World（`GameWorld`），規則（学習則を含む），利得規則，Matching，ビュー，`build_world` | `socsim-core` |
 | `engine` | `assemble`（`SimulationBuilder` を返す）．`core` を含意 | `socsim-core`，`socsim-engine` |
 | `llm` | LLM の決定規則，応答ストア，再生の manifest（[LLM による決定](#llm-による決定) を参照）．`core` を含意．Mechanism `game_llm_decide` と `assemble_with_llm` には `engine` も要る | `socsim-core`，`socsim-llm`（既定の feature だけ．ネットワークなし） |
 | `live` | `live_backend_factory()`（キャッシュなしの Ollama → OpenAI のバックエンド）．`llm` を含意 | `llm` と同じ＋`socsim-llm/live` |
@@ -210,10 +211,21 @@ pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
         state: &mut X::PolicyState,
         ctx: &LearnContext<'_, G, X>,
     ) -> Result<(), RuleError> { Ok(()) }
+    fn learn_encounter(
+        &self,
+        state: &mut X::PolicyState,
+        outcome: &EncounterOutcome<'_, G::Action>,
+        ctx: &LearnContext<'_, G, X>,
+    ) -> Result<(), RuleError> { Ok(()) }
+    fn needs_encounter_learning(&self) -> bool { false }
+    fn needs_pair_history(&self) -> bool { false }
 }
 ```
 
-`decide` と `learn_step` の受け手が `&self` であることに注意してください．規則のオブジェクトは共有されるコードであり，
+`learn_encounter`，`needs_encounter_learning`，`needs_pair_history` は省略できます．
+エージェントが 1 ステップに複数の対戦をするときに意味を持ちます（[対戦ごとの学習](#対戦ごとの学習) と [対の履歴](#対の履歴) を参照）．
+
+`decide` と学習のメソッドの受け手が `&self` であることに注意してください．規則のオブジェクトは共有されるコードであり，
 エージェントについて覚えておくことはすべて，渡される `state: &mut X::PolicyState` に置きます
 （[規則の状態と snapshot](#規則の状態と-snapshot) を参照）．
 
@@ -224,6 +236,9 @@ pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
 | `Fixed::new(action)` | 任意の `StageGame` | 常に `action` を出す（初期化時に全役割で検証） | `Stateless` |
 | `UniformRandom` | `FiniteGame` | 役割の行動から `rng` で一様に引く | `Stateless` |
 | `TitForTat::new(coop)` | `FiniteGame`，2 役割，各役割 2 行動 | 初回は `coop`，以後は相手の直前の行動 | `TftState { last_opponent }` |
+
+ほかの組込みの規則 — `Mixed`（固定の混合戦略），`MyopicBestResponse`，`FictitiousPlay`，`LogitChoice`，`RothErev`，
+繰り返しゲームのオートマトン `Automaton` — は [学習則と決定の粒度](#学習則と決定の粒度) で説明します．
 
 規則は `RuleBook` に**種類の名前**で登録します（`register(kind, Arc<dyn DecisionRule<G, X>>)`．
 重複した種類は `RuleError::DuplicateKind`）．種類の番号は種類名の昇順で振られるので，登録の順序には依存しません．
@@ -315,8 +330,10 @@ pub trait ExperimentState: Send + Sync + 'static {
 ### `PolicyState` と `Slot`
 
 組込みの規則は利用者の `PolicyState` の型を知りません．`Slot<T>` トレイト（`slot`，`slot_mut`，`from_slot`）を通して自分の状態に届きます．
-`Fixed` と `UniformRandom` は `Slot<Stateless>` を，`TitForTat` は `Slot<TftState>` を要求します．
-`BuiltinPolicyState`（`X = ()` の `PolicyState`）は両方を実装しています．
+`Fixed`，`UniformRandom`，`Mixed`，`MyopicBestResponse` は `Slot<Stateless>` を，`TitForTat` は `Slot<TftState>` を要求し，
+学習則は `Slot<BeliefState>`（`FictitiousPlay`），`Slot<EstimateState>`（`LogitChoice`），
+`Slot<PropensityState>`（`RothErev`），`Slot<AutomatonPolicyState>`（`Automaton`）を要求します．
+`BuiltinPolicyState`（`X = ()` の `PolicyState`）はこれらをすべて実装しています．
 組込みの規則と独自の規則を混ぜるには，これを包みます．
 
 ```rust
@@ -366,6 +383,8 @@ impl ExperimentState for ReputationState {
 | そのステップの対戦・行動・利得 | `PlayArena`（`world.plays()`） |
 | そのステップのエージェントごとの利得と対戦数 | `world.payoffs()`，`world.n_played()` |
 | エージェントごとのステップ履歴（長さ `history_len` の環） | `world.history(agent)` |
+| 組ごとの対戦の履歴（組ごとに長さ `history_len` の環．規則が求めたときだけ） | `DecisionContext::pair_history` から（[対の履歴](#対の履歴) を参照） |
+| Matching の状態（`MatchingState`．例えば `RoundRobin` の cursor） | World とともに直列化される |
 | 実験状態 | `world.x()` |
 
 3 つの Mechanism（`game_match`，`game_decide`，`game_play`）と `RuleBook`，`Matching`，`OutcomeRule` は，
@@ -392,23 +411,27 @@ resumed.restore(snapshot);                  // continues bit-identically
 
 | メソッド | 返すもの |
 |---|---|
-| `t()`，`me()`，`unit()` | ステップ，自分の id，決定の単位（`DecisionUnit::Step`） |
-| `role()`，`encounter()` | そのステップの自分の役割と対戦 |
-| `opponents()` | **同じ対戦の**ほかのエージェント |
+| `t()`，`me()`，`unit()`，`scope()` | ステップ，自分の id，決定の単位（既定では `DecisionUnit::Step`）とその `DecisionScope` |
+| `role()`，`encounter()` | その決定での自分の役割と対戦（`PerAgentRole` では `encounter()` は `None`） |
+| `opponents()` | **同じ対戦の**ほかのエージェント（`PerAgentRole` では，その役割で着いた対戦すべての相手） |
 | `my_history()` | 自分の過去の `StepRecord`（行動，利得，`n_played`） |
 | `opponent_history(id)` | `id` の行動の履歴．**`id` が現在の相手でなければ `None`** |
+| `pair_history(id)` | `id` との過去の対戦．対の履歴が有効で，かつ `id` が現在の相手でなければ `None` |
 | `game()` | 段階ゲーム |
 | `view()` | `X::view_for(me)` |
 | `omniscient()` | 制限のないデータ（後述） |
 
-**`LearnContext`**（`learn_step` に渡される）：`t()`，`me()`，`record()`（このステップの自分の記録），`my_history()`，
+これらが決定の粒度によってどう変わるかは [決定の粒度](#決定の粒度) にまとめてあります．
+
+**`LearnContext`**（`learn_step` と `learn_encounter` に渡される）：`t()`，`me()`，`scope()`，`record()`（このステップの自分の記録），`my_history()`，
 `outcomes()`（このステップの自分の対戦を `EncounterId` の順に．各 `EncounterOutcome` は `role`，`seats`，`actions`，`payoffs`，`credit` を持つ），
 `game()`，`view()`，`omniscient()`．
 
 `X` が何を見せるかは `view_for(me)` で決めます．不完備情報のゲームなら `me` の私的シグナルだけを，
 間接互恵のモデルなら公開の評判のベクトルを返す，といった具合です．
 
-**`omniscient()`** は `OmniscientContext` を返し，全エージェントの id・保持している行動・履歴と，`X` 全体を読めます．
+**`omniscient()`** は `OmniscientContext` を返し，全エージェントの id・保持している行動・履歴，`X` 全体，
+そして `DecisionContext` から得た場合は（有効なら）任意の 2 人の組の履歴（`pair_history(a, b)`）を読めます．
 これを呼ぶと**情報構造の保証がなくなります**．全知であることを意図した規則にだけ使ってください．
 また Decision の間は，同じステップで先に行動したエージェントがすでに保持行動を更新しているため，
 `held` が活性化の順序に依存することがあります．
@@ -436,12 +459,14 @@ pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
 
 `encounters_into` は `out.push(&seats, Credit::All)` ごとに対戦を 1 つ積みます（`seats` は役割ごとに 1 エージェント）．
 `check` は `assemble` の中で一度だけ走り，Matching が World と合っているかを検査します．
+使われている [決定の粒度](#決定の粒度) は `ctx.decision_scope()` でわかります．
 組込みの `FixedPlayers::pairs(&[(0, 1), …])` は毎ステップ同じ組を対戦させ，
 未知のエージェント，2 回現れるエージェント，役割がちょうど 2 でないゲームを拒否します．
+組込みの [`RoundRobin`](#roundrobin) は，毎ステップすべての 2 人の組を対戦させます．
 あるステップで席に着かなかったエージェントは，そのステップでは決定も対戦もしません．
 
 独自の Matching が要する状態は，Matching の構造体ではなく **`X` に**置きます（独自の Mechanism で更新します）．
-`MatchingState` には現在 `None` しかなく，Matching の構造体の中の状態は snapshot に含まれないからです．
+`MatchingState` は閉じた enum で（`None` と，組込みの総当たり用の `RoundRobin { cursor }`），Matching の構造体の中の状態は snapshot に含まれないからです．
 
 ---
 
@@ -452,8 +477,8 @@ pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
 | Mechanism | フェーズ | 行うこと |
 |---|---|---|
 | [`game_match`](mechanisms/game-match.ja.md) | PreStep，Decision | PreStep：対戦の表，`payoff`，`n_played` を空にする．Decision：そのステップの対戦を `Matching` に組ませる． |
-| [`game_decide`](mechanisms/game-decide.ja.md) | Decision，Reward | Decision：席に着いた各エージェントの規則が `decide` する（Held なら保持行動を使う）．行動は `check_action` で検査する．Reward：規則で動く全エージェントの `learn_step`． |
-| [`game_play`](mechanisms/game-play.ja.md) | Interaction | 全席が埋まっていることを検査し，`OutcomeRule` で利得を計算し，`PayoffAggregation` でエージェントごとに集計し，全エージェントの `StepRecord` をステップ履歴に追記する． |
+| [`game_decide`](mechanisms/game-decide.ja.md) | Decision，Reward | Decision：席に着いた各エージェントの規則が決定の単位ごとに `decide` する（Held なら保持行動を使う）．行動は `check_action` で検査する．Reward：規則で動く全エージェントの `learn_encounter`（規則が求めるとき，対戦ごとに）と，その後の `learn_step`． |
+| [`game_play`](mechanisms/game-play.ja.md) | Interaction | 全席が埋まっていることを検査し，`OutcomeRule` で利得を計算し，（有効なら）対戦を対の履歴に追記し，`PayoffAggregation` でエージェントごとに集計し，全エージェントの `StepRecord` をステップ履歴に追記する． |
 
 同じフェーズの Mechanism は登録順に動くので，`game_match` が席を決めてから `game_decide` が行動を尋ねます．1 ステップは次のとおりです．
 
@@ -461,8 +486,8 @@ pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
 PreStep      game_match   reset arena / payoff / n_played
 Decision     game_match   Matching → encounters
              game_decide  decide + check_action → actions, held
-Interaction  game_play    OutcomeRule → payoffs → aggregation → history
-Reward       game_decide  learn_step (rule state)
+Interaction  game_play    OutcomeRule → payoffs → pair history → aggregation → history
+Reward       game_decide  learn_encounter (per encounter) + learn_step (rule state)
 ```
 
 feature `llm` では，`assemble_with_llm` が 4 つ目の Mechanism [`game_llm_decide`](mechanisms/game-llm-decide.ja.md)（Decision，Reward）を
@@ -509,9 +534,10 @@ pub fn assemble<G, X, M: Matching<G, X>, O: OutcomeRule<G, X>>(
 ### `PlayOptions`
 
 ```rust
-PlayOptions::new()                                     // Sum + Stop
+PlayOptions::new()                                     // Sum + Stop + PerStep
     .payoff_aggregation(PayoffAggregation::Mean)        // Sum (default) | Mean
     .on_invalid_action(OnInvalidAction::Stop)           // Stop (default) | Fallback(map)
+    .decision_scope(DecisionScope::PerEncounter)        // PerStep (default) | PerAgentRole | PerEncounter
 ```
 
 - **`PayoffAggregation`** — 1 ステップに複数の対戦があるとき，エージェントの利得を `payoffs()[agent]` にどうまとめるか．
@@ -520,6 +546,484 @@ PlayOptions::new()                                     // Sum + Stop
   - `Stop`（既定）：ステップがエラーで失敗します．
   - `Fallback(BTreeMap<kind, action>)`：行動を種類ごとの代替行動に差し替え，イベント `game.invalid_action` を
     payload `{ "agent", "kind", "role", "action" }`（拒否された行動を `Debug` 形式で）とともに記録します．
+- **`DecisionScope`** — 1 ステップに複数の対戦の席に着いたエージェントが何回決定するか．[決定の粒度](#決定の粒度) を参照．
+
+---
+
+## 学習則と決定の粒度
+
+`Fixed`，`UniformRandom`，`TitForTat` のほかに，この crate は古典的な学習則と繰り返しゲームのオートマトン，総当たりの Matching，
+そして**決定の粒度**（decision scope）を提供します．決定の粒度は，1 ステップに複数の対戦の席に着いたエージェントが何回決定するかを定めます．
+学習の計算そのものは `socsim_games::learn`（仮想プレイ，Roth–Erev，ロジット選択，オートマトン）にあり，
+これは既定のビルドに含まれ，どの `socsim-*` crate にも依存しません．以下の `DecisionRule` の包み（feature `core`）が，その状態を World に置きます．
+
+### 規則の一覧
+
+最後の列の検査はすべて `init_state` の中で行われます．したがって設定を誤った規則は，シミュレーションが始まる前に
+`build_world` が（`GameError::Rule(RuleError::Unsupported(_))` として）拒否します．
+
+| 規則 | 構築 | 状態のスロット（`BuiltinPolicyState` の variant） | 有効な条件（満たさなければ構築時に拒否） |
+|---|---|---|---|
+| `Mixed` | `Mixed::new(q)` — 行動の番号順に並べた固定の混合戦略 | `Stateless` | 各 `q[i]` が有限で `≥ 0`．`Σ q = 1`（許容誤差 `1e-12`）．`q.len()` が**すべての**役割の行動数に等しい |
+| `MyopicBestResponse` | `MyopicBestResponse::new()`，`.tie_break_lowest()`（既定）/ `.tie_break_random()`，`.first_action(a)`（既定 `0`） | `Stateless` | `first_action` がすべての役割で妥当な行動 |
+| `FictitiousPlay` | `FictitiousPlay::new()`，`.initial_counts(vec)`（既定はすべて 0），`.tie_break_lowest()`（既定）/ `.tie_break_random()` | `BeliefState`（`Belief`） | 役割がちょうど 2．初期カウントは有限で `≥ 0`，両方の役割について相手の行動 1 つにつき 1 つ |
+| `LogitChoice` | `LogitChoice::new(lambda)`，`.estimate(EstimateMode::LastOpponent \| EmpiricalFrequency)`（既定 `EmpiricalFrequency`） | `EstimateState`（`Estimate`） | 役割がちょうど 2．`lambda` が有限で `≥ 0` |
+| `RothErev` | `RothErev::new(phi, epsilon, initial_propensity)` | `PropensityState`（`Propensity`） | `0 ≤ phi < 1`，`0 ≤ epsilon < 1`，`initial_propensity > 0`（いずれも有限）．すべての役割・すべての行動の組で利得が有限かつ `> 0` |
+| `Automaton` | `Automaton::new(kind, coop)`，`kind` は `AutomatonKind::{AllC, AllD, Grim, Wsls, Tft, Gtft { generosity }}` のいずれか | `AutomatonPolicyState`（`Automaton`） | すべての役割の行動数がちょうど 2．`coop` が `0` か `1`．GTFT の `generosity` が `[0, 1]` |
+| `TitForTat`（従来どおり） | `TitForTat::new(coop)` | `TftState`（`TitForTat`） | 2 役割，各役割 2 行動，`coop` が妥当 |
+
+`BuiltinPolicyState`（`X = ()` の `PolicyState`）は，表のすべてのスロットについて `Slot<_>` を実装しています．
+独自の `PolicyState` を使うときは，[`PolicyState` と `Slot`](#policystate-と-slot) のように，登録する規則のスロットについて `Slot<T>` を実装してください．
+4 つの状態の型は `global()` と `by_opponent()`（`(AgentId, 状態)` の列．`AgentId` の昇順）を持ち，`world.policies().state(agent)` から中身を確かめられます．
+
+`TitForTat` の動作は従来どおりです．エージェントごとに `last_opponent` を 1 つだけ持ち，そのエージェントの対戦ごとに `EncounterId` の順で上書きします．
+相手ごとに別々に覚える tit-for-tat が要るときは，`DecisionScope::PerEncounter` のもとで `Automaton::new(AutomatonKind::Tft, coop)` を使ってください．
+
+`MyopicBestResponse` は，相手の直近の行動に対して最適応答します．何を読むかは [決定の粒度](#決定の粒度) によって変わります．
+
+- `PerStep` — 現在の各相手が直前のステップに出した行動．ステップ履歴から読みます．
+- `PerEncounter` — その対戦の相手について [対の履歴](#対の履歴) に記録された最後の行動．
+- `PerAgentRole` — その役割の現在の相手のうち記録のある相手それぞれについて，対の履歴の最後の行動．
+  規則は，それらの行動の一様な混合に対する期待利得を最大にします．
+
+使える行動がないうち（最初のステップ，一度も対戦していない相手，`PerStep` で直前のステップに対戦しなかった相手）は `first_action` を出します．
+この規則は `needs_pair_history() == true` を返すので，割り当てると対の履歴が作られます．
+`PerAgentRole` と `PerEncounter` では 2 人ゲームだけに対応し，それ以外のゲームでは `RuleError::Unsupported` でステップが止まります．
+
+### 仮想プレイ
+
+各エージェントは**信念**，つまり相手の行動ごとのカウントを持ちます．
+`counts()` は規則が使う正規化しないベクトルで，初期の（仮想の）カウントに，観測した相手の行動 1 回につき 1 を足したものです．
+`empirical_counts()` は観測だけを数えます．規則はカウントへの最適応答，すなわち `Σ_j counts[j] · u(a, j)` を最大にする行動を出します．
+カウントがすべて 0 なら，すべての行動が同点です．同点は `f64` の完全一致で判定し，`TieBreak::LowestIndex`（既定．乱数を使わない）か
+`TieBreak::Random`（同点の行動について `gen_range` を 1 回）で解決します．仮想プレイは **2 人ゲーム**に限ります．
+
+更新は**同時**です．各エージェントは直前のステップまでのカウントで決定し，観測はそのステップの対戦が終わってから（Reward で）足されます．
+交互に更新する版は用意していません．2 つの更新の順序は別の力学になるからです．
+Shapley の 3×3 のゲームでは，同時更新の仮想プレイは 6 つの行動の組を永遠に巡り，同じ組が続く長さは前の組の約 1.47 倍ずつ伸びていきます．
+一方，2 人目が 1 人目の更新済みのカウントに応答するように交互に更新すると，各組が 1 ステップずつしか続かない 3 ステップの短い周期に落ち込みます．
+
+この計算はシミュレーションなしでも動かせます（既定のビルド．乱数のために `rand = "0.8"` を足す）．
+
+```rust
+use rand::{rngs::StdRng, SeedableRng};
+use socsim_games::learn::fictitious::{simultaneous_step, FictitiousBelief};
+use socsim_games::MatrixGame;
+
+fn main() {
+    // Shapley's 3×3 game.
+    let game = MatrixGame::bimatrix(
+        &[vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]],
+        &[vec![0.0, 0.0, 1.0], vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]],
+    )
+    .unwrap();
+    let mut row = FictitiousBelief::with_defaults(&game, 0).unwrap();
+    let mut col = FictitiousBelief::with_defaults(&game, 1).unwrap();
+    let mut rng = StdRng::seed_from_u64(0); // unused with lowest-index ties
+
+    // Lengths of the runs of identical action pairs.
+    let mut runs: Vec<((usize, usize), u32)> = Vec::new();
+    for _ in 0..200 {
+        let pair = simultaneous_step(&game, &mut row, &mut col, &mut rng).unwrap();
+        match runs.last_mut() {
+            Some((last, n)) if *last == pair => *n += 1,
+            _ => runs.push((pair, 1)),
+        }
+    }
+    let first: Vec<_> = runs.iter().take(9).collect();
+    println!("{first:?}");
+    // [((0, 0), 1), ((0, 2), 2), ((2, 2), 3), ((2, 1), 5), ((1, 1), 8),
+    //  ((1, 0), 12), ((0, 0), 18), ((0, 2), 27), ((2, 2), 40)]
+}
+```
+
+### Roth–Erev の強化学習
+
+各エージェントは自分の行動ごとに傾向 `q_j > 0` を持ち（初期値はすべて `initial_propensity`），行動 `j` を確率 `q_j / Σ_k q_k` で選びます．
+行動 `k` を出して利得 `x` を得たら，3 パラメータの規則ですべての傾向を更新します．
+
+```
+q_j ← (1 − φ) · q_j + E_j,     E_j = (1 − ε) · x        if j = k
+                                E_j = ε · x / (N − 1)    otherwise
+```
+
+`φ`（`phi`）は忘却，`ε`（`epsilon`）は試行，`N` は自分の行動数です（`N = 1` なら利得はすべて唯一の行動に入る）．
+参照点は差し引きません．利得をそのまま使うので，ゲームの利得はすべて正でなければならず（構築時に検査），
+有限かつ正でない実現利得（独自の利得規則なら起こりうる）はステップをエラーで止めます．
+0 や負の利得を持つゲームを使うときは，構築する前に利得をずらしてください．
+
+### ロジット選択
+
+`LogitChoice` は相手の過去の行動から自分の各行動の利得を見積もり，行動 `a` を `exp(λ · û(a))` に比例する確率で出します．
+見積もりは，相手の直近の行動に対する利得（`EstimateMode::LastOpponent`）か，
+相手の行動の経験頻度に対する期待利得（`EstimateMode::EmpiricalFrequency`．既定）です．
+観測がひとつもないうちは見積もりがすべて 0 なので，選択は一様になります．`λ = 0` なら常に一様です．
+softmax は指数をとる前に最大の見積もりを引くので，`λ` が大きくてもあふれません．ロジット選択は **2 人ゲーム**に限ります．
+
+```rust
+use rand::{rngs::StdRng, SeedableRng};
+use socsim_games::learn::logit::{EstimateMode, LogitState};
+use socsim_games::learn::roth_erev::RothErevState;
+use socsim_games::MatrixGame;
+
+fn main() {
+    // A prisoner's dilemma shifted so every payoff is strictly positive.
+    let game = MatrixGame::bimatrix(
+        &[vec![4.0, 1.0], vec![6.0, 2.0]],
+        &[vec![4.0, 6.0], vec![1.0, 2.0]],
+    )
+    .unwrap();
+
+    // Roth–Erev: initial propensity 1, phi = 0.1, epsilon = 0.2.
+    let mut re = RothErevState::new(&game, 0, 1.0, 0.1, 0.2).unwrap();
+    re.update(0, 3.0).unwrap(); // chose action 0, earned 3
+    let q = re.propensities();
+    let p = re.selection_probabilities().unwrap();
+    println!("propensities [{:.1}, {:.1}]", q[0], q[1]);
+    println!("probabilities [{:.4}, {:.4}]", p[0], p[1]);
+    // propensities [3.3, 1.5]
+    // probabilities [0.6875, 0.3125]
+
+    // Logit: uniform before any observation, then exp(lambda * estimate).
+    let mut logit = LogitState::new(&game, 0, 1.0, EstimateMode::LastOpponent).unwrap();
+    println!("before {:?}", logit.selection_probabilities(&game, 0).unwrap());
+    logit.observe(0).unwrap(); // the opponent played C
+    let p = logit.selection_probabilities(&game, 0).unwrap();
+    println!("after  [{:.4}, {:.4}]", p[0], p[1]);
+    // before [0.5, 0.5]
+    // after  [0.1192, 0.8808]
+
+    let mut rng = StdRng::seed_from_u64(7);
+    let action = logit.choose_action(&game, 0, &mut rng).unwrap();
+    assert!(action < 2);
+}
+```
+
+（`0.9 · 1 + 0.8 · 3 = 3.3`，`0.9 · 1 + 0.2 · 3 = 1.5`．相手が `C` を出した後の見積もりは `4` と `6` なので，`p(C) = 1 / (1 + e²)` です．）
+
+### 繰り返しゲームのオートマトン
+
+`Automaton::new(kind, coop)` は，すべての役割の行動数がちょうど 2 のゲームで，決まった繰り返しゲームの戦略を出します．
+`coop` は協力の行動（`C`）の番号で，もう一方の番号が `D` です．`AllD` を除き，どのオートマトンも最初は `C` を出します．
+
+| `AutomatonKind` | 次の行動 |
+|---|---|
+| `AllC` / `AllD` | 常に `C` / 常に `D` |
+| `Grim` | 相手が一度でも `D` を出すまでは `C`，以後はずっと `D` |
+| `Tft` | 相手の直前の行動 |
+| `Wsls`（win-stay, lose-shift） | `(C, C) → C`，`(C, D) → D`，`(D, C) → D`，`(D, D) → C`．`(自分, 相手)` は直前のステップの行動 |
+| `Gtft { generosity }` | 相手の `C` の後は `C`．相手の `D` の後は確率 `generosity` で `C`，それ以外は `D` |
+
+### 乱数
+
+学習則が引くのは，`game_decide` が `decide` に渡すエンジンのストリームだけです．`learn_encounter` と `learn_step` は RNG を受け取りません．
+ストリームはスケジューラーの活性化の順に，1 人のエージェントの中では決定の単位の順に消費されます（[決定の粒度](#決定の粒度) を参照）．
+引き方は固定です．確率ベクトルから引く規則（`Mixed`，`LogitChoice`，`RothErev`，GTFT）は一様な `f64` を 1 回引き，
+行動の番号順に累積確率をたどります（丸め誤差で引いた値が合計を超えたときは，確率が正である最後の行動をとる）．
+同点の乱択は同点の行動について `gen_range` を 1 回引き，最適な行動が 1 つだけなら何も消費しません．
+`Fixed`，`TitForTat`，決定的なオートマトン，番号の小さい方を選ぶ同点処理，`generosity` が `0` か `1` の GTFT は乱数を消費しません．
+
+### 決定の粒度
+
+`PlayOptions::decision_scope(scope)` で，1 回の決定が何をカバーするかを選びます．
+Matching があるエージェントを 1 ステップに複数の対戦の席に着けると，この違いが効いてきます．
+
+| | `DecisionScope::PerStep`（既定） | `DecisionScope::PerAgentRole` | `DecisionScope::PerEncounter` |
+|---|---|---|---|
+| 1 ステップあたりの決定の回数 | 1 回．その行動をすべての席に書く | そのステップに持つ役割ごとに 1 回（役割の昇順） | 席ごとに 1 回（`EncounterId` の順） |
+| `ctx.unit()` / `ctx.scope()` | `DecisionUnit::Step` / `PerStep` | `DecisionUnit::AgentRole(role)` / `PerAgentRole` | `DecisionUnit::Encounter(id)` / `PerEncounter` |
+| `ctx.role()` | その役割（すべての席で同じ） | その役割 | その席の役割 |
+| `ctx.encounter()` | 最後の対戦（`EncounterId` が最大のもの） | `None` | その対戦 |
+| `ctx.opponents()` | その対戦のほかのエージェント | その役割で着いた対戦すべての相手（重複を除き昇順） | その対戦のほかのエージェント |
+| `held` を書くか | 書く | 書かない | 書かない |
+| `StepRecord::action` | その行動 | `None` | `None` |
+
+`PerAgentRole` と `PerEncounter` では，エージェントが 1 ステップの中で違う行動を出しうるので，保持する行動や記録する行動が 1 つに決まりません．
+そのため `held` は前の値のままで，ステップ履歴には `action: None` が記録されます（利得と `n_played` は通常どおり記録される）．
+これらの粒度で過去の対戦の行動が要る規則は，`LearnContext::outcomes()` か [対の履歴](#対の履歴) から読みます．
+`Held` のエージェントは，どの粒度でも保持行動をすべての席に出します．
+
+`PerStep` では，各エージェントが 1 ステップに持つ役割が **1 つ**でなければなりません．
+前もって判定できる Matching は，`MatchContext::decision_scope()` を見て `Matching::check` でこれを検査します．
+`RoundRobin` は，`PerStep` のもとでエージェントが 3 人以上のとき，または `both_orders(true)` のとき，`assemble` から `GameError::InvalidMatching` を返します．
+前もって判定できない Matching では，`PerStep` のステップでエージェントが 2 つの違う役割を持つと，
+`game_decide` が `RuleError::AmbiguousRole { agent }` から作った Mechanism のエラー（`agent 0 holds more than one role in a per-step decision`）でステップを止めます．
+`Held` のエージェントも対象です．
+
+```rust
+use std::sync::Arc;
+
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, Automaton, AutomatonKind,
+    DecisionScope, InitialActions, MatrixGame, NormalFormOutcome, PlayOptions, RoundRobin,
+    RuleBook,
+};
+
+fn main() {
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap();
+    let mut rules = RuleBook::new();
+    rules.register("tft", Arc::new(Automaton::new(AutomatonKind::Tft, 0))).unwrap();
+    let assign = Assignment::Ordered(vec![AssignGroup {
+        kind: AssignKind::Rule("tft".to_owned()),
+        count: 3,
+    }]);
+
+    for scope in [DecisionScope::PerStep, DecisionScope::PerAgentRole, DecisionScope::PerEncounter] {
+        let world = build_world(game.clone(), 3, (), InitialActions::Same(0), &rules, &assign, 10, 10, 1)
+            .unwrap();
+        // With three agents, agent 1 sits in role 1 of (0, 1) and role 0 of (1, 2).
+        let result = assemble(
+            world,
+            RoundRobin::new(),
+            rules.clone(),
+            NormalFormOutcome,
+            PlayOptions::new().decision_scope(scope),
+            1,
+        );
+        match result {
+            Ok(_) => println!("{scope:?}: ok"),
+            Err(error) => println!("{scope:?}: {error}"),
+        }
+    }
+    // PerStep: invalid matching: RoundRobin assigns more than one role to an agent in a per-step decision
+    // PerAgentRole: ok
+    // PerEncounter: ok
+}
+```
+
+LLM による決定は `PerStep` だけに対応します．`assemble_with_llm` はほかの粒度を `RuleError::Unsupported` で拒否します．
+
+### `RoundRobin`
+
+`RoundRobin::new()` は，エージェントの**すべての組**を毎ステップ 1 回ずつ対戦させます．
+エージェントを `AgentId` で並べ，組を辞書式の順に積みます（4 人なら `(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)`）．役割 0 には番号の小さい方が着きます．
+`.both_orders(true)` は各組の直後に逆順の組も積むので（`(0, 1), (1, 0), (0, 2), (2, 0), …`），各エージェントはどの相手とも両方の役割で対戦します．
+自分自身との対戦には対応していません．`.self_play(true)` は，役割がちょうど 2 でないゲームと同じく，`assemble` が `GameError::InvalidMatching` で拒否します．
+この Matching は乱数を引きません．
+
+状態は `MatchingState::RoundRobin { cursor }` で，World に（したがって snapshot に）保存されます．
+`cursor` は行ったラウンドの数で，毎ステップ 1 ずつ増えます．
+
+エージェントが `n` 人なら，各エージェントは 1 ステップに `n − 1` 回（両方の順なら `2(n − 1)` 回）対戦するので，`PayoffAggregation` が効いてきます．
+`Sum` は対戦ごとの利得を足し，`Mean` は `n_played` で割ります．
+上の囚人のジレンマで 3 人が `C`，`D`，`C` を出すと，`Sum` では `[3, 10, 3]`，`Mean` では `[1.5, 5, 1.5]` を受け取ります．
+
+### 対戦ごとの学習
+
+`DecisionRule` には `learn_step` のほかに 3 つのフックがあります．
+
+| メソッド | 既定 | 意味 |
+|---|---|---|
+| `learn_encounter(state, outcome, ctx)` | 何もしない | 1 つの対戦から学習する |
+| `needs_encounter_learning()` | `false` | `true` なら `game_decide` が `learn_encounter` を呼ぶ |
+| `needs_pair_history()` | `false` | 割り当てたどれかの種類で `true` なら，`build_world` が [対の履歴](#対の履歴) を作る |
+
+Reward では，`game_decide` が規則で動くエージェントを `AgentId` の昇順に訪れます．
+規則が `needs_encounter_learning() == true` を返すエージェントについては，まずそのエージェントの対戦ごとに `EncounterId` の順で `learn_encounter` を 1 回ずつ呼び，
+その後で `learn_step` を呼びます．`LearnContext::scope()` は決定の粒度を返します．
+
+`FictitiousPlay`，`LogitChoice`，`RothErev`，`Automaton` はこれを使って，粒度に応じて状態を切り替えます．
+`PerEncounter` では**相手ごとに状態を 1 つ**持ちます（`by_opponent()`）．状態はその相手との最初の決定か観測のときに作られ，新しい規則と同じように初期化されます．
+`learn_encounter` はその対戦の相手の状態を更新し，`learn_step` は何もしません．
+`PerStep` と `PerAgentRole` では**全体で 1 つの状態**を持ちます（`global()`）．`learn_encounter` は何もせず，`learn_step` がそのステップの対戦を `EncounterId` の順にすべて取り込みます．
+全体の状態は役割 0 に合わせた形をしており（例えば仮想プレイの信念は役割 1 の行動ごとに 1 つのカウントを持つ），役割 1 を持つエージェントも同じ状態を使います．
+相手ごとの状態は，その相手と最初に出会ったときの役割に合わせた形になります．
+2 つの役割の行動数が同じなら違いはありません．違う場合は，もう一方の役割での決定が失敗することがあります．
+
+### 対の履歴
+
+対の履歴は，エージェントの順序なしの組ごとに，その 2 人の直近 `history_len` 回の対戦（ステップと双方の行動）を保持します．
+メモリを使うので，`build_world` は割り当てたどれかの規則の種類が `needs_pair_history() == true` を返すときだけこれを作ります．
+組込みの規則でこれを返すのは `MyopicBestResponse` だけで，独自の規則も求められます．作らなかった場合，World の JSON（と snapshot）に `pair_history` の項目は現れません．
+
+- `DecisionContext::pair_history(other)` は，その決定の単位の**現在の相手**についてだけ `PairView` を返します．
+  対の履歴が有効でないとき，または `other` が `ctx.opponents()` にないときは `None` です．
+  現在の相手でもまだ一度も対戦していなければ，**空の**ビューが返ります．
+- `PairView::iter()` は `(t, 自分の行動, 相手の行動)` を古い順に返します．向きは尋ねたエージェントに合わせます．
+  `len()` と `is_empty()` は保持している対戦の数を数えます．`both_orders(true)` では 1 ステップに 2 回対戦し，両方が `EncounterId` の順に記録されます．
+- `ctx.omniscient().pair_history(a, b)` は World の任意の 2 人の組を読みます（`DecisionContext` から得た場合．`LearnContext` の `OmniscientContext` では `None`）．
+- `game_play` は利得を計算した後で，そのステップの 2 席の対戦を追記します．したがって決定から自分のステップが見えることはありません．
+
+総当たりで `PerEncounter` のもと，対の履歴を読む規則：
+
+```rust
+use std::sync::Arc;
+
+use socsim_core::SimRng;
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, Automaton, AutomatonKind,
+    BuiltinPolicyState, DecisionContext, DecisionRule, DecisionScope, InitialActions, MatrixGame,
+    NormalFormOutcome, PlayOptions, RoundRobin, RuleBook, RuleError, RuleInitContext, Slot,
+    Stateless,
+};
+
+/// Tit-for-tat that reads the pair history instead of keeping its own state.
+struct PairTitForTat;
+
+impl DecisionRule<MatrixGame, ()> for PairTitForTat {
+    fn name(&self) -> &str {
+        "pair_tit_for_tat"
+    }
+    fn init_state(&self, _: &RuleInitContext, _: &MatrixGame) -> Result<BuiltinPolicyState, RuleError> {
+        Ok(<BuiltinPolicyState as Slot<Stateless>>::from_slot(Stateless))
+    }
+    fn decide(
+        &self,
+        _state: &mut BuiltinPolicyState,
+        ctx: &DecisionContext<'_, MatrixGame, ()>,
+        _rng: &mut SimRng,
+    ) -> Result<usize, RuleError> {
+        let opponent = ctx.opponents()[0];
+        let pair = ctx.pair_history(opponent).expect("pair history is enabled");
+        // (t, my action, their action), oldest first; cooperate on first meeting.
+        Ok(pair.iter().last().map_or(0, |(_, _, theirs)| *theirs))
+    }
+    fn needs_pair_history(&self) -> bool {
+        true // asks build_world to create the pair history
+    }
+}
+
+fn main() {
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap();
+    let mut rules = RuleBook::new();
+    rules.register("pair_tft", Arc::new(PairTitForTat)).unwrap();
+    rules.register("all_d", Arc::new(Automaton::new(AutomatonKind::AllD, 0))).unwrap();
+    rules.register("all_c", Arc::new(Automaton::new(AutomatonKind::AllC, 0))).unwrap();
+    let assign = Assignment::Ordered(
+        ["pair_tft", "all_d", "all_c"]
+            .iter()
+            .map(|kind| AssignGroup { kind: AssignKind::Rule((*kind).to_owned()), count: 1 })
+            .collect(),
+    );
+    let world = build_world(game, 3, (), InitialActions::Same(0), &rules, &assign, 10, 10, 1).unwrap();
+    let mut simulation = assemble(
+        world,
+        RoundRobin::new(),
+        rules,
+        NormalFormOutcome,
+        PlayOptions::new().decision_scope(DecisionScope::PerEncounter),
+        1,
+    )
+    .unwrap()
+    .build();
+
+    let mut totals = [0.0; 3];
+    for _ in 0..10 {
+        simulation.step().unwrap();
+        for (total, payoff) in totals.iter_mut().zip(simulation.world().payoffs()) {
+            *total += payoff;
+        }
+    }
+    println!("{totals:?}");
+    // [39.0, 64.0, 30.0]
+}
+```
+
+10 ラウンドで，対の履歴を読む tit-for-tat は `all_d` に一度だけ搾取され（`0 + 9 · 1`），`all_c` とはずっと協力します（`10 · 3`）．
+
+### 例：総当たりの繰り返し囚人のジレンマ
+
+5 つのオートマトンが 200 ラウンドの繰り返し囚人のジレンマで総当たりします（`crates/socsim-games/examples/ipd_tournament.rs` を短くしたもの）．
+`PerEncounter` では各エージェントが相手ごとにオートマトンを 1 つずつ持つので，tit-for-tat は裏切り者だけを罰し，ほかの相手は罰しません．
+
+```rust
+use std::sync::Arc;
+
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, Automaton, AutomatonKind,
+    DecisionScope, InitialActions, MatrixGame, NormalFormOutcome, PayoffAggregation,
+    PlayOptions, RoundRobin, RuleBook,
+};
+
+const ROUNDS: usize = 200;
+
+fn main() {
+    // Prisoner's dilemma, action 0 = C, 1 = D.
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap();
+
+    let strategies = [
+        ("all_c", AutomatonKind::AllC),
+        ("all_d", AutomatonKind::AllD),
+        ("tft", AutomatonKind::Tft),
+        ("grim", AutomatonKind::Grim),
+        ("wsls", AutomatonKind::Wsls),
+    ];
+    let mut rules = RuleBook::new();
+    for (kind, automaton) in &strategies {
+        rules.register(kind, Arc::new(Automaton::new(automaton.clone(), 0))).unwrap();
+    }
+
+    let seed = 1;
+    let world = build_world(
+        game,
+        strategies.len(), // agent i runs strategies[i]
+        (),
+        InitialActions::Same(0),
+        &rules,
+        &Assignment::Ordered(
+            strategies
+                .iter()
+                .map(|(kind, _)| AssignGroup { kind: AssignKind::Rule((*kind).to_owned()), count: 1 })
+                .collect(),
+        ),
+        ROUNDS,
+        ROUNDS as u64,
+        seed,
+    )
+    .unwrap();
+
+    let mut simulation = assemble(
+        world,
+        RoundRobin::new(), // every pair once per step: 10 encounters for 5 agents
+        rules,
+        NormalFormOutcome,
+        PlayOptions::new()
+            .decision_scope(DecisionScope::PerEncounter) // one decision per seat
+            .payoff_aggregation(PayoffAggregation::Sum),
+        seed,
+    )
+    .unwrap()
+    .build();
+
+    let mut totals = vec![0.0; strategies.len()];
+    for _ in 0..ROUNDS {
+        simulation.step().unwrap();
+        for (total, payoff) in totals.iter_mut().zip(simulation.world().payoffs()) {
+            *total += payoff;
+        }
+    }
+    for ((kind, _), total) in strategies.iter().zip(&totals) {
+        println!("{kind}: {total}");
+    }
+    // all_c: 1800
+    // all_d: 2008
+    // tft: 1999
+    // grim: 1999
+    // wsls: 1900
+}
+```
+
+```sh
+cargo run -p socsim-games --example ipd_tournament --features core,engine
+```
+
+`all_d` に対して tit-for-tat は最初のラウンドで負け，その後は双方が裏切ります．
+tit-for-tat は `0 + 199 · 1 = 199`，`all_d` は `5 + 199 · 1 = 204` です（完全な例はこの組の得点も表示する）．
+ほかの 3 つの協力的な相手からはそれぞれ `200 · 3 = 600` を得るので，合計は `1999` です．
+`all_d` が上回るのは，すべての相手を少なくとも一度は搾取するからです．tit-for-tat と grim は最初のラウンドで，
+`wsls` は 1 ラウンドおきに（win-stay, lose-shift は裏切り者に対して `C` と `D` を交互に出す），`all_c` は毎ラウンド搾取されます．
 
 ---
 
@@ -529,6 +1033,7 @@ feature `llm` を有効にすると，エージェントの行動を言語モデ
 LLM の規則は `DecisionRule` ではありません．別の Mechanism [`game_llm_decide`](mechanisms/game-llm-decide.ja.md)（型は `LlmDriver`）が動かします．
 この Mechanism はそのステップの LLM の決定をすべて集めて 1 つのバッチとして送り，その後で行動を確定します．
 即決の規則（`game_decide`）と LLM の規則（`game_llm_decide`）は同じ World に混ぜられます．各種類はどちらか一方の Driver だけが担当します．
+LLM による決定は，既定の [決定の粒度](#決定の粒度) `PerStep` だけに対応します．`assemble_with_llm` は `PerAgentRole` と `PerEncounter` を `RuleError::Unsupported` で拒否します．
 
 ```toml
 socsim-games  = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-games", features = ["llm", "engine"] }
@@ -945,7 +1450,9 @@ LLM の決定が無いステップでは何も記録しません．
 
 したがってゲームのシミュレーションではラベル `[2]` と `[3]` が予約済みです．独自のストリームには `[4]` 以上を使ってください
 （[RNG ストリームのラベル付け規約](library.ja.md#rngストリームのラベル付け規約) を参照）．
-学習は `AgentId` の昇順で，決定はスケジューラーの活性化の順で行われます．同じ seed と同じコードなら，実行はステップごとに再現されます．
+学習は `AgentId` の昇順で，決定はスケジューラーの活性化の順（1 人のエージェントの中では決定の単位の順）で行われます．
+組込みの学習則が引くのは `decide` に渡されるエンジンのストリームだけです（[乱数](#乱数) を参照）．
+同じ seed と同じコードなら，実行はステップごとに再現されます．
 
 ---
 

@@ -10,7 +10,9 @@ the rules learn from what happened — once per step, inside the ordinary
 
 The crate is library-only (no `ModulePack`, not wired into the `socsim` binary).
 This page covers the building blocks, where their state lives, what a rule is
-allowed to see, and how to assemble a runnable simulation. Separately from the
+allowed to see, how to assemble a runnable simulation, and the built-in learning
+rules and decision scopes (see
+[Learning rules and decision scope](#learning-rules-and-decision-scope)). Separately from the
 simulation, the crate ships classic games and solvers for finite games — Nash
 equilibria, dominance, minimax and logit QRE (see
 [Solving finite games](#solving-finite-games)).
@@ -21,8 +23,8 @@ equilibria, dominance, minimax and logit QRE (see
 
 | Feature | Adds | socsim dependencies |
 |---|---|---|
-| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`), `MatrixGame`, the built-in games (`catalog`), mixed strategies (`mixed`) and the solvers (`solve`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
-| `core` | the world (`GameWorld`), rules, outcome rules, matching, views, `build_world` | `socsim-core` |
+| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`), `MatrixGame`, the built-in games (`catalog`), mixed strategies (`mixed`), the solvers (`solve`) and the learning-rule cores (`learn`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
+| `core` | the world (`GameWorld`), rules (including the learning rules), outcome rules, matching, views, `build_world` | `socsim-core` |
 | `engine` | `assemble` (returns a `SimulationBuilder`); implies `core` | `socsim-core`, `socsim-engine` |
 | `llm` | LLM-backed decision rules, the response store and the replay manifest (see [LLM decisions](#llm-decisions-feature-llm)); implies `core`. The `game_llm_decide` mechanism and `assemble_with_llm` also need `engine` | `socsim-core`, `socsim-llm` (default features only — no networking) |
 | `live` | `live_backend_factory()` (the cache-free Ollama → OpenAI backend); implies `llm` | as `llm`, plus `socsim-llm/live` |
@@ -223,10 +225,23 @@ pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
         state: &mut X::PolicyState,
         ctx: &LearnContext<'_, G, X>,
     ) -> Result<(), RuleError> { Ok(()) }
+    fn learn_encounter(
+        &self,
+        state: &mut X::PolicyState,
+        outcome: &EncounterOutcome<'_, G::Action>,
+        ctx: &LearnContext<'_, G, X>,
+    ) -> Result<(), RuleError> { Ok(()) }
+    fn needs_encounter_learning(&self) -> bool { false }
+    fn needs_pair_history(&self) -> bool { false }
 }
 ```
 
-Note the receivers: `decide` and `learn_step` take `&self`. A rule object is
+`learn_encounter`, `needs_encounter_learning` and `needs_pair_history` are
+optional; they matter when an agent plays several encounters per step (see
+[Per-encounter learning](#per-encounter-learning) and
+[Pair history](#pair-history)).
+
+Note the receivers: `decide` and the learning methods take `&self`. A rule object is
 shared code; everything it remembers about an agent lives in the
 `state: &mut X::PolicyState` it is handed (see
 [where rule state lives](#where-rule-state-lives-and-why-it-matters-for-snapshots)).
@@ -238,6 +253,11 @@ Built-in rules:
 | `Fixed::new(action)` | any `StageGame` | always plays `action` (validated for every role at init) | `Stateless` |
 | `UniformRandom` | `FiniteGame` | uniform draw over the role's actions from `rng` | `Stateless` |
 | `TitForTat::new(coop)` | `FiniteGame`, two roles, two actions per role | plays `coop` first, then the opponent's last action | `TftState { last_opponent }` |
+
+Further built-in rules — `Mixed` (a fixed mixed strategy),
+`MyopicBestResponse`, `FictitiousPlay`, `LogitChoice`, `RothErev` and the
+repeated-game automata `Automaton` — are described in
+[Learning rules and decision scope](#learning-rules-and-decision-scope).
 
 Rules are registered by **kind name** in a `RuleBook`
 (`register(kind, Arc<dyn DecisionRule<G, X>>)`; a duplicate kind is
@@ -338,9 +358,13 @@ pub trait ExperimentState: Send + Sync + 'static {
 ### `PolicyState` and `Slot`
 
 Built-in rules do not name your `PolicyState`; they reach their own state
-through the `Slot<T>` trait (`slot`, `slot_mut`, `from_slot`). `Fixed` and
-`UniformRandom` need `Slot<Stateless>`, `TitForTat` needs `Slot<TftState>`.
-`BuiltinPolicyState` (the `PolicyState` of `X = ()`) implements both. To mix
+through the `Slot<T>` trait (`slot`, `slot_mut`, `from_slot`). `Fixed`,
+`UniformRandom`, `Mixed` and `MyopicBestResponse` need `Slot<Stateless>`,
+`TitForTat` needs `Slot<TftState>`, and the learning rules need
+`Slot<BeliefState>` (`FictitiousPlay`), `Slot<EstimateState>` (`LogitChoice`),
+`Slot<PropensityState>` (`RothErev`) or `Slot<AutomatonPolicyState>`
+(`Automaton`). `BuiltinPolicyState` (the `PolicyState` of `X = ()`) implements
+all of them. To mix
 built-in and custom rules, wrap it:
 
 ```rust
@@ -392,6 +416,8 @@ All state that a resumed run needs is stored **in the world**:
 | this step's encounters, actions, payoffs | `PlayArena` (`world.plays()`) |
 | this step's payoff and play count per agent | `world.payoffs()`, `world.n_played()` |
 | per-agent step history (ring of `history_len`) | `world.history(agent)` |
+| per-pair encounter history (ring of `history_len` per pair; only when a rule asks for it) | through `DecisionContext::pair_history` (see [Pair history](#pair-history)) |
+| the matching's state (`MatchingState`, e.g. the `RoundRobin` cursor) | serialised with the world |
 | the experiment state | `world.x()` |
 
 The three mechanisms (`game_match`, `game_decide`, `game_play`), the
@@ -423,17 +449,21 @@ default methods give the information structure of a standard repeated game:
 
 | Method | Returns |
 |---|---|
-| `t()`, `me()`, `unit()` | step, own id, decision unit (`DecisionUnit::Step`) |
-| `role()`, `encounter()` | own role and encounter this step |
-| `opponents()` | the other agents **in the same encounter** |
+| `t()`, `me()`, `unit()`, `scope()` | step, own id, decision unit (`DecisionUnit::Step` by default) and its `DecisionScope` |
+| `role()`, `encounter()` | own role and encounter for this decision (`encounter()` is `None` under `PerAgentRole`) |
+| `opponents()` | the other agents **in the same encounter** (under `PerAgentRole`, in all encounters of that role) |
 | `my_history()` | own past `StepRecord`s (action, payoff, `n_played`) |
 | `opponent_history(id)` | the actions of `id` — **`None` unless `id` is a current opponent** |
+| `pair_history(id)` | this agent's past encounters with `id` — `None` unless the pair history is enabled and `id` is a current opponent |
 | `game()` | the stage game |
 | `view()` | `X::view_for(me)` |
 | `omniscient()` | unrestricted data (see below) |
 
-**`LearnContext`** (passed to `learn_step`): `t()`, `me()`, `record()` (own
-record for this step), `my_history()`, `outcomes()` (own encounters this step,
+How these change with the decision scope is listed under
+[Decision scope](#decision-scope).
+
+**`LearnContext`** (passed to `learn_step` and `learn_encounter`): `t()`, `me()`,
+`scope()`, `record()` (own record for this step), `my_history()`, `outcomes()` (own encounters this step,
 in `EncounterId` order — each `EncounterOutcome` has `role`, `seats`, `actions`,
 `payoffs`, `credit`), `game()`, `view()`, `omniscient()`.
 
@@ -442,7 +472,8 @@ signal for an incomplete-information game, or a public reputation vector for an
 indirect-reciprocity model.
 
 **`omniscient()`** returns an `OmniscientContext` with every agent's id, held
-action and history, and the full `X`. Calling it **removes the information
+action and history, the full `X`, and — from a `DecisionContext`, when enabled —
+the history of any pair of agents (`pair_history(a, b)`). Calling it **removes the information
 structure guarantee** — use it only for rules that are meant to be omniscient.
 During `Decision`, `held` may also reflect activation order, because agents that
 acted earlier in the step have already updated their held action.
@@ -470,14 +501,17 @@ pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
 
 `encounters_into` pushes one encounter per `out.push(&seats, Credit::All)`
 (`seats` has one agent per role). `check` runs once in `assemble` to validate the
-matching against the world. The built-in `FixedPlayers::pairs(&[(0, 1), …])`
-plays the same pairs every step and rejects unknown agents, an agent listed
-twice, and games without exactly two roles. An agent that is not seated in a
-step does not decide or play that step.
+matching against the world; `ctx.decision_scope()` tells it the
+[decision scope](#decision-scope) in use. The built-in
+`FixedPlayers::pairs(&[(0, 1), …])` plays the same pairs every step and rejects
+unknown agents, an agent listed twice, and games without exactly two roles. The
+built-in [`RoundRobin`](#roundrobin) seats every pair of agents every step. An
+agent that is not seated in a step does not decide or play that step.
 
 A custom matching keeps any state it needs **in `X`** (updated by your own
-mechanism), not in its own struct — `MatchingState` currently has only `None`,
-and state in the matching struct is not part of a snapshot.
+mechanism), not in its own struct — `MatchingState` is a closed enum (`None`, and
+`RoundRobin { cursor }` for the built-in round-robin), and state in the matching
+struct is not part of a snapshot.
 
 ---
 
@@ -488,8 +522,8 @@ and state in the matching struct is not part of a snapshot.
 | Mechanism | Phases | Does |
 |---|---|---|
 | [`game_match`](mechanisms/game-match.md) | PreStep, Decision | PreStep: clears the play arena, `payoff`, `n_played`. Decision: asks the `Matching` for this step's encounters. |
-| [`game_decide`](mechanisms/game-decide.md) | Decision, Reward | Decision: each seated agent's rule `decide`s (or its held action is used); the action is checked with `check_action`. Reward: every rule-driven agent's `learn_step`. |
-| [`game_play`](mechanisms/game-play.md) | Interaction | checks every seat is filled, computes payoffs with the `OutcomeRule`, aggregates them per agent with `PayoffAggregation`, and appends a `StepRecord` for every agent to the step history. |
+| [`game_decide`](mechanisms/game-decide.md) | Decision, Reward | Decision: each seated agent's rule `decide`s once per decision unit (or its held action is used); the action is checked with `check_action`. Reward: every rule-driven agent's `learn_encounter` (per encounter, when the rule asks for it) and then `learn_step`. |
+| [`game_play`](mechanisms/game-play.md) | Interaction | checks every seat is filled, computes payoffs with the `OutcomeRule`, appends the encounters to the pair history (when enabled), aggregates payoffs per agent with `PayoffAggregation`, and appends a `StepRecord` for every agent to the step history. |
 
 Because mechanisms in the same phase run in registration order, `game_match`
 always seats agents before `game_decide` asks them for actions. Per step:
@@ -498,8 +532,8 @@ always seats agents before `game_decide` asks them for actions. Per step:
 PreStep      game_match   reset arena / payoff / n_played
 Decision     game_match   Matching → encounters
              game_decide  decide + check_action → actions, held
-Interaction  game_play    OutcomeRule → payoffs → aggregation → history
-Reward       game_decide  learn_step (rule state)
+Interaction  game_play    OutcomeRule → payoffs → pair history → aggregation → history
+Reward       game_decide  learn_encounter (per encounter) + learn_step (rule state)
 ```
 
 With the `llm` feature, `assemble_with_llm` registers a fourth mechanism,
@@ -554,9 +588,10 @@ builder overrides the engine stream.
 ### `PlayOptions`
 
 ```rust
-PlayOptions::new()                                     // Sum + Stop
+PlayOptions::new()                                     // Sum + Stop + PerStep
     .payoff_aggregation(PayoffAggregation::Mean)        // Sum (default) | Mean
     .on_invalid_action(OnInvalidAction::Stop)           // Stop (default) | Fallback(map)
+    .decision_scope(DecisionScope::PerEncounter)        // PerStep (default) | PerAgentRole | PerEncounter
 ```
 
 - **`PayoffAggregation`** — how an agent's payoffs from several encounters in
@@ -568,6 +603,562 @@ PlayOptions::new()                                     // Sum + Stop
   - `Fallback(BTreeMap<kind, action>)`: the action is replaced by the kind's
     fallback, and an event `game.invalid_action` is recorded with payload
     `{ "agent", "kind", "role", "action" }` (the rejected action, `Debug`-formatted).
+- **`DecisionScope`** — how many decisions an agent makes when it sits in several
+  encounters in one step; see [Decision scope](#decision-scope).
+
+---
+
+## Learning rules and decision scope
+
+Besides `Fixed`, `UniformRandom` and `TitForTat`, the crate ships classic
+learning rules and repeated-game automata, a round-robin matching, and a
+**decision scope** that says how many decisions an agent makes when it sits in
+several encounters in one step. The learning arithmetic itself lives in
+`socsim_games::learn` (fictitious play, Roth–Erev, logit choice, automata),
+which is part of the default build and depends on no `socsim-*` crate; the
+`DecisionRule` wrappers below (feature `core`) store that state in the world.
+
+### The rule table
+
+Every check in the last column runs in `init_state`, so a misconfigured rule is
+rejected by `build_world` (as `GameError::Rule(RuleError::Unsupported(_))`)
+before the simulation starts.
+
+| Rule | Constructor | State slot (`BuiltinPolicyState` variant) | Valid when (otherwise rejected at build time) |
+|---|---|---|---|
+| `Mixed` | `Mixed::new(q)` — a fixed mixed strategy in action-index order | `Stateless` | every `q[i]` finite and `≥ 0`; `Σ q = 1` within `1e-12`; `q.len()` equals the action count of **every** role |
+| `MyopicBestResponse` | `MyopicBestResponse::new()`, `.tie_break_lowest()` (default) / `.tie_break_random()`, `.first_action(a)` (default `0`) | `Stateless` | `first_action` is a valid action for every role |
+| `FictitiousPlay` | `FictitiousPlay::new()`, `.initial_counts(vec)` (default all zero), `.tie_break_lowest()` (default) / `.tie_break_random()` | `BeliefState` (`Belief`) | exactly two roles; initial counts finite and `≥ 0`, one per opponent action for both roles |
+| `LogitChoice` | `LogitChoice::new(lambda)`, `.estimate(EstimateMode::LastOpponent \| EmpiricalFrequency)` (default `EmpiricalFrequency`) | `EstimateState` (`Estimate`) | exactly two roles; `lambda` finite and `≥ 0` |
+| `RothErev` | `RothErev::new(phi, epsilon, initial_propensity)` | `PropensityState` (`Propensity`) | `0 ≤ phi < 1`, `0 ≤ epsilon < 1`, `initial_propensity > 0` (all finite); **every** payoff of every role and profile is finite and `> 0` |
+| `Automaton` | `Automaton::new(kind, coop)`, `kind` ∈ `AutomatonKind::{AllC, AllD, Grim, Wsls, Tft, Gtft { generosity }}` | `AutomatonPolicyState` (`Automaton`) | every role has exactly two actions; `coop` is `0` or `1`; GTFT `generosity` in `[0, 1]` |
+| `TitForTat` (unchanged) | `TitForTat::new(coop)` | `TftState` (`TitForTat`) | two roles, two actions each, `coop` valid |
+
+`BuiltinPolicyState` (the `PolicyState` of `X = ()`) implements `Slot<_>` for
+every slot in the table. With your own `PolicyState`, implement `Slot<T>` for
+the slots of the rules you register, as in
+[`PolicyState` and `Slot`](#policystate-and-slot). The four state types expose
+`global()` and `by_opponent()` (a slice of `(AgentId, state)` in ascending
+`AgentId` order) for inspection through `world.policies().state(agent)`.
+
+`TitForTat` keeps working exactly as before: one `last_opponent` per agent,
+overwritten by each of the agent's encounters in `EncounterId` order. For a
+tit-for-tat that remembers each opponent separately, use
+`Automaton::new(AutomatonKind::Tft, coop)` under `DecisionScope::PerEncounter`.
+
+`MyopicBestResponse` best-responds to the opponents' most recent actions. What
+it reads depends on the [decision scope](#decision-scope):
+
+- `PerStep` — each current opponent's action in the previous step, from the
+  step history.
+- `PerEncounter` — the last action recorded in the [pair history](#pair-history)
+  for this encounter's opponent.
+- `PerAgentRole` — for each current opponent of this role that has a record,
+  the last action in the pair history; the rule maximises the expected payoff
+  against the uniform mix of those actions.
+
+While no applicable action exists (the first step, an opponent never met, or
+an opponent that did not play in the previous step under `PerStep`) it plays
+`first_action`. The rule sets `needs_pair_history() == true`, so assigning it
+creates the pair history. Under `PerAgentRole` and `PerEncounter` it supports
+two-player games only; any other game stops the step with
+`RuleError::Unsupported`.
+
+### Fictitious play
+
+Each agent holds a **belief**: one count per opponent action. `counts()` is the
+unnormalised vector that the rule uses — the initial (fictitious) counts plus
+one per observed opponent action; `empirical_counts()` holds the observations
+only. The rule plays a best response to the counts, i.e. it maximises
+`Σ_j counts[j] · u(a, j)`; with all-zero counts every action ties. Ties are
+detected by exact `f64` equality and resolved by `TieBreak::LowestIndex`
+(default, no randomness) or `TieBreak::Random` (one `gen_range` over the tied
+actions). Fictitious play is defined for **two-player** games only.
+
+Updating is **simultaneous**: every agent decides from the counts through the
+previous step, and the observations are added only after the step has been
+played (in Reward). No alternating variant is offered, because the two update
+orders are different dynamics. In Shapley's 3×3 game, simultaneous fictitious
+play cycles forever through six action pairs, each run of a pair about 1.47
+times as long as the one before; letting the second player respond to the first
+player's already-updated count instead collapses play into a three-step cycle
+in which each pair lasts a single step.
+
+The core can be run without a simulation (default build; add `rand = "0.8"`
+for the RNG):
+
+```rust
+use rand::{rngs::StdRng, SeedableRng};
+use socsim_games::learn::fictitious::{simultaneous_step, FictitiousBelief};
+use socsim_games::MatrixGame;
+
+fn main() {
+    // Shapley's 3×3 game.
+    let game = MatrixGame::bimatrix(
+        &[vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]],
+        &[vec![0.0, 0.0, 1.0], vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]],
+    )
+    .unwrap();
+    let mut row = FictitiousBelief::with_defaults(&game, 0).unwrap();
+    let mut col = FictitiousBelief::with_defaults(&game, 1).unwrap();
+    let mut rng = StdRng::seed_from_u64(0); // unused with lowest-index ties
+
+    // Lengths of the runs of identical action pairs.
+    let mut runs: Vec<((usize, usize), u32)> = Vec::new();
+    for _ in 0..200 {
+        let pair = simultaneous_step(&game, &mut row, &mut col, &mut rng).unwrap();
+        match runs.last_mut() {
+            Some((last, n)) if *last == pair => *n += 1,
+            _ => runs.push((pair, 1)),
+        }
+    }
+    let first: Vec<_> = runs.iter().take(9).collect();
+    println!("{first:?}");
+    // [((0, 0), 1), ((0, 2), 2), ((2, 2), 3), ((2, 1), 5), ((1, 1), 8),
+    //  ((1, 0), 12), ((0, 0), 18), ((0, 2), 27), ((2, 2), 40)]
+}
+```
+
+### Roth–Erev reinforcement
+
+Each agent holds one propensity `q_j > 0` per own action (all equal to
+`initial_propensity` at the start) and chooses action `j` with probability
+`q_j / Σ_k q_k`. After playing action `k` and receiving payoff `x`, every
+propensity is updated with the three-parameter rule
+
+```
+q_j ← (1 − φ) · q_j + E_j,     E_j = (1 − ε) · x        if j = k
+                                E_j = ε · x / (N − 1)    otherwise
+```
+
+where `φ` (`phi`) is forgetting, `ε` (`epsilon`) experimentation and `N` the
+number of own actions (with `N = 1` the whole payoff goes to the single action).
+There is no reference point: payoffs are used as they are, which is why the
+game's payoffs must all be strictly positive (checked at build time), and a
+realised payoff that is not finite and positive — possible with a custom
+outcome rule — stops the step with an error. To use a game with zero or
+negative payoffs, shift its payoffs before building it.
+
+### Logit choice
+
+`LogitChoice` estimates each own action's payoff from the opponent's past
+actions and plays action `a` with probability proportional to
+`exp(λ · û(a))`. The estimate is either the payoff against the opponent's most
+recent action (`EstimateMode::LastOpponent`) or the expected payoff against the
+opponent's empirical action frequencies (`EstimateMode::EmpiricalFrequency`,
+the default). Before any observation all estimates are zero, so the choice is
+uniform; `λ = 0` is always uniform. The softmax subtracts the largest estimate
+before exponentiating, so large `λ` does not overflow. Logit choice is defined
+for **two-player** games only.
+
+```rust
+use rand::{rngs::StdRng, SeedableRng};
+use socsim_games::learn::logit::{EstimateMode, LogitState};
+use socsim_games::learn::roth_erev::RothErevState;
+use socsim_games::MatrixGame;
+
+fn main() {
+    // A prisoner's dilemma shifted so every payoff is strictly positive.
+    let game = MatrixGame::bimatrix(
+        &[vec![4.0, 1.0], vec![6.0, 2.0]],
+        &[vec![4.0, 6.0], vec![1.0, 2.0]],
+    )
+    .unwrap();
+
+    // Roth–Erev: initial propensity 1, phi = 0.1, epsilon = 0.2.
+    let mut re = RothErevState::new(&game, 0, 1.0, 0.1, 0.2).unwrap();
+    re.update(0, 3.0).unwrap(); // chose action 0, earned 3
+    let q = re.propensities();
+    let p = re.selection_probabilities().unwrap();
+    println!("propensities [{:.1}, {:.1}]", q[0], q[1]);
+    println!("probabilities [{:.4}, {:.4}]", p[0], p[1]);
+    // propensities [3.3, 1.5]
+    // probabilities [0.6875, 0.3125]
+
+    // Logit: uniform before any observation, then exp(lambda * estimate).
+    let mut logit = LogitState::new(&game, 0, 1.0, EstimateMode::LastOpponent).unwrap();
+    println!("before {:?}", logit.selection_probabilities(&game, 0).unwrap());
+    logit.observe(0).unwrap(); // the opponent played C
+    let p = logit.selection_probabilities(&game, 0).unwrap();
+    println!("after  [{:.4}, {:.4}]", p[0], p[1]);
+    // before [0.5, 0.5]
+    // after  [0.1192, 0.8808]
+
+    let mut rng = StdRng::seed_from_u64(7);
+    let action = logit.choose_action(&game, 0, &mut rng).unwrap();
+    assert!(action < 2);
+}
+```
+
+(`0.9 · 1 + 0.8 · 3 = 3.3` and `0.9 · 1 + 0.2 · 3 = 1.5`; after the opponent
+played `C`, the estimates are `4` and `6`, so `p(C) = 1 / (1 + e²)`.)
+
+### Repeated-game automata
+
+`Automaton::new(kind, coop)` plays a fixed repeated-game strategy in a game
+where every role has exactly two actions. `coop` is the index of the
+cooperative action (`C`); the other index is `D`. All automata start with `C`
+except `AllD`.
+
+| `AutomatonKind` | Next action |
+|---|---|
+| `AllC` / `AllD` | always `C` / always `D` |
+| `Grim` | `C` until the opponent has played `D` once, then `D` forever |
+| `Tft` | the opponent's previous action |
+| `Wsls` (win-stay, lose-shift) | `(C, C) → C`, `(C, D) → D`, `(D, C) → D`, `(D, D) → C`, where `(own, opponent)` is the previous step |
+| `Gtft { generosity }` | `C` after the opponent's `C`; after the opponent's `D`, `C` with probability `generosity`, else `D` |
+
+### Random numbers
+
+Learning rules draw only from the engine stream that `game_decide` passes to
+`decide`; `learn_encounter` and `learn_step` take no RNG. The stream is consumed
+in the scheduler's activation order and, within one agent, in decision-unit
+order (see [Decision scope](#decision-scope)). Sampling is fixed: a rule that
+samples from a probability vector (`Mixed`, `LogitChoice`, `RothErev`, GTFT)
+draws one uniform `f64` and walks the cumulative probabilities in
+action-index order (if rounding leaves the draw past the total, the last action
+with positive probability is taken). Random tie-breaking draws one `gen_range`
+over the tied actions, and a single best action consumes nothing.
+`Fixed`, `TitForTat`, the deterministic automata, lowest-index ties, and GTFT at
+`generosity` `0` or `1` consume no randomness.
+
+### Decision scope
+
+`PlayOptions::decision_scope(scope)` chooses what one decision covers. It
+matters as soon as a matching seats an agent in several encounters in a step.
+
+| | `DecisionScope::PerStep` (default) | `DecisionScope::PerAgentRole` | `DecisionScope::PerEncounter` |
+|---|---|---|---|
+| decisions per agent per step | one, written to all its seats | one per role it holds that step, in ascending role order | one per seat, in `EncounterId` order |
+| `ctx.unit()` / `ctx.scope()` | `DecisionUnit::Step` / `PerStep` | `DecisionUnit::AgentRole(role)` / `PerAgentRole` | `DecisionUnit::Encounter(id)` / `PerEncounter` |
+| `ctx.role()` | the role (the same in all its seats) | that role | the seat's role |
+| `ctx.encounter()` | its last encounter (highest `EncounterId`) | `None` | that encounter |
+| `ctx.opponents()` | the other agents of that encounter | every opponent in that role's encounters, deduplicated, ascending | the other agents of that encounter |
+| writes `held` | yes | no | no |
+| `StepRecord::action` | the action | `None` | `None` |
+
+Under `PerAgentRole` and `PerEncounter` an agent can play different actions in
+one step, so there is no single action to hold or record: `held` keeps its
+previous value and the step history records `action: None` (payoff and
+`n_played` are recorded as usual). Rules that need the actions of past
+encounters under these scopes read them from `LearnContext::outcomes()` or from
+the [pair history](#pair-history). `Held` agents play their held action in all
+their seats under every scope.
+
+`PerStep` requires every agent to hold **one role** per step. A matching that
+can tell up front checks this in `Matching::check` through
+`MatchContext::decision_scope()`: `RoundRobin` returns
+`GameError::InvalidMatching` from `assemble` under `PerStep` with three or more
+agents or with `both_orders(true)`. For a matching that cannot be checked in
+advance, `game_decide` stops the step with a mechanism error built from
+`RuleError::AmbiguousRole { agent }` (`agent 0 holds more than one role in a
+per-step decision`) when an agent holds two different roles in a `PerStep`
+step — `Held` agents included.
+
+```rust
+use std::sync::Arc;
+
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, Automaton, AutomatonKind,
+    DecisionScope, InitialActions, MatrixGame, NormalFormOutcome, PlayOptions, RoundRobin,
+    RuleBook,
+};
+
+fn main() {
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap();
+    let mut rules = RuleBook::new();
+    rules.register("tft", Arc::new(Automaton::new(AutomatonKind::Tft, 0))).unwrap();
+    let assign = Assignment::Ordered(vec![AssignGroup {
+        kind: AssignKind::Rule("tft".to_owned()),
+        count: 3,
+    }]);
+
+    for scope in [DecisionScope::PerStep, DecisionScope::PerAgentRole, DecisionScope::PerEncounter] {
+        let world = build_world(game.clone(), 3, (), InitialActions::Same(0), &rules, &assign, 10, 10, 1)
+            .unwrap();
+        // With three agents, agent 1 sits in role 1 of (0, 1) and role 0 of (1, 2).
+        let result = assemble(
+            world,
+            RoundRobin::new(),
+            rules.clone(),
+            NormalFormOutcome,
+            PlayOptions::new().decision_scope(scope),
+            1,
+        );
+        match result {
+            Ok(_) => println!("{scope:?}: ok"),
+            Err(error) => println!("{scope:?}: {error}"),
+        }
+    }
+    // PerStep: invalid matching: RoundRobin assigns more than one role to an agent in a per-step decision
+    // PerAgentRole: ok
+    // PerEncounter: ok
+}
+```
+
+LLM decisions support `PerStep` only: `assemble_with_llm` rejects the other
+scopes with `RuleError::Unsupported`.
+
+### `RoundRobin`
+
+`RoundRobin::new()` seats **every pair** of agents once per step. Agents are
+sorted by `AgentId` and the pairs are pushed in lexicographic order — for four
+agents `(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)` — with the lower id in
+role 0. `.both_orders(true)` also pushes the reversed pair immediately after
+each pair (`(0, 1), (1, 0), (0, 2), (2, 0), …`), so every agent plays both roles
+against every opponent. Self-play is not supported: `.self_play(true)` is
+rejected by `assemble` with `GameError::InvalidMatching`, as is a game without
+exactly two roles. The matching draws no randomness.
+
+Its state is `MatchingState::RoundRobin { cursor }`, stored in the world (and
+therefore in a snapshot): `cursor` counts the rounds played and grows by one
+per step.
+
+With `n` agents each agent plays `n − 1` encounters per step (`2(n − 1)` with
+both orders), so `PayoffAggregation` matters: `Sum` adds the encounter payoffs
+and `Mean` divides by `n_played`. Three agents playing `C`, `D`, `C` in the
+prisoner's dilemma above receive `[3, 10, 3]` under `Sum` and `[1.5, 5, 1.5]`
+under `Mean`.
+
+### Per-encounter learning
+
+`DecisionRule` has three hooks besides `learn_step`:
+
+| Method | Default | Meaning |
+|---|---|---|
+| `learn_encounter(state, outcome, ctx)` | no-op | learn from one encounter |
+| `needs_encounter_learning()` | `false` | when `true`, `game_decide` calls `learn_encounter` |
+| `needs_pair_history()` | `false` | when `true` for any assigned kind, `build_world` creates the [pair history](#pair-history) |
+
+In Reward, `game_decide` visits rule-driven agents in ascending `AgentId`
+order. For each agent whose rule returns `needs_encounter_learning() == true`
+it first calls `learn_encounter` once per encounter of that agent, in
+`EncounterId` order, and then calls `learn_step`. `LearnContext::scope()`
+reports the decision scope.
+
+`FictitiousPlay`, `LogitChoice`, `RothErev` and `Automaton` use this to switch
+their state with the scope. Under `PerEncounter` they keep **one state per
+opponent** (`by_opponent()`), created on the first decision or observation
+against that opponent and initialised like a fresh rule; `learn_encounter`
+updates the state of that encounter's opponent and `learn_step` does nothing.
+Under `PerStep` and `PerAgentRole` they keep a **single global state**
+(`global()`); `learn_encounter` does nothing and `learn_step` folds all of the
+step's encounters into it, in `EncounterId` order. The global state is shaped
+for role 0 (for example, a fictitious-play belief has one count per role-1
+action), and an agent that holds role 1 uses the same state; a per-opponent
+state is shaped for the role in which the agent first meets that opponent.
+This makes no difference when both roles have the same number of actions;
+otherwise a decision in the other role can fail.
+
+### Pair history
+
+The pair history keeps, for each unordered pair of agents, the last
+`history_len` encounters between them — the step and both actions. It costs
+memory, so `build_world` creates it only when some assigned rule kind returns
+`needs_pair_history() == true`. Among the built-in rules only
+`MyopicBestResponse` does; custom rules can ask for it too. When it is not
+created, the `pair_history` field is absent
+from the world's JSON (and from a snapshot).
+
+- `DecisionContext::pair_history(other)` returns a `PairView` only for a
+  **current opponent** of the decision unit. It returns `None` when the pair
+  history is not enabled or `other` is not in `ctx.opponents()`; a current
+  opponent that this agent has never met gives an **empty** view.
+- `PairView::iter()` yields `(t, my_action, other_action)` from oldest to
+  newest, oriented to the agent that asked; `len()` and `is_empty()` count the
+  retained encounters. With `both_orders(true)` a pair meets twice per step and
+  both encounters are recorded, in `EncounterId` order.
+- `ctx.omniscient().pair_history(a, b)` reads any pair of agents in the world
+  (taken from a `DecisionContext`; the `OmniscientContext` of a
+  `LearnContext` returns `None`).
+- `game_play` appends this step's two-seat encounters after it has computed
+  payoffs, so a decision never sees its own step.
+
+A rule that reads the pair history, in a round-robin under `PerEncounter`:
+
+```rust
+use std::sync::Arc;
+
+use socsim_core::SimRng;
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, Automaton, AutomatonKind,
+    BuiltinPolicyState, DecisionContext, DecisionRule, DecisionScope, InitialActions, MatrixGame,
+    NormalFormOutcome, PlayOptions, RoundRobin, RuleBook, RuleError, RuleInitContext, Slot,
+    Stateless,
+};
+
+/// Tit-for-tat that reads the pair history instead of keeping its own state.
+struct PairTitForTat;
+
+impl DecisionRule<MatrixGame, ()> for PairTitForTat {
+    fn name(&self) -> &str {
+        "pair_tit_for_tat"
+    }
+    fn init_state(&self, _: &RuleInitContext, _: &MatrixGame) -> Result<BuiltinPolicyState, RuleError> {
+        Ok(<BuiltinPolicyState as Slot<Stateless>>::from_slot(Stateless))
+    }
+    fn decide(
+        &self,
+        _state: &mut BuiltinPolicyState,
+        ctx: &DecisionContext<'_, MatrixGame, ()>,
+        _rng: &mut SimRng,
+    ) -> Result<usize, RuleError> {
+        let opponent = ctx.opponents()[0];
+        let pair = ctx.pair_history(opponent).expect("pair history is enabled");
+        // (t, my action, their action), oldest first; cooperate on first meeting.
+        Ok(pair.iter().last().map_or(0, |(_, _, theirs)| *theirs))
+    }
+    fn needs_pair_history(&self) -> bool {
+        true // asks build_world to create the pair history
+    }
+}
+
+fn main() {
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap();
+    let mut rules = RuleBook::new();
+    rules.register("pair_tft", Arc::new(PairTitForTat)).unwrap();
+    rules.register("all_d", Arc::new(Automaton::new(AutomatonKind::AllD, 0))).unwrap();
+    rules.register("all_c", Arc::new(Automaton::new(AutomatonKind::AllC, 0))).unwrap();
+    let assign = Assignment::Ordered(
+        ["pair_tft", "all_d", "all_c"]
+            .iter()
+            .map(|kind| AssignGroup { kind: AssignKind::Rule((*kind).to_owned()), count: 1 })
+            .collect(),
+    );
+    let world = build_world(game, 3, (), InitialActions::Same(0), &rules, &assign, 10, 10, 1).unwrap();
+    let mut simulation = assemble(
+        world,
+        RoundRobin::new(),
+        rules,
+        NormalFormOutcome,
+        PlayOptions::new().decision_scope(DecisionScope::PerEncounter),
+        1,
+    )
+    .unwrap()
+    .build();
+
+    let mut totals = [0.0; 3];
+    for _ in 0..10 {
+        simulation.step().unwrap();
+        for (total, payoff) in totals.iter_mut().zip(simulation.world().payoffs()) {
+            *total += payoff;
+        }
+    }
+    println!("{totals:?}");
+    // [39.0, 64.0, 30.0]
+}
+```
+
+Over 10 rounds the pair tit-for-tat is exploited once by `all_d` (`0 + 9 · 1`)
+and cooperates throughout with `all_c` (`10 · 3`).
+
+### Worked example: a round-robin IPD tournament
+
+Five automata play the iterated prisoner's dilemma against each other for 200
+rounds (`crates/socsim-games/examples/ipd_tournament.rs`, shortened here).
+`PerEncounter` gives each agent one automaton per opponent, so tit-for-tat
+punishes the defector without punishing anyone else:
+
+```rust
+use std::sync::Arc;
+
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, Automaton, AutomatonKind,
+    DecisionScope, InitialActions, MatrixGame, NormalFormOutcome, PayoffAggregation,
+    PlayOptions, RoundRobin, RuleBook,
+};
+
+const ROUNDS: usize = 200;
+
+fn main() {
+    // Prisoner's dilemma, action 0 = C, 1 = D.
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap();
+
+    let strategies = [
+        ("all_c", AutomatonKind::AllC),
+        ("all_d", AutomatonKind::AllD),
+        ("tft", AutomatonKind::Tft),
+        ("grim", AutomatonKind::Grim),
+        ("wsls", AutomatonKind::Wsls),
+    ];
+    let mut rules = RuleBook::new();
+    for (kind, automaton) in &strategies {
+        rules.register(kind, Arc::new(Automaton::new(automaton.clone(), 0))).unwrap();
+    }
+
+    let seed = 1;
+    let world = build_world(
+        game,
+        strategies.len(), // agent i runs strategies[i]
+        (),
+        InitialActions::Same(0),
+        &rules,
+        &Assignment::Ordered(
+            strategies
+                .iter()
+                .map(|(kind, _)| AssignGroup { kind: AssignKind::Rule((*kind).to_owned()), count: 1 })
+                .collect(),
+        ),
+        ROUNDS,
+        ROUNDS as u64,
+        seed,
+    )
+    .unwrap();
+
+    let mut simulation = assemble(
+        world,
+        RoundRobin::new(), // every pair once per step: 10 encounters for 5 agents
+        rules,
+        NormalFormOutcome,
+        PlayOptions::new()
+            .decision_scope(DecisionScope::PerEncounter) // one decision per seat
+            .payoff_aggregation(PayoffAggregation::Sum),
+        seed,
+    )
+    .unwrap()
+    .build();
+
+    let mut totals = vec![0.0; strategies.len()];
+    for _ in 0..ROUNDS {
+        simulation.step().unwrap();
+        for (total, payoff) in totals.iter_mut().zip(simulation.world().payoffs()) {
+            *total += payoff;
+        }
+    }
+    for ((kind, _), total) in strategies.iter().zip(&totals) {
+        println!("{kind}: {total}");
+    }
+    // all_c: 1800
+    // all_d: 2008
+    // tft: 1999
+    // grim: 1999
+    // wsls: 1900
+}
+```
+
+```sh
+cargo run -p socsim-games --example ipd_tournament --features core,engine
+```
+
+Against `all_d`, tit-for-tat loses the first round and then both defect:
+`0 + 199 · 1 = 199` for tit-for-tat and `5 + 199 · 1 = 204` for `all_d` (the
+full example also prints this pair). Against each of the other three
+cooperators it earns `200 · 3 = 600`, hence `1999`. `all_d` comes out ahead
+because it exploits every opponent at least once: tit-for-tat and grim in the
+first round, `wsls` every other round (win-stay, lose-shift alternates between
+`C` and `D` against a defector) and `all_c` every round.
 
 ---
 
@@ -579,6 +1170,9 @@ rules are not `DecisionRule`s: they are driven by a separate mechanism,
 every LLM decision of the step, sends them as one batch, and only then fixes the
 actions. Immediate rules (`game_decide`) and LLM rules (`game_llm_decide`) can be
 mixed in the same world — each kind is owned by exactly one of the two drivers.
+LLM decisions support only the default
+[decision scope](#decision-scope) `PerStep`: `assemble_with_llm` rejects
+`PerAgentRole` and `PerEncounter` with `RuleError::Unsupported`.
 
 ```toml
 socsim-games  = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-games", features = ["llm", "engine"] }
@@ -1055,8 +1649,11 @@ Every stream derives from the one `seed` passed to `build_world` and `assemble`:
 Labels `[2]` and `[3]` are therefore reserved in a game simulation — use `[4]`
 and above for your own streams (see the
 [RNG labelling convention](library.md#rng-stream-labeling-convention)). Agents
-learn in sorted `AgentId` order and decide in the scheduler's activation order;
-with the same seed and the same code a run is reproducible step for step.
+learn in sorted `AgentId` order and decide in the scheduler's activation order
+(and, within one agent, in decision-unit order); the built-in learning rules
+draw only from the engine stream passed to `decide` (see
+[Random numbers](#random-numbers)). With the same seed and the same code a run
+is reproducible step for step.
 
 ---
 

@@ -14,8 +14,11 @@
 
 1. すべての席に行動があることを検査します（埋まっていない席はエラー）．
 2. 設定された `OutcomeRule` で役割ごとの利得を計算します．
-3. 各利得を席のエージェントの `payoff` に足して `n_played` を 1 増やし，その後 `PayoffAggregation`（`Sum` か `Mean`）を適用します．
-4. エージェントごとに `StepRecord { action, payoff, n_played }` を 1 つステップ履歴に追記します．
+3. 各利得を席のエージェントの `payoff` に足して `n_played` を 1 増やします．
+4. World に対の履歴があるとき（割り当てたどれかの規則が `needs_pair_history() == true` を返したとき），そのステップの 2 席の対戦をすべて `EncounterId` の順に追記します．
+5. `PayoffAggregation`（`Sum` か `Mean`）を適用します．
+6. エージェントごとに `StepRecord { action, payoff, n_played }` を 1 つステップ履歴に追記します．
+   `DecisionScope::PerAgentRole` と `PerEncounter` では，エージェントが 1 ステップの中で違う行動を出しうるので，`action` は `None` です．
 
 ## 2. 理論と出典
 
@@ -35,7 +38,7 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 ![game_play data flow](../assets/mech-game-play.svg)
 
 対戦（`seats`，`credit`，`actions`）と，`OutcomeContext` を通してゲーム・`X`・保持行動・トポロジーを読みます．
-席ごとの利得，エージェントごとの `payoff` と `n_played`，ステップ履歴を書きます．
+席ごとの利得，エージェントごとの `payoff` と `n_played`，（有効なら）対の履歴，ステップ履歴を書きます．
 
 ## 4. 6フェーズループにおける位置
 
@@ -50,15 +53,18 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 | `PlayArena.payoffs` | | ✓ | 席ごとに 1 つの利得． |
 | `GameWorld.payoff` | ✓ | ✓ | エージェントごとに足し合わせ，`Mean` のときは `n_played` で割る． |
 | `GameWorld.n_played` | ✓ | ✓ | エージェントが席に着いた対戦ごとに 1 増やす． |
-| ステップ履歴（`StepRecord`） | | ✓ | エージェントごとに 1 件．席のないエージェントの `action` は `None`．長さ `history_len` の環． |
+| 対の履歴 | | ✓ | `build_world` が作ったとき（規則が求めたとき）だけ．2 席の対戦ごとに `(t, 双方の行動)` を 1 件，`EncounterId` の順に，利得の計算の後で書く．組ごとに長さ `history_len` の環． |
+| ステップ履歴（`StepRecord`） | | ✓ | エージェントごとに 1 件．席のないエージェントの `action` は `None`．`PerAgentRole` / `PerEncounter` ではすべてのエージェントで `None`．長さ `history_len` の環． |
 | `game`，`x`，`held`，`topology`，`clock.t` | ✓ | | `OutcomeContext` を通して． |
 
 ## 6. 依存関係と順序制約
 
 - **上流：** `game_match`（PreStep）が `payoff` / `n_played` を 0 にします．これがないと利得がステップをまたいで積み上がります．
   `game_decide`（Decision）がすべての席を埋めていなければなりません．
-- **下流：** `game_decide`（Reward）は `learn_step` のために新しいステップの記録と対戦の結果を読みます．
-  次のステップの `DecisionContext::my_history` と `opponent_history` は，ここで書いた履歴を読みます．
+- **下流：** `game_decide`（Reward）は `learn_encounter` / `learn_step` のために新しいステップの記録と対戦の結果を読みます．
+  次のステップの `DecisionContext::my_history`，`opponent_history`，`pair_history` は，ここで書いた履歴を読みます．
+  対の履歴は Interaction で書かれるので，決定から自分のステップが見えることはありません．
+- **決定の粒度：** `assemble` は `PlayOptions::decision_scope` を `game_play` にも渡します．`StepRecord::action` を記録するかどうかはこれで決まります．
 
 ## 7. パラメータ
 
@@ -66,6 +72,7 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 |---|---|---|---|
 | `outcome: O`（`O: OutcomeRule<G, X>`） | — | structural | `assemble` に渡す．組込み：`NormalFormOutcome`（`G: NormalFormGame` を要求）． |
 | `opts.payoff_aggregation` | `PayoffAggregation::Sum` | structural | `Sum` か `Mean`．`Mean` では対戦しなかったエージェントは `0` のまま． |
+| `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep`：`StepRecord::action` はエージェントの行動．`PerAgentRole` / `PerEncounter`：`None`． |
 
 ## 8. 適用方法
 
@@ -86,7 +93,7 @@ let last = sim.world().history(socsim_core::AgentId(0)).and_then(|h| h.last().cl
 
 ## 9. 決定論性と RNG
 
-乱数は**引きません**．対戦は `EncounterId` の順に評価し，記録は `AgentId` の昇順に書くので，
+乱数は**引きません**．対戦は `EncounterId` の順に評価し，記録は `AgentId` の昇順に（対の履歴の記録は `EncounterId` の順に）書くので，
 結果は Decision で選ばれた行動だけで完全に決まります．
 
 ## 10. 期待される動作

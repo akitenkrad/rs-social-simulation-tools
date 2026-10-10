@@ -16,9 +16,14 @@ mechanisms. For every encounter written by `game_match` and filled by
 1. checks that every seat holds an action (an unfilled seat is an error);
 2. computes one payoff per role with the configured `OutcomeRule`;
 3. adds each payoff to the seated agent's `payoff` and increments its
-   `n_played`, then applies the `PayoffAggregation` (`Sum` or `Mean`);
-4. appends one `StepRecord { action, payoff, n_played }` per agent to the step
-   history.
+   `n_played`;
+4. when the world has a pair history (some assigned rule returned
+   `needs_pair_history() == true`), appends every two-seat encounter of the
+   step to it, in `EncounterId` order;
+5. applies the `PayoffAggregation` (`Sum` or `Mean`);
+6. appends one `StepRecord { action, payoff, n_played }` per agent to the step
+   history. Under `DecisionScope::PerAgentRole` and `PerEncounter` an agent can
+   play different actions in one step, so `action` is `None` there.
 
 ## 2. Theory & source
 
@@ -41,7 +46,8 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 
 Reads the encounters (`seats`, `credit`, `actions`) and, through
 `OutcomeContext`, the game, `X`, held actions and topology. Writes the per-seat
-payoffs, the per-agent `payoff` and `n_played`, and the step history.
+payoffs, the per-agent `payoff` and `n_played`, the pair history (when
+enabled) and the step history.
 
 ## 4. Position in the 6-phase loop
 
@@ -57,7 +63,8 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
 | `PlayArena.payoffs` | | ✓ | One payoff per seat. |
 | `GameWorld.payoff` | ✓ | ✓ | Accumulated per agent, then divided by `n_played` under `Mean`. |
 | `GameWorld.n_played` | ✓ | ✓ | Incremented once per encounter the agent is seated in. |
-| step history (`StepRecord`) | | ✓ | One record per agent; `action` is `None` for an unseated agent. Ring of length `history_len`. |
+| pair history | | ✓ | Only when created by `build_world` (a rule asked for it). One record `(t, both actions)` per two-seat encounter, in `EncounterId` order, after payoffs are computed; ring of `history_len` per pair. |
+| step history (`StepRecord`) | | ✓ | One record per agent; `action` is `None` for an unseated agent, and for every agent under `PerAgentRole` / `PerEncounter`. Ring of length `history_len`. |
 | `game`, `x`, `held`, `topology`, `clock.t` | ✓ | | Through `OutcomeContext`. |
 
 ## 6. Dependencies & ordering constraints
@@ -66,8 +73,12 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
   payoffs would accumulate across steps. `game_decide` (Decision) must fill
   every seat.
 - **Downstream:** `game_decide` (Reward) reads the new step record and
-  encounter outcomes for `learn_step`; `DecisionContext::my_history` and
-  `opponent_history` in the next step read the history written here.
+  encounter outcomes for `learn_encounter` / `learn_step`;
+  `DecisionContext::my_history`, `opponent_history` and `pair_history` in the
+  next step read the histories written here. Because the pair history is
+  written in Interaction, a decision never sees its own step.
+- **Decision scope:** `assemble` passes `PlayOptions::decision_scope` to
+  `game_play`; it decides whether `StepRecord::action` is recorded.
 
 ## 7. Parameters
 
@@ -75,6 +86,7 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
 |---|---|---|---|
 | `outcome: O` (`O: OutcomeRule<G, X>`) | — | structural | Passed to `assemble`. Built-in: `NormalFormOutcome` (requires `G: NormalFormGame`). |
 | `opts.payoff_aggregation` | `PayoffAggregation::Sum` | structural | `Sum` or `Mean`; agents that played nothing keep `0` under `Mean`. |
+| `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep`: `StepRecord::action` is the agent's action. `PerAgentRole` / `PerEncounter`: `None`. |
 
 ## 8. How to apply
 
@@ -96,7 +108,8 @@ let last = sim.world().history(socsim_core::AgentId(0)).and_then(|h| h.last().cl
 ## 9. Determinism & RNG
 
 Draws **no** randomness. Encounters are evaluated in `EncounterId` order and
-records are written in sorted `AgentId` order, so the result is fully
+records are written in sorted `AgentId` order (pair-history records in
+`EncounterId` order), so the result is fully
 determined by the actions chosen in Decision.
 
 ## 10. Expected behaviour

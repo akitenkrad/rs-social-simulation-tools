@@ -58,7 +58,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`org_learning`](mechanisms/org-learning.ja.md) | PostStep | Argyris (1977) | calibration | 顕在条件下で voicing するときのダブルループ知識バンプ．それ以外では暗黙知の減衰． |
 | [`policy`](mechanisms/policy-mechanism.ja.md) | Decision | MARL (§14.1) | learnable | 学習済み RL ポリシーをドロップイン型 Decision メカニズムとして利用する（ライブラリ専用）． |
 | [`game_match`](mechanisms/game-match.ja.md) | PreStep, Decision | matching protocol | structural | ステップごとの対戦の状態を空にし，`Matching` がそのステップの対戦の席にエージェントを着ける（ライブラリ専用）． |
-| [`game_decide`](mechanisms/game-decide.ja.md) | Decision, Reward | decision rules (e.g. Axelrod 1984) | rule-driven | 席に着いた各エージェントの `DecisionRule` が検査済みの行動を選び，対戦の後に規則が `learn_step` する．規則の状態は World にある（ライブラリ専用）． |
+| [`game_decide`](mechanisms/game-decide.ja.md) | Decision, Reward | decision rules (e.g. Axelrod 1984) | rule-driven | 席に着いた各エージェントの `DecisionRule` が決定の単位（ステップ，役割，対戦）ごとに検査済みの行動を選び，対戦の後に規則が対戦ごと（`learn_encounter`）とステップごと（`learn_step`）に学習する．規則の状態は World にある（ライブラリ専用）． |
 | [`game_llm_decide`](mechanisms/game-llm-decide.ja.md) | Decision, Reward | LLM agents in repeated games | LLM-driven | LLM の種類のエージェントが要求を描画し，それをバッチにまとめ，重複を除き，応答ストアから再生するかバックエンドへ送り，再試行とフォールバックを交えて検査済みの行動にする（feature `llm`．ライブラリ専用）． |
 | [`game_play`](mechanisms/game-play.ja.md) | Interaction | normal-form payoffs | structural | 対戦ごとに `OutcomeRule` で利得を計算し，エージェントごとに集計（`Sum`/`Mean`）してステップ履歴に記録する（ライブラリ専用）． |
 | [`hegselmann_krause`](mechanisms/hegselmann-krause.ja.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | ε 以内の意見の選択された平均へ向かう同期的な有界信頼更新（ライブラリ専用）． |

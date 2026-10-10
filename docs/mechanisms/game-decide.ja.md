@@ -13,8 +13,12 @@
 すべてのエージェントの `DecisionRule` を動かします．
 
 - **Decision** では，席に着いた各エージェントに行動を尋ねます（規則を通して．`Held` のエージェントは保持行動から）．
-  行動を `StageGame::check_action` で検査し，エージェントの席に書き，保持行動を更新します．
-- **Reward** では，規則で動く全エージェントについて，そのステップの記録と対戦の結果を渡して `learn_step` を呼びます．
+  行動を `StageGame::check_action` で検査し，エージェントの席に書きます．
+  エージェントが何回決定するかは**決定の粒度**（`PlayOptions::decision_scope`）で決まります．
+  1 ステップに 1 回（`PerStep`．既定．保持行動も更新する），そのステップに持つ役割ごとに 1 回（`PerAgentRole`），
+  席ごとに 1 回（`PerEncounter`）のいずれかです．
+- **Reward** では，規則で動く全エージェントについて，そのステップの記録と対戦の結果を渡し，
+  （規則が求めるなら）そのエージェントの対戦ごとに `learn_encounter` を呼び，その後で `learn_step` を呼びます．
 
 規則のオブジェクトそのものは共有されるコードです．各エージェントの規則の状態は World の `PolicyTable` にあるので，
 この Mechanism は再開後の実行に影響する状態を持ちません．
@@ -34,7 +38,23 @@ $$a_i^t = \text{decide}_{k(i)}\big(s_i,\ \text{view}_i^t;\ \text{rng}\big), \qqu
 - $\text{view}_i^t$ — `DecisionContext`：自分の役割と対戦，現在の相手，自分の履歴，相手の行動の履歴，`X::view_for(i)`．
 
 組込みの規則は `Fixed`（一定の行動），`UniformRandom`（役割の行動から一様），
-`TitForTat`（Axelrod, 1984：初回は協力し，以後は相手の直前の行動をまねる）です．
+`TitForTat`（Axelrod, 1984：初回は協力し，以後は相手の直前の行動をまねる），`Mixed`（固定の混合戦略），
+`MyopicBestResponse`（相手の直前の行動への最適応答），
+`FictitiousPlay`（Brown, 1951．同時更新，2 人ゲーム．Shapley (1964) の例では収束せずに巡回する），
+`LogitChoice`（相手の直近の行動か経験頻度へのロジット応答），
+`RothErev`（Erev & Roth (1998) の 3 パラメータの強化学習．忘却 `φ` と試行 `ε` を持つ），
+`Automaton`（ALLC，ALLD，GRIM，TFT，WSLS — Nowak & Sigmund, 1993 — と寛容な TFT）です．
+学習の計算は `socsim_games::learn` にあります（[学習則と決定の粒度](../games.ja.md#学習則と決定の粒度) を参照）．
+
+決定の粒度が `PerStep` より細かいとき，`decide` は $(t, i)$ ごとではなく決定の単位ごと —
+`PerAgentRole` では $(t, i, \text{role})$，`PerEncounter` では $(t, i, \text{encounter})$ — に 1 回呼ばれます．
+学習の更新は，どの粒度でも，対戦ごとの呼び出し（求める規則だけ）とその後のステップごとの呼び出しからなります．
+
+$$s_i \leftarrow \text{learn}^{\text{step}}_{k(i)}\Big(\text{learn}^{\text{enc}}_{k(i)}\big(\cdots \text{learn}^{\text{enc}}_{k(i)}(s_i,\ o_{i,1}^t) \cdots,\ o_{i,m}^t\big)\Big)$$
+
+ここで $o_{i,1}^t, \dots, o_{i,m}^t$ は `EncounterId` の順に並べたエージェント $i$ の対戦の結果，
+$\text{learn}^{\text{enc}}$ は `learn_encounter`，$\text{learn}^{\text{step}}$ は `learn_step` です．
+
 規則は `socsim_marl::Policy` とは別物です．`DecisionRule` は `G::Action` 上のゲーム層の戦略で状態を World に置くものであり，
 観測ベクトル上のニューラルな方策ではありません．
 
@@ -42,8 +62,8 @@ $$a_i^t = \text{decide}_{k(i)}\big(s_i,\ \text{view}_i^t;\ \text{rng}\big), \qqu
 
 ![game_decide data flow](../assets/mech-game-decide.svg)
 
-Decision は，`game_match` が書いた席，各エージェントの規則の種類と状態，保持行動，履歴，`X` を読み，
-選んだ行動を席に，保持行動と規則の状態を World に書きます（`decide` は状態を変更してよい）．
+Decision は，`game_match` が書いた席，各エージェントの規則の種類と状態，保持行動，履歴，（有効なら）対の履歴，`X` を読み，
+選んだ行動を席に，保持行動（`PerStep` のときだけ）と規則の状態を World に書きます（`decide` は状態を変更してよい）．
 Reward は，`game_play` が書いたそのステップの記録と対戦の結果を読み，規則の状態を更新します．
 
 ## 4. 6フェーズループにおける位置
@@ -52,9 +72,14 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
 
 - **Decision** — 同じフェーズで `game_match` の後（登録順）に動くので，対戦ができています．
   エージェントはスケジューラーの活性化の順（`ctx.agent_order`）に訪れ，席のないエージェントと LLM の種類のエージェントは飛ばします．
+  1 人のエージェントの中では，決定は決定の単位の順に行います．1 ステップに 1 回，役割の昇順に役割ごとに 1 回（`PerAgentRole`），
+  `EncounterId` の順に席ごとに 1 回（`PerEncounter`）のいずれかです．
   `assemble_with_llm` では，同じフェーズで次に `game_llm_decide` が動き，LLM のエージェントの席を埋めます．
-- **Reward** — `game_play`（Interaction）が利得とステップ履歴を書いた後なので，`learn_step` はステップ全体を見ます．
+- **Reward** — `game_play`（Interaction）が利得とステップ履歴を書いた後なので，学習はステップ全体を見ます．
   エージェントは `AgentId` の昇順に訪れ，`Held` のエージェントと LLM の種類のエージェントは飛ばします（`game_llm_decide` の Reward はこの後に動く）．
+  規則が `needs_encounter_learning() == true` を返すエージェントについては，そのエージェントの対戦ごとに `EncounterId` の順で `learn_encounter` を呼び，
+  その後で `learn_step` を呼びます．組込みの学習則は，`PerEncounter` では `learn_encounter` で相手ごとの状態を，
+  ほかの粒度では `learn_step` で全体で 1 つの状態を更新します．
 
 ## 5. 状態の読み書きコントラクト
 
@@ -62,9 +87,10 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
 |---|:--:|:--:|---|
 | `PlayArena.seats` | ✓ | | Decision：行動するエージェントとその役割． |
 | `PlayArena.actions` | | ✓ | Decision：各席の検査済みの行動． |
-| `GameWorld.held` | ✓ | ✓ | Decision：`Held` のエージェントはこれを出す．規則で動くエージェントの行動はこれを置き換える． |
+| `GameWorld.held` | ✓ | ✓ | Decision：`Held` のエージェントはこれをすべての席に出す．`PerStep` では規則で動くエージェントの行動がこれを置き換える（`PerAgentRole` / `PerEncounter` では置き換えない）． |
 | `PolicyTable`（`kinds`，`slot`，`kind_of`，`states`） | ✓ | ✓ | `decide` と `learn_step` はエージェントの状態への `&mut` を受け取る． |
 | ステップ履歴，`game`，`x`，`ids`，`clock.t` | ✓ | | `DecisionContext` / `LearnContext` を通して． |
+| 対の履歴 | ✓ | | Decision：`DecisionContext::pair_history`（現在の相手）と `omniscient()` を通して．規則が `needs_pair_history() == true` を返すときだけ存在する．書くのは `game_play`． |
 | `PlayArena.payoffs` / `credit` | ✓ | | Reward：`LearnContext::outcomes()` を通して． |
 | Recorder のイベント `game.invalid_action` | | ✓ | `OnInvalidAction::Fallback` のときだけ． |
 
@@ -72,7 +98,11 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
 
 - **上流：** `game_match`（Decision）が対戦を書いていること．Reward の前に `game_play`（Interaction）が利得とステップ履歴を書いていること．
 - **下流：** `game_play` はすべての席に行動があることを要求します．LLM のエージェントの席は，`game_decide` の後に登録される `game_llm_decide` が埋めます．
-- **情報構造：** 既定のビューで見えるのは，自分の対戦の相手だけです（それ以外の相手に対して `opponent_history` は `None` を返す）．
+- **決定の粒度と Matching：** `PerStep` では，各エージェントが 1 ステップに持つ役割は 1 つでなければなりません．
+  `RoundRobin` は，エージェントを 2 つの役割に着けることになる `PerStep` を `assemble` で拒否します．
+  それ以外の場合は `game_decide` が `RuleError::AmbiguousRole` でステップを止めます（`Held` のエージェントも対象）．
+  同じ粒度が `game_match`（`MatchContext::decision_scope` を通して）と `game_play` にも渡されます．
+- **情報構造：** 既定のビューで見えるのは，自分の対戦の相手だけです（それ以外の相手に対して `opponent_history` と `pair_history` は `None` を返す）．
   World 全体は `omniscient()` からだけ読めます．Decision の間に `omniscient()` から読む `held` は，活性化の順序に依存することがあります．
 
 ## 7. パラメータ
@@ -81,6 +111,7 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
 |---|---|---|---|
 | `rules: RuleBook<G, X>` | — | structural | `assemble` に渡す．種類は名前で登録する． |
 | `opts.on_invalid_action` | `OnInvalidAction::Stop` | policy | `Stop`：不正な行動でステップが失敗する．`Fallback(map)`：種類ごとの代替行動に差し替え，`game.invalid_action` を記録する． |
+| `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep` / `PerAgentRole` / `PerEncounter`．`game_match` と `game_play` にも渡される．LLM による決定は `PerStep` だけに対応する． |
 
 `Fallback` の表が対象にするのはこの Mechanism の種類だけです．LLM の種類は書きません（そのフォールバックは LLM の規則の `RetryProtocol` が持つ）．
 `Fallback` のとき，`assemble` は使われているすべての規則の種類に代替行動があることを要求し，各代替行動を全役割で `check_action` により検査します．
@@ -113,10 +144,18 @@ let sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules, NormalFormOutco
     .build();
 ```
 
+各エージェントが相手ごとに学習の状態を持つ総当たりにするには，Matching に `RoundRobin::new()` を，
+オプションに `PlayOptions::new().decision_scope(DecisionScope::PerEncounter)` を渡します．
+そのまま動く総当たり戦は [例](../games.ja.md#例総当たりの繰り返し囚人のジレンマ)（`examples/ipd_tournament.rs`）にあります．
+
 ## 9. 決定論性と RNG
 
 `decide` はエンジンのステップの RNG（`ctx.rng`，`derive_seed(seed, &[1])` から）を受け取ります．
 `UniformRandom` はこれを引き，`Fixed` と `TitForTat` は引きません．
+ストリームは活性化の順に，1 人のエージェントの中では決定の単位の順に消費されます．
+`Mixed`，`LogitChoice`，`RothErev`，GTFT（相手の裏切りの後で `0 < generosity < 1` のとき）は決定ごとに一様な `f64` を 1 回引き，
+行動の番号順に累積確率をたどります．同点の乱択（`FictitiousPlay`，`MyopicBestResponse`）は同点の行動について `gen_range` を 1 回引きます．
+`learn_encounter` と `learn_step` は RNG を受け取りません．
 規則の状態の初期化（`build_world` の中）は `derive_seed(seed, &[3, agent, generation])` を使い，
 `derive_seed(seed, &[2])` は World の `decision_root` として保存されます．どちらのラベルも予約済みです．
 学習は `AgentId` の昇順，決定はスケジューラーの順で行うので，同じ seed なら実行は再現されます．
@@ -128,6 +167,13 @@ let sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules, NormalFormOutco
 100 ラウンドの得点は 99 と 104 です（`examples/ipd_pair.rs`）．
 範囲外の行動を返す規則は，`Stop` ではステップを止め，`Fallback` では（発生ごとに `game.invalid_action` を 1 件記録して）差し替えられます．
 
+ALLC，ALLD，TFT，GRIM，WSLS のオートマトンを `PerEncounter` で 200 ラウンド総当たりさせると（`examples/ipd_tournament.rs`），
+合計は 1800，2008，1999，1999，1900 です．TFT は ALLD に最初のラウンドだけ負け（199 対 204），ほかの相手とは協力し続けます．
+
 ## 11. 参考文献
 
 - Axelrod, R. (1984). *The Evolution of Cooperation*. Basic Books.
+- Brown, G. W. (1951). Iterative solution of games by fictitious play. In T. C. Koopmans (Ed.), *Activity Analysis of Production and Allocation* (pp. 374–376). Wiley.
+- Erev, I., & Roth, A. E. (1998). Predicting how people play games: Reinforcement learning in experimental games with unique, mixed strategy equilibria. *American Economic Review*, 88(4), 848–881.
+- Nowak, M., & Sigmund, K. (1993). A strategy of win-stay, lose-shift that outperforms tit-for-tat in the Prisoner's Dilemma game. *Nature*, 364, 56–58.
+- Shapley, L. S. (1964). Some topics in two-person games. In M. Dresher, L. S. Shapley, & A. W. Tucker (Eds.), *Advances in Game Theory* (pp. 1–28). Princeton University Press.

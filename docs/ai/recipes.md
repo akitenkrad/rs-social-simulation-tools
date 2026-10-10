@@ -1221,6 +1221,17 @@ rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
   it and record a `game.invalid_action` event.
 - Rules see only their own encounter's opponents by default; reading
   `ctx.omniscient()` deliberately gives up that information structure.
+- **Several encounters per agent (tournaments).** With `RoundRobin::new()`
+  every pair plays every step, so with three or more agents (or
+  `both_orders(true)`) an agent sits in several encounters, in both roles. The
+  default `DecisionScope::PerStep` (one decision per agent per step) is then
+  rejected by `assemble` (`GameError::InvalidMatching`); pass
+  `PlayOptions::new().decision_scope(DecisionScope::PerEncounter)` (one
+  decision per seat; the built-in learning rules and `Automaton` then keep one
+  state per opponent) or `PerAgentRole`. Under those scopes `held` is not
+  updated and `StepRecord::action` is `None`. Worked example:
+  `crates/socsim-games/examples/ipd_tournament.rs`; details in
+  [`docs/games.md` § Learning rules and decision scope](../games.md#learning-rules-and-decision-scope).
 - See also [`docs/games.md`](../games.md) and the `game_match` /
   `game_decide` / `game_play` pages under `docs/mechanisms/`.
 - LLM-driven players: see [Recipe 8b — LLM agents in a normal-form game](#recipe-8b--llm-agents-in-a-normal-form-game-socsim-games-feature-llm).
