@@ -972,6 +972,145 @@ JSONL schema (one object per line):
 
 ---
 
+## Recipe 10 — Normal-form game simulation
+
+**When to use.** Agents repeatedly play a stage game (prisoner's dilemma,
+coordination, zero-sum, …): each step they are seated into encounters, choose
+actions with per-agent decision rules, receive payoffs, and learn. Use
+`socsim-games` instead of hand-writing a world + mechanisms.
+
+**Dependencies.**
+
+```toml
+socsim-games  = { git = "...", branch = "main", package = "socsim-games", features = ["engine"] }
+socsim-core   = { git = "...", branch = "main", package = "socsim-core" }
+socsim-engine = { git = "...", branch = "main", package = "socsim-engine" }
+serde = { version = "1", features = ["derive"] }   # only for a custom X / PolicyState
+```
+
+**Code — built-in rules, `X = ()`.** Grounded in
+`crates/socsim-games/examples/ipd_pair.rs`:
+
+```rust
+use std::sync::Arc;
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, Fixed, FixedPlayers,
+    InitialActions, MatrixGame, NormalFormOutcome, PlayOptions, RuleBook, TitForTat,
+};
+
+fn main() {
+    // action 0 = C, 1 = D; a = row player, b = column player
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    ).unwrap();
+
+    let mut rules = RuleBook::new();
+    rules.register("tit_for_tat", Arc::new(TitForTat::new(0))).unwrap();
+    rules.register("fixed_defect", Arc::new(Fixed::new(1))).unwrap();
+
+    let seed = 1;
+    let rounds = 100;
+    let world = build_world(
+        game, 2, (), InitialActions::Same(0), &rules,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("tit_for_tat".into()), count: 1 },
+            AssignGroup { kind: AssignKind::Rule("fixed_defect".into()), count: 1 },
+        ]),
+        rounds,          // history_len (ring buffer per agent)
+        rounds as u64,   // t_max
+        seed,
+    ).unwrap();
+
+    let mut sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules,
+                           NormalFormOutcome, PlayOptions::new(), seed)
+        .unwrap()         // -> SimulationBuilder; add .scheduler/.recorder/.add_mechanism here
+        .build();
+
+    let mut scores = [0.0, 0.0];
+    for _ in 0..rounds {
+        sim.step().unwrap();
+        for (s, p) in scores.iter_mut().zip(sim.world().payoffs()) { *s += p; } // per-step payoffs
+    }
+    assert_eq!(scores, [99.0, 104.0]);
+}
+```
+
+**Code — a custom rule with model state in `X`.** Grounded in
+`crates/socsim-games/tests/experiment_state.rs`:
+
+```rust
+use serde::{Deserialize, Serialize};
+use socsim_core::{AgentId, SimRng};
+use socsim_games::{
+    BuiltinPolicyState, DecisionContext, DecisionRule, ExperimentState, MatrixGame,
+    RuleError, RuleInitContext, Slot, TftState,
+};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ReputationState { reputation: Vec<f64> }          // model state lives in X
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+enum MyPolicyState { Builtin(BuiltinPolicyState), Discriminator { threshold: f64 } }
+
+impl ExperimentState for ReputationState {
+    type PolicyState = MyPolicyState;
+    type View<'a> = &'a [f64];                           // what rules may see of X
+    fn view_for(&self, _me: AgentId) -> Self::View<'_> { &self.reputation }
+}
+
+// Needed only if TitForTat is also registered with this X.
+impl Slot<TftState> for MyPolicyState {
+    fn slot(&self) -> Option<&TftState> { match self { Self::Builtin(s) => s.slot(), _ => None } }
+    fn slot_mut(&mut self) -> Option<&mut TftState> { match self { Self::Builtin(s) => s.slot_mut(), _ => None } }
+    fn from_slot(v: TftState) -> Self { Self::Builtin(<BuiltinPolicyState as Slot<TftState>>::from_slot(v)) }
+}
+
+struct Discriminator;
+impl DecisionRule<MatrixGame, ReputationState> for Discriminator {
+    fn name(&self) -> &str { "discriminator" }
+    fn init_state(&self, _: &RuleInitContext, _: &MatrixGame) -> Result<MyPolicyState, RuleError> {
+        Ok(MyPolicyState::Discriminator { threshold: 0.5 })
+    }
+    fn decide(&self, state: &mut MyPolicyState,
+              ctx: &DecisionContext<'_, MatrixGame, ReputationState>,
+              _rng: &mut SimRng) -> Result<usize, RuleError> {
+        let MyPolicyState::Discriminator { threshold } = state else {
+            return Err(RuleError::MissingSlot("Discriminator"));
+        };
+        let opponent = ctx.opponents()[0];                // same-encounter opponent only
+        Ok(usize::from(ctx.view()[opponent.0 as usize] < *threshold))
+    }
+}
+// Update X from your own Mechanism<GameWorld<MatrixGame, ReputationState>>
+// (e.g. in Reward) via ctx.world.x_mut(), added to the builder after assemble().
+```
+
+**Snapshot / resume.** `Simulation::snapshot()` captures the whole
+`GameWorld` (rule states included) plus the RNG position; rebuild with the same
+rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
+
+**Gotchas.**
+- Pass the **same `seed`** to `build_world` and `assemble`. Streams: `[0]` world
+  init (`Assignment::Shuffled`), `[1]` engine, `[2]` `decision_root`, `[3, agent,
+  generation]` rule-state init — use `[4]+` for your own.
+- Keep rules, matchings and outcome rules stateless (`&self`); per-agent memory
+  goes in `X::PolicyState`, everything else in `X`. Custom matching state goes in
+  `X` too.
+- Only **two-role** games are assembled (`GameError::UnsupportedRoles`), and only
+  `Credit::All` encounters are played.
+- `world().payoffs()` / `n_played()` are **per step** (reset in PreStep);
+  `PayoffAggregation::Mean` divides by `n_played`.
+- A rule returning an invalid action stops the step by default; use
+  `OnInvalidAction::Fallback(map)` (one entry per rule kind in use) to replace
+  it and record a `game.invalid_action` event.
+- Rules see only their own encounter's opponents by default; reading
+  `ctx.omniscient()` deliberately gives up that information structure.
+- See also [`docs/games.md`](../games.md) and the `game_match` /
+  `game_decide` / `game_play` pages under `docs/mechanisms/`.
+
+---
+
 ## Choosing library mode vs CLI mode
 
 | | **Library mode** | **CLI mode** (`socsim` binary) |

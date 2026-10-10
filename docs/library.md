@@ -310,6 +310,20 @@ let mut sim = SimulationBuilder::new(world)
 
 Reserve further labels (`&[2]`, `&[3]`, …) for any additional independent streams your model owns. The `cellular_automata` example follows exactly this convention.
 
+**Labels reserved by `socsim-games`.** A game simulation built with
+[`socsim_games::build_world` / `assemble`](games.md) uses the convention above
+and additionally **reserves `&[2]` and `&[3]`**, all derived from the one `seed`
+passed to both functions:
+
+| Label | Stream in a game simulation |
+|---|---|
+| `derive_seed(seed, &[0])` | world initialisation (shuffling the rule assignment) |
+| `derive_seed(seed, &[1])` | the engine (passed to `SimulationBuilder::seed` by `assemble`) |
+| `derive_seed(seed, &[2])` | `decision_root`, stored in the game world for decision-time streams |
+| `derive_seed(seed, &[3, agent, generation])` | rule-state initialisation (`RuleInitContext::init_seed`) |
+
+Use `&[4]` and above for your own streams in a game model.
+
 To verify determinism in your own code, run two simulations with the same seed and compare outputs — the `custom_mechanism.rs` example does exactly this.
 
 ---

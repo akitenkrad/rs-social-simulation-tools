@@ -1,6 +1,6 @@
 # socsim Capability Map (for AI coding agents)
 
-`socsim` (`rs-social-simulation-tools`) is a composable, **seed-deterministic** agent-based social-simulation platform in Rust, organised as an **eighteen-crate** workspace. This page is the curated **capability map** for an AI agent building an implementation — usually an academic-paper replication — **on top of** socsim consumed as a git dependency.
+`socsim` (`rs-social-simulation-tools`) is a composable, **seed-deterministic** agent-based social-simulation platform in Rust, organised as a **nineteen-crate** workspace. This page is the curated **capability map** for an AI agent building an implementation — usually an academic-paper replication — **on top of** socsim consumed as a git dependency.
 
 Three sources, three jobs:
 
@@ -76,6 +76,7 @@ let final_state = sim.world();
 | Reusable metrics (stats / distribution / agreement) | `socsim-metrics` | `socsim_metrics::stats::{mean, variance, gini, …}`, `::distribution::{kl_divergence, chi_square_homogeneity, …}`, `::agreement::{cohen_kappa, tetrachoric, …}`, `::opinion::{MetricsMechanism, …}` (feature `core`) | Default build = zero socsim deps. Keep paper-specific metrics local. |
 | Output dirs + CSV/JSON + `latest` symlink | `socsim-results` | `socsim_results::{timestamp, create_run_dir, refresh_latest_symlink, write_csv, write_json, WriteError}` | Leaf crate; the `results/<ts>/` convention without a `Recorder`. |
 | Metric / event logging (Recorders) | `socsim-log` | `socsim_log::{InMemoryRecorder, JsonlRecorder, CsvRecorder}` | Only needed when you use a `Recorder`; library models can skip it (`NullRecorder` default). |
+| Normal-form game simulation (stage game + decision rules + matching + payoffs) | `socsim-games` (features `core` / `engine`) | `socsim_games::{MatrixGame, StageGame, NormalFormGame, FiniteGame, DecisionRule, RuleBook, Fixed, UniformRandom, TitForTat, OutcomeRule, NormalFormOutcome, Matching, FixedPlayers, ExperimentState, Slot, GameWorld, build_world, assemble, PlayOptions, OnInvalidAction, PayoffAggregation}` | Library-only; default build = zero socsim deps; no `socsim-llm`. Rule state lives in the world → exact snapshot resume. |
 | Learnable Decision-phase policies (MARL) | `socsim-marl` | `socsim_marl::{Policy, DiscretePolicyNet, NetConfig, PolicyMechanism, MarlTrainer, TrainConfig, ObsEncoder, ActionApplier, RewardFn, TrajectoryBuffer}` | Pulls in `burn`; library-only. |
 | Bundled CLI packs (HR / opinion / silence) | `socsim-packs` + `socsim-config` | `socsim_packs::hr_lifecycle::{HrWorld, HrLifecyclePack}`; `socsim_config::{ModulePack, Registry, Params, Scenario}` | CLI-mode building blocks; usable as a library too. |
 | Run / sweep / summarise via CLI | `socsim-cli` (binary `socsim`) | `socsim run|sweep|summarize|validate|list|init|datasets` | World-polymorphic; packs selected by name. |
@@ -294,6 +295,27 @@ let final_state = sim.world();
   - `PolicyMechanism::collecting(policy: Rc<RefCell<P>>, encoder, applier, buffer)` / `::inference(policy, encoder, applier)` (frozen, greedy, RNG-free).
   - `MarlTrainer::new(policy)` → `train(&TrainConfig, env_factory, &dyn RewardFn<W>) -> Result<Vec<EpisodeStat>>`; `TrainConfig { episodes: usize, seed: u64 }`; `TrajectoryBuffer`.
 
+#### `socsim-games`
+- **Purpose:** normal-form (strategic-form) game simulations: stage games, per-agent decision rules, matching protocols, outcome (payoff) rules, and an experiment-state slot `X`, assembled into a socsim `Simulation`.
+- **Engine-free?** Default build: yes — **zero `socsim-*` deps** (only the game traits + `MatrixGame`). Feature `core` → `socsim-core`; feature `engine` → `socsim-core` + `socsim-engine`. **Never** depends on `socsim-llm`, `socsim-config`, or `socsim-runner`. Library-only (no `ModulePack`, not in the binary).
+- **Git dep:**
+  ```toml
+  socsim-games = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-games", features = ["engine"] }
+  ```
+- **Feature flags:** default = none (game traits only) · `core` (world, rules, outcome, matching, views, `build_world`; adds `serde_json`) · `engine` (implies `core`; adds `assemble`).
+- **Key public API** (`crates/socsim-games/src/…`):
+  - Games: `trait StageGame { type Action; fn n_roles(&self) -> usize; fn check_action(&self, role, &Action) -> Result<(), ActionError>; }`; `trait NormalFormGame: StageGame { fn payoff(&self, role, profile: &[Action]) -> f64; fn payoffs_into(&self, profile, out: &mut [f64]); }`; `trait FiniteGame: NormalFormGame<Action = usize> { fn n_actions(&self, role) -> usize; fn action_label(..) -> Cow<str>; fn is_symmetric(&self) -> bool; }`. `MatrixGame::{new(n_actions, payoffs), bimatrix(&a, &b), zero_sum(&a), with_labels(labels)}` → `Result<_, MatrixError>` (`Shape` / `TooLarge` / `NonFinite` / `Labels`).
+  - Rules: `trait DecisionRule<G, X> { fn name(&self) -> &str; fn init_state(&self, &RuleInitContext, &G) -> Result<X::PolicyState, RuleError>; fn decide(&self, state: &mut X::PolicyState, &DecisionContext<G, X>, &mut SimRng) -> Result<G::Action, RuleError>; fn learn_step(&self, state, &LearnContext<G, X>) -> Result<(), RuleError> /* default no-op */; }`. Built-ins: `Fixed::new(action)` (needs `Slot<Stateless>`), `UniformRandom` (`FiniteGame`, `Slot<Stateless>`), `TitForTat::new(coop)` (`FiniteGame`, 2 roles × 2 actions, `Slot<TftState>`). `RuleBook::new()` + `register(kind: &str, Arc<dyn DecisionRule<G, X>>)`; kind ids follow sorted kind-name order. `RuleInitContext { agent, kind, generation, init_seed }`.
+  - Experiment state: `trait ExperimentState { type PolicyState: Clone + Send + Sync + Debug; type View<'a>; fn view_for(&self, me: AgentId) -> Self::View<'_>; }`; `impl ExperimentState for ()` (`PolicyState = BuiltinPolicyState`, `View = ()`). `trait Slot<T> { slot, slot_mut, from_slot }`; `BuiltinPolicyState::{Stateless, TitForTat}` implements `Slot<Stateless>` + `Slot<TftState>`.
+  - Outcome: `trait OutcomeRule<G, X> { fn name(&self) -> &str; fn outcome(&self, &OutcomeContext<G, X>, EncounterRef, actions: &[G::Action], payoffs: &mut [f64]) -> socsim_core::Result<()>; }`; built-in `NormalFormOutcome` (`G: NormalFormGame`). `OutcomeContext::{t, game, x, held(agent), topology}`.
+  - Matching: `trait Matching<G, X> { fn name; fn check(&self, &MatchContext) -> Result<(), GameError>; fn init_state(..) -> MatchingState /* None */; fn encounters_into(&self, &MatchContext, &mut MatchingState, &mut SimRng, &mut ArenaWriter<G::Action>) -> socsim_core::Result<()>; }`; `ArenaWriter::push(&[AgentId], Credit) -> Result<EncounterId>`; built-in `FixedPlayers::pairs(&[(u64, u64)])` / `FixedPlayers::new(Vec<[AgentId; 2]>)`.
+  - Views: `DecisionContext::{t, me, unit, role, encounter, opponents, my_history, opponent_history(id) /* None unless id is a current opponent */, game, view, omniscient}`; `LearnContext::{t, me, record, my_history, outcomes, game, view, omniscient}`; `OmniscientContext::{ids, held(agent), history(agent), x}`.
+  - World: `GameWorld<G, X = ()>` (`WorldState`; serde when `G`, `G::Action`, `X`, `X::PolicyState` are) — accessors `game()`, `x()`, `x_mut()`, `held()`, `policies()` (`PolicyTable::{state(agent), kind(agent)}`), `plays()` (`PlayArena`), `payoffs()` / `n_played()` (**this step only**), `history(agent)` (`HistoryView<StepRecord { action: Option<A>, payoff, n_played }>`).
+  - Assembly: `build_world(game, n_agents, x, InitialActions::{Same(a), PerAgent(vec)}, &rules, &Assignment::{Ordered, Shuffled}(vec![AssignGroup { kind: AssignKind::{Rule(String), Held}, count }]), history_len, t_max, seed) -> Result<GameWorld<G, X>, GameError>`; `assemble(world, matching, rules, outcome, PlayOptions, seed) -> Result<SimulationBuilder<GameWorld<G, X>>, GameError>` (feature `engine`; sets `.seed(derive_seed(seed, &[1]))`, registers `game_match`, `game_decide`, `game_play` in that order). `PlayOptions::new().payoff_aggregation(PayoffAggregation::{Sum, Mean}).on_invalid_action(OnInvalidAction::{Stop, Fallback(BTreeMap<String, A>)})`.
+  - Mechanisms (registered by `assemble`): `game_match` (PreStep: clear arena/`payoff`/`n_played`; Decision: `Matching::encounters_into`), `game_decide` = `RuleDriver` (Decision: `decide` + `check_action` per seated agent in activation order; Reward: `learn_step` per rule-driven agent in sorted `AgentId` order), `game_play` (Interaction: all seats filled → `OutcomeRule` → `PayoffAggregation` → append `StepRecord` per agent). Event `game.invalid_action` (`{agent, kind, role, action}`) under `Fallback`.
+  - Errors: `GameError::{Rule, Action, Matrix, AgentCount, InvalidHistoryLength, UnsupportedRoles, InvalidMatching}`; `RuleError::{MissingSlot, UnknownKind, DuplicateKind, InvalidAction, Unsupported}`.
+- **Limits today:** encounters must have exactly **two roles** (`assemble` → `UnsupportedRoles`); only `Credit::All` is played; `MatchingState` has only `None`; `DecisionUnit::Step` only. Example: `crates/socsim-games/examples/ipd_pair.rs`.
+
 ### Library-only leaves (engine-free helpers)
 
 #### `socsim-results`
@@ -388,7 +410,7 @@ let final_state = sim.world();
 
 **Determinism**
 - **All randomness via `SimRng`** seeded from the run seed. Never introduce an ad-hoc RNG (no `Math.random`-style global, no `rand::thread_rng()` in model code). Derive independent streams with `SimRng::derive(&[…])` / `derive_seed(root, &[…])`.
-- **RNG stream convention:** `derive_seed(root, &[0])` = world/network/agent init, `derive_seed(root, &[1])` = the engine/scheduler (passed to `SimulationBuilder::seed`). Reserve `&[2]`, `&[3]`, … for further independent streams.
+- **RNG stream convention:** `derive_seed(root, &[0])` = world/network/agent init, `derive_seed(root, &[1])` = the engine/scheduler (passed to `SimulationBuilder::seed`). Reserve `&[2]`, `&[3]`, … for further independent streams. **In a `socsim-games` simulation `&[2]` (`decision_root`) and `&[3, agent, generation]` (rule-state init) are taken** — start your own labels at `&[4]`.
 - **Sorted `AgentId`.** `WorldState::agent_ids` should return IDs in sorted order; never let hash-map iteration order influence results.
 - **LLM nondeterminism stays in `socsim-llm`.** A warm `PromptCache` + `LlmConfig::deterministic()` (temperature 0) is what makes an LLM run pseudo-deterministic on top of the seed-deterministic core. Keep model calls out of every phase except `Decision`.
 
@@ -413,6 +435,15 @@ let final_state = sim.world();
 - Token-level logprobs come from `complete_with_logprobs` (default impl returns `LlmError::Unsupported`; live backends override it).
 - Prefer the harness (`build_live_client_from_settings` / `wrap_client` / `llm_config`) over a per-model `llm.rs`.
 
+**`socsim-games` specifics**
+- **State needed to resume lives in the world; mechanisms are stateless.** Every agent's rule state is in `GameWorld`'s `PolicyTable`, the matching state in `MatchingState`, and everything model-specific in `X`. `game_match` / `game_decide` / `game_play`, the `RuleBook`, the `Matching` and the `OutcomeRule` are code re-supplied on rebuild. Never keep mutable per-run data in a rule, matching or outcome struct (`decide`/`learn_step` take `&self` for this reason) — it would not be in the snapshot and a resumed run would diverge. Keep `X` and `PolicyState` serde-restorable (no clients, handles, caches).
+- **RNG streams `[2]` and `[3]` are reserved** (`derive_seed(seed, &[2])` = `decision_root`, `derive_seed(seed, &[3, agent, generation])` = `RuleInitContext::init_seed`), on top of the standard `[0]` (world init, `Assignment::Shuffled`) and `[1]` (engine; `decide` and `Matching` draw from the step RNG). Pass the same `seed` to `build_world` and `assemble`.
+- **`DecisionRule` ≠ `socsim_marl::Policy`.** A `DecisionRule<G, X>` is a game-layer strategy over `G::Action` whose per-agent state is stored in the world and which is driven by `game_decide`; `socsim_marl::Policy` is a neural policy over an `f32` observation vector driven by `PolicyMechanism`. Do not wrap one as the other implicitly.
+- **The core does not depend on `socsim-llm`** (nor `socsim-config` / `socsim-runner`). Do not add those dependencies to `socsim-games`' `core` / `engine` features.
+- **Information structure:** a rule's default view is limited to opponents in **its own encounter** (`opponents()`, `opponent_history(id)` → `None` for anyone else) plus `X::view_for(me)`. The whole world is readable **only** through `ctx.omniscient()`, which drops the guarantee (and, during Decision, `held` may reflect activation order). Put any agent-visible extra information behind `view_for`.
+- **User-defined matching state goes in `X`.** `MatchingState` is a closed enum (`None`); a custom `Matching` reads its bookkeeping from `ctx.x()` and your own mechanism updates it via `GameWorld::x_mut()`.
+- Mechanisms you add after `assemble` run after the game mechanisms within each phase; a Reward-phase mechanism sees this step's `payoffs()`. `payoffs()` / `n_played()` are reset every PreStep — accumulate across steps yourself.
+
 **`socsim-datasets` specifics**
 - The crate **never vendors data**. The raw ANES Time-Series microdata is license-gated (needs a free electionstudies.org account + data-use agreement), so it is `Source::Manual` and is not auto-downloaded. CES 2022 Common Content is CC0 1.0 (public domain) on the Harvard Dataverse, so it is `Source::Dataverse` and **is** auto-downloaded. `fetch()` downloads only non-`Manual` sources into a consuming repo's gitignored `data/`.
 
@@ -422,8 +453,8 @@ let final_state = sim.world();
 
 - **`docs/ai/recipes.md`** — copy-paste `Cargo.toml` + `main.rs` templates per replication shape (engine-free LLM-social, spatial/ABM library mode, survey + reproduce).
 - **`cargo doc -p <crate> --open`** — the full, authoritative API for any crate above.
-- **Human docs** (prose + rationale + worked examples): the index in the repo `README.md`, then `docs/architecture.md`, `docs/library.md`, `docs/design.md`, `docs/packs.md`, `docs/mechanisms.md`, `docs/cli.md`.
-- **Worked examples in-tree:** `crates/socsim-engine/examples/{engine_only,opinion_dynamics,cellular_automata,snapshot_resume}.rs`; `crates/socsim-packs/examples/hr_baseline.rs`.
+- **Human docs** (prose + rationale + worked examples): the index in the repo `README.md`, then `docs/architecture.md`, `docs/library.md`, `docs/design.md`, `docs/packs.md`, `docs/mechanisms.md`, `docs/cli.md`, `docs/games.md` (normal-form games).
+- **Worked examples in-tree:** `crates/socsim-engine/examples/{engine_only,opinion_dynamics,cellular_automata,snapshot_resume}.rs`; `crates/socsim-packs/examples/hr_baseline.rs`; `crates/socsim-games/examples/ipd_pair.rs` (`--features core,engine`).
 
 ---
 

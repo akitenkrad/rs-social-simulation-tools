@@ -1,6 +1,6 @@
-<svg width="100%" viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" role="img">
+<svg width="100%" viewBox="0 0 1000 680" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>socsim crate workspace dependency graph</title>
-<desc>The eighteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-packs use the green accent, while the library-only crates — socsim-marl (burn), socsim-mechanisms (depends on socsim-core only), socsim-llm, socsim-results, socsim-survey (engine-free survey recode), socsim-datasets (survey dataset schemas + registry + optional acquisition), socsim-reproduce (paper-anchor reproduction harness, depends on socsim-results), and socsim-metrics (feature-gated observation stats) — are drawn with dashed borders.</desc>
+<desc>The nineteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-packs use the green accent, while the library-only crates — socsim-marl (burn), socsim-mechanisms (depends on socsim-core only), socsim-llm, socsim-results, socsim-survey (engine-free survey recode), socsim-datasets (survey dataset schemas + registry + optional acquisition), socsim-reproduce (paper-anchor reproduction harness, depends on socsim-results), socsim-metrics (feature-gated observation stats), and socsim-games (normal-form games; depends on socsim-core and socsim-engine only, not on socsim-llm, socsim-config or socsim-runner) — are drawn with dashed borders.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -22,13 +22,13 @@
   </style>
 </defs>
 
-<rect x="3" y="3" width="994" height="614" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+<rect x="3" y="3" width="994" height="674" rx="20" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
 
-<text class="title" x="40" y="48" font-size="24" fill="#2C2C2A">Crate workspace — 18 crates, three layers</text>
+<text class="title" x="40" y="48" font-size="24" fill="#2C2C2A">Crate workspace — 19 crates, three layers</text>
 <text class="body"  x="40" y="74" font-size="13.5" fill="#6B6A64">A binary spine over a dependency-free foundation, beside an orthogonal band of optional / library-only crates.</text>
 
 <!-- ===== binary spine (left) ===== -->
-<rect x="38" y="96" width="560" height="492" rx="16" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.4"/>
+<rect x="38" y="96" width="560" height="552" rx="16" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.4"/>
 <text class="title" x="58" y="124" font-size="14" fill="#534AB7">Binary spine — composed into the socsim binary</text>
 
 <!-- cli -->
@@ -85,7 +85,7 @@
 <text class="body" x="150" y="420" font-size="9.5" fill="#534AB7">config→core</text>
 
 <!-- ===== orthogonal / optional band (right) ===== -->
-<rect x="618" y="96" width="346" height="492" rx="16" fill="#FBFAF6" stroke="#5F5E5A" stroke-width="1.2" stroke-dasharray="2 4"/>
+<rect x="618" y="96" width="346" height="552" rx="16" fill="#FBFAF6" stroke="#5F5E5A" stroke-width="1.2" stroke-dasharray="2 4"/>
 <text class="title" x="638" y="124" font-size="13.5" fill="#3C3B37">Orthogonal / optional band</text>
 
 <!-- spatial + net (green) -->
@@ -135,6 +135,12 @@
 <text class="body" x="654" y="571" font-size="10" fill="#6B6A64">stats · network/spatial adapters (→ core/net/grid)</text>
 <rect x="828" y="544" width="104" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
 <text class="body" x="880" y="558" font-size="9.5" fill="#3C3B37" text-anchor="middle">feature-gated</text>
+
+<rect x="638" y="586" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text class="mono" x="654" y="604" font-size="12.5" fill="#332E6E">socsim-games</text>
+<text class="body" x="654" y="619" font-size="10" fill="#6B6A64">normal-form games (→ core, engine)</text>
+<rect x="858" y="592" width="74" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
+<text class="body" x="895" y="606" font-size="9.5" fill="#3C3B37" text-anchor="middle">no LLM</text>
 
 <!-- hr-lifecycle -> net (green dep), grid -> spine (core) -->
 <g stroke="#0F6E56" stroke-width="1.3" fill="none">

@@ -310,6 +310,17 @@ let mut sim = SimulationBuilder::new(world)
 
 モデルが所有する追加の独立ストリームには，さらなるラベル（`&[2]`，`&[3]`，…）を割り当ててください．`cellular_automata` の例はまさにこの規約に従っています．
 
+**`socsim-games` が予約するラベル．** [`socsim_games::build_world` / `assemble`](games.ja.md) で組み立てるゲームのシミュレーションは，上の規約に従ったうえで **`&[2]` と `&[3]` を予約します**．いずれも両関数に渡す 1 つの `seed` から派生します．
+
+| ラベル | ゲームのシミュレーションでのストリーム |
+|---|---|
+| `derive_seed(seed, &[0])` | ワールド初期化（規則の割り当ての並べ替え） |
+| `derive_seed(seed, &[1])` | エンジン（`assemble` が `SimulationBuilder::seed` に渡す） |
+| `derive_seed(seed, &[2])` | `decision_root`．決定時のストリームのためにゲームの World に保存される |
+| `derive_seed(seed, &[3, agent, generation])` | 規則の状態の初期化（`RuleInitContext::init_seed`） |
+
+ゲームのモデルで独自のストリームを使うときは `&[4]` 以上を使ってください．
+
 自作のコードで決定論性を検証するには，同じシードで2つのシミュレーションを実行して出力を比較します — `custom_mechanism.rs` の例がまさにこれを行っています．
 
 ---

@@ -1,0 +1,79 @@
+<svg width="100%" viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>game_play mechanism data flow</title>
+<desc>Interaction mechanism from socsim-games. For every encounter in the PlayArena it checks that every seat holds an action, computes one payoff per role with the OutcomeRule (NormalFormOutcome evaluates the game's payoffs), adds each payoff to the seated agent's payoff and increments n_played, applies the PayoffAggregation (Sum or Mean), and appends one StepRecord (action, payoff, n_played) per agent to the step history. Deterministic; draws no randomness.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="754" height="324" rx="18" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<!-- phase strip: Interaction active -->
+<g class="body" font-size="11.5">
+  <rect x="40"  y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="94"  y="45" fill="#6B6A64" text-anchor="middle">PreStep</text>
+  <rect x="156" y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="210" y="45" fill="#6B6A64" text-anchor="middle">Environment</text>
+  <rect x="272" y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="326" y="45" fill="#6B6A64" text-anchor="middle">Decision</text>
+  <rect x="388" y="28" width="108" height="26" rx="7" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+  <text x="442" y="45" fill="#534AB7" text-anchor="middle" font-weight="700">Interaction</text>
+  <rect x="504" y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="558" y="45" fill="#6B6A64" text-anchor="middle">Reward</text>
+  <rect x="620" y="28" width="100" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="670" y="45" fill="#6B6A64" text-anchor="middle">PostStep</text>
+</g>
+
+<!-- input state -->
+<g>
+  <rect x="40" y="104" width="170" height="124" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
+  <text class="body" x="125" y="96" font-size="13" fill="#0F6E56" text-anchor="middle" font-weight="600">reads</text>
+  <text class="mono" x="56" y="132" font-size="12.5" fill="#0B5040">PlayArena</text>
+  <text class="mono" x="56" y="152" font-size="12.5" fill="#0B5040">  .seats · .credit</text>
+  <text class="mono" x="56" y="172" font-size="12.5" fill="#0B5040">  .actions (all Some)</text>
+  <text class="mono" x="56" y="196" font-size="12.5" fill="#0B5040">game · x · held</text>
+  <text class="body" x="56" y="218" font-size="11" fill="#3C7E6C">via OutcomeContext</text>
+</g>
+
+<!-- mechanism box -->
+<g>
+  <rect x="262" y="86" width="236" height="160" rx="14" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.6"/>
+  <text class="title" x="380" y="114" font-size="18" fill="#332E6E" text-anchor="middle">game_play</text>
+  <text class="body"  x="380" y="134" font-size="12" fill="#6B6A64" text-anchor="middle">payoffs · aggregation · history</text>
+  <line x1="282" y1="146" x2="478" y2="146" stroke="#C7C2E8" stroke-width="1"/>
+  <text class="mono" x="380" y="170" font-size="12" fill="#332E6E" text-anchor="middle">u = OutcomeRule(a^e)</text>
+  <text class="mono" x="380" y="192" font-size="12" fill="#332E6E" text-anchor="middle">payoff[i] += u_r(i)</text>
+  <text class="mono" x="380" y="212" font-size="12" fill="#332E6E" text-anchor="middle">n_played[i] += 1</text>
+  <text class="mono" x="380" y="234" font-size="12" fill="#332E6E" text-anchor="middle">Sum | Mean (÷ n_played)</text>
+</g>
+
+<!-- output state -->
+<g>
+  <rect x="550" y="104" width="170" height="124" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
+  <text class="body" x="635" y="96" font-size="13" fill="#0F6E56" text-anchor="middle" font-weight="600">writes</text>
+  <text class="mono" x="566" y="132" font-size="12.5" fill="#0B5040">PlayArena.payoffs</text>
+  <text class="mono" x="566" y="154" font-size="12.5" fill="#0B5040">payoff · n_played</text>
+  <text class="mono" x="566" y="176" font-size="12.5" fill="#0B5040">step history</text>
+  <text class="body" x="566" y="198" font-size="11" fill="#3C7E6C">one StepRecord per agent</text>
+  <text class="body" x="566" y="213" font-size="11" fill="#3C7E6C">(action, payoff, n_played)</text>
+</g>
+
+<!-- arrows -->
+<path d="M210 166 H259" stroke="#534AB7" stroke-width="1.6" marker-end="url(#hr)"/>
+<path d="M498 166 H547" stroke="#534AB7" stroke-width="1.6" marker-end="url(#hr)"/>
+
+<!-- footnote -->
+<text class="body" x="380" y="284" font-size="12" fill="#6B6A64" text-anchor="middle">Runs once per step over every encounter · no RNG · unfilled seat or non-All credit → error</text>
+<text class="body" x="380" y="304" font-size="11.5" fill="#9A988F" text-anchor="middle">NormalFormOutcome evaluates the stage game's payoffs; a custom OutcomeRule may also read X.</text>
+
+</svg>

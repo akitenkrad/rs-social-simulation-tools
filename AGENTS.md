@@ -63,7 +63,7 @@ socsim-llm  = { git = "https://github.com/akitenkrad/rs-social-simulation-tools"
 - **Phase semantics:** put logic in the phase that matches its role; do read-only
   recording in `PostStep`.
 
-## The 18 crates at a glance
+## The 19 crates at a glance
 
 Foundation: `socsim-core` (traits, `WorldState`, `Mechanism`, `Phase`, `AgentId`),
 `socsim-rng` (`SimRng`, `derive_seed`). Engine spine: `socsim-config`,
@@ -71,7 +71,9 @@ Foundation: `socsim-core` (traits, `WorldState`, `Mechanism`, `Phase`, `AgentId`
 `socsim-cli` (`socsim` binary). Orthogonal/optional: `socsim-net` (ER/WS/BA
 networks), `socsim-grid` (spatial), `socsim-packs` (bundled CLI packs),
 `socsim-mechanisms` (opinion/contagion/cultural/group catalog), `socsim-marl`
-(learnable policies), `socsim-llm` (LLM agents). Library-only data/IO:
+(learnable policies), `socsim-llm` (LLM agents), `socsim-games` (normal-form
+games: stage games, decision rules, matching, payoffs; features `core` /
+`engine`; no `socsim-llm`). Library-only data/IO:
 `socsim-results` (run dirs, CSV/JSON), `socsim-metrics` (stats/distribution/
 agreement), `socsim-survey` (config-driven recode engine), `socsim-datasets`
 (dataset schemas + registry + optional acquisition), `socsim-reproduce`
