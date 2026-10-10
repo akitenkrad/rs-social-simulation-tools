@@ -69,6 +69,7 @@ impl VoiceDecisionLlmMechanism {
             cache_path: Some(
                 p.get_str("cache_path", "runs/silence_cache.json").to_owned(),
             ),
+            think: None,
         };
         let client = build_live_client_from_settings(&settings).map_err(|e| {
             SocsimError::Mechanism(format!("failed to build live LLM client: {e}"))

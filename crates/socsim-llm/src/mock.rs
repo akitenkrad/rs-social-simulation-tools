@@ -1,4 +1,4 @@
-//! Network-free [`LlmClient`](crate::LlmClient) implementations for tests and
+//! Network-free [`LlmClient`] implementations for tests and
 //! offline development.
 
 use crate::client::{CallMetadata, LlmClient, LlmConfig, LlmError, LlmResponse};

@@ -361,6 +361,6 @@ mod tests {
         assert!(world
             .opinions()
             .iter()
-            .all(|&x| x < 0.15 || x > 0.85));
+            .all(|&x| !(0.15..=0.85).contains(&x)));
     }
 }

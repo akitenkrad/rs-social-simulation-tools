@@ -23,7 +23,7 @@ use crate::client::{
 /// A client picks **one** endpoint for its whole lifetime (a replication runs
 /// against a single endpoint), selected via [`OllamaClient::with_api`].  Both
 /// endpoints share identical `options` semantics (`temperature` / `seed` /
-/// `num_predict`) via [`OllamaClient::build_options`].
+/// `num_predict`) via the same internal `build_options` helper.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OllamaApi {
     /// The role-structured `/api/chat` endpoint (the default).
