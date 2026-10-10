@@ -33,6 +33,8 @@ pub struct TftState {
 pub enum BuiltinPolicyState {
     Stateless(Stateless),
     TitForTat(TftState),
+    #[cfg(feature = "llm")]
+    Llm(crate::llm::LlmConversation),
 }
 
 pub trait Slot<T> {
@@ -46,6 +48,8 @@ impl Slot<Stateless> for BuiltinPolicyState {
         match self {
             Self::Stateless(value) => Some(value),
             Self::TitForTat(_) => None,
+            #[cfg(feature = "llm")]
+            Self::Llm(_) => None,
         }
     }
 
@@ -53,6 +57,8 @@ impl Slot<Stateless> for BuiltinPolicyState {
         match self {
             Self::Stateless(value) => Some(value),
             Self::TitForTat(_) => None,
+            #[cfg(feature = "llm")]
+            Self::Llm(_) => None,
         }
     }
 
@@ -66,6 +72,8 @@ impl Slot<TftState> for BuiltinPolicyState {
         match self {
             Self::TitForTat(value) => Some(value),
             Self::Stateless(_) => None,
+            #[cfg(feature = "llm")]
+            Self::Llm(_) => None,
         }
     }
 
@@ -73,10 +81,34 @@ impl Slot<TftState> for BuiltinPolicyState {
         match self {
             Self::TitForTat(value) => Some(value),
             Self::Stateless(_) => None,
+            #[cfg(feature = "llm")]
+            Self::Llm(_) => None,
         }
     }
 
     fn from_slot(value: TftState) -> Self {
         Self::TitForTat(value)
+    }
+}
+
+#[cfg(feature = "llm")]
+#[diagnostic::do_not_recommend]
+impl Slot<crate::llm::LlmConversation> for BuiltinPolicyState {
+    fn slot(&self) -> Option<&crate::llm::LlmConversation> {
+        match self {
+            Self::Llm(value) => Some(value),
+            Self::Stateless(_) | Self::TitForTat(_) => None,
+        }
+    }
+
+    fn slot_mut(&mut self) -> Option<&mut crate::llm::LlmConversation> {
+        match self {
+            Self::Llm(value) => Some(value),
+            Self::Stateless(_) | Self::TitForTat(_) => None,
+        }
+    }
+
+    fn from_slot(value: crate::llm::LlmConversation) -> Self {
+        Self::Llm(value)
     }
 }

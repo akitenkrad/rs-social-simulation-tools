@@ -247,3 +247,27 @@ fn builtin_rules_do_not_call_omniscient_context() {
         "built-in rules must stay inside the default information view"
     );
 }
+
+#[test]
+fn rule_and_llm_source_trees_do_not_call_omniscient_context() {
+    fn append_rust_sources(path: &std::path::Path, source: &mut String) {
+        for entry in fs::read_dir(path).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                append_rust_sources(&path, source);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                source.push_str(&fs::read_to_string(path).unwrap());
+            }
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut source = String::new();
+    append_rust_sources(&manifest_dir.join("src/rule"), &mut source);
+    append_rust_sources(&manifest_dir.join("src/llm"), &mut source);
+
+    assert!(
+        !source.contains(".omniscient("),
+        "rules and LLM policies must stay inside the default information view"
+    );
+}

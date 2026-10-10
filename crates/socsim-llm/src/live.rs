@@ -14,15 +14,8 @@ use crate::fallback::FallbackClient;
 use crate::ollama::OllamaClient;
 use crate::openai::OpenAiClient;
 
-/// Assemble the type-erased "Ollama-first → OpenAI-fallback" backend and open
-/// the cache at `cache_path` (in-memory when `None`).
-///
-/// Shared by [`build_live_client`] and [`build_shared_live_client`] so the two
-/// constructors compose the *same* backend + cache and differ only in the
-/// caching decorator they wrap it in.
-fn build_backend_and_cache(
-    cache_path: Option<&Path>,
-) -> Result<(Box<dyn LlmClient>, PromptCache), LlmError> {
+/// Assemble the type-erased "Ollama-first → OpenAI-fallback" backend.
+fn build_backend() -> Box<dyn LlmClient> {
     let ollama = OllamaClient::from_env();
     // Allow running on Ollama alone: if OPENAI_API_KEY is unset, place an
     // empty-key placeholder. It is only reached when Ollama fails, and only
@@ -33,13 +26,34 @@ fn build_backend_and_cache(
     });
 
     let fallback = FallbackClient::new(ollama, openai);
-    let backend: Box<dyn LlmClient> = Box::new(fallback);
+    Box::new(fallback)
+}
+
+/// Assemble the canonical backend and open the cache at `cache_path`
+/// (in-memory when `None`).
+///
+/// Shared by [`build_live_client`] and [`build_shared_live_client`] so the two
+/// constructors compose the *same* backend + cache and differ only in the
+/// caching decorator they wrap it in.
+fn build_backend_and_cache(
+    cache_path: Option<&Path>,
+) -> Result<(Box<dyn LlmClient>, PromptCache), LlmError> {
+    let backend = build_backend();
 
     let cache = match cache_path {
         Some(path) => PromptCache::open(path)?,
         None => PromptCache::in_memory(),
     };
     Ok((backend, cache))
+}
+
+/// Build the canonical Ollama-first → OpenAI-fallback backend without a cache.
+///
+/// The returned backend carries no response cache. Recording responses is the
+/// caller's responsibility. Construction is lazy and makes no network request;
+/// a backend is contacted only when [`LlmClient::complete`] is invoked.
+pub fn build_live_backend() -> Result<Box<dyn LlmClient>, LlmError> {
+    Ok(build_backend())
 }
 
 /// Build the canonical Ollama-first → OpenAI-fallback → caching client from
@@ -129,5 +143,11 @@ mod tests {
         assert!(client.cache().borrow().is_empty());
         // And it is usable as &dyn LlmClient.
         let _by_dyn: &dyn LlmClient = &client;
+    }
+
+    #[test]
+    fn backend_only_variant_constructs_without_network() {
+        let _backend: Box<dyn LlmClient> =
+            build_live_backend().expect("backend construction should not contact the network");
     }
 }

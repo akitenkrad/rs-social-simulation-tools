@@ -20,4 +20,11 @@ pub enum GameError {
     UnsupportedRoles { n_roles: usize },
     #[error("invalid matching: {0}")]
     InvalidMatching(String),
+    #[error("policy table kinds do not match the kind catalog")]
+    InvalidKinds {
+        expected: Vec<String>,
+        actual: Vec<String>,
+    },
+    #[error("LLM replay manifest mismatch: {0}")]
+    ManifestMismatch(String),
 }

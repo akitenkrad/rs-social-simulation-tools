@@ -1,8 +1,10 @@
 mod book;
 mod builtin;
+mod catalog;
 
 pub use book::RuleBook;
 pub use builtin::{Fixed, TitForTat, UniformRandom};
+pub use catalog::KindCatalog;
 
 use socsim_core::{AgentId, SimRng};
 use thiserror::Error;
@@ -22,6 +24,8 @@ pub enum RuleError {
     InvalidAction(String),
     #[error("rule cannot be used with this game: {0}")]
     Unsupported(String),
+    #[error("LLM backend error: {0}")]
+    Backend(String),
 }
 
 pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {

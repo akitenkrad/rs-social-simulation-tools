@@ -7,8 +7,8 @@ use rand::seq::SliceRandom;
 use socsim_core::{derive_seed, AgentId, SimClock, SimRng};
 
 use crate::{
-    ExperimentState, GameError, GameWorld, InternalStepHistory, MatchingState, PlayArena,
-    PolicyTable, RuleBook, RuleInitContext, StageGame, Topology,
+    ExperimentState, GameError, GameWorld, InternalStepHistory, KindCatalog, MatchingState,
+    PlayArena, PolicyTable, RuleBook, RuleError, RuleInitContext, StageGame, Topology,
 };
 
 #[cfg(feature = "engine")]
@@ -111,6 +111,35 @@ where
     G: StageGame,
     X: ExperimentState,
 {
+    build_world_with(
+        game,
+        n_agents,
+        x,
+        initial_held,
+        &KindCatalog::from_rules(rules),
+        assign,
+        history_len,
+        t_max,
+        seed,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_world_with<G, X>(
+    game: G,
+    n_agents: usize,
+    x: X,
+    initial_held: InitialActions<G::Action>,
+    catalog: &KindCatalog<G, X>,
+    assign: &Assignment,
+    history_len: usize,
+    t_max: u64,
+    seed: u64,
+) -> Result<GameWorld<G, X>, GameError>
+where
+    G: StageGame,
+    X: ExperimentState,
+{
     if history_len == 0 {
         return Err(GameError::InvalidHistoryLength);
     }
@@ -155,7 +184,7 @@ where
     }
 
     let ids: Vec<_> = (0..n_agents as u64).map(AgentId).collect();
-    let kinds = rules.kinds();
+    let kinds = catalog.kinds().map(str::to_owned).collect();
     let mut slot = Vec::with_capacity(n_agents);
     let mut kind_of = Vec::new();
     let mut states = Vec::new();
@@ -163,8 +192,9 @@ where
         match assignment {
             AssignKind::Held => slot.push(PolicyTable::<X::PolicyState>::HELD),
             AssignKind::Rule(kind) => {
-                let rule = rules.get(&kind)?;
-                let kind_id = rules.kind_id(&kind)?;
+                let kind_id = catalog
+                    .kind_id(&kind)
+                    .ok_or_else(|| RuleError::UnknownKind(kind.clone()))?;
                 let state_index =
                     u32::try_from(states.len()).map_err(|_| GameError::AgentCount {
                         expected: u32::MAX as usize,
@@ -178,7 +208,7 @@ where
                     generation,
                     init_seed: derive_seed(seed, &[3, agent.0, u64::from(generation)]),
                 };
-                states.push(rule.init_state(&context, &game)?);
+                states.push(catalog.init_state(&kind, &context, &game)?);
                 kind_of.push(kind_id);
                 slot.push(state_index);
             }
@@ -221,6 +251,15 @@ where
         return Err(GameError::UnsupportedRoles {
             n_roles: world.game.n_roles(),
         });
+    }
+
+    let expected: Vec<_> = KindCatalog::from_rules(&rules)
+        .kinds()
+        .map(str::to_owned)
+        .collect();
+    let actual = world.policies.kinds.clone();
+    if actual != expected {
+        return Err(GameError::InvalidKinds { expected, actual });
     }
 
     let mut active_kinds = BTreeSet::new();

@@ -1,5 +1,8 @@
 pub mod game;
 
+#[cfg(feature = "llm")]
+pub mod llm;
+
 pub use game::{ActionError, FiniteGame, MatrixError, MatrixGame, NormalFormGame, StageGame};
 
 #[cfg(feature = "core")]
@@ -23,8 +26,8 @@ pub mod world;
 pub use assemble::assemble;
 #[cfg(feature = "core")]
 pub use assemble::{
-    build_world, AssignGroup, AssignKind, Assignment, InitialActions, OnInvalidAction,
-    PayoffAggregation, PlayOptions,
+    build_world, build_world_with, AssignGroup, AssignKind, Assignment, InitialActions,
+    OnInvalidAction, PayoffAggregation, PlayOptions,
 };
 #[cfg(feature = "core")]
 pub use error::GameError;
@@ -36,7 +39,8 @@ pub use mechanism::RuleDriver;
 pub use outcome::{NormalFormOutcome, OutcomeContext, OutcomeRule};
 #[cfg(feature = "core")]
 pub use rule::{
-    DecisionRule, Fixed, RuleBook, RuleError, RuleInitContext, TitForTat, UniformRandom,
+    DecisionRule, Fixed, KindCatalog, RuleBook, RuleError, RuleInitContext, TitForTat,
+    UniformRandom,
 };
 #[cfg(feature = "core")]
 pub use view::{

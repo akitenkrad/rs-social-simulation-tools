@@ -69,12 +69,16 @@ pub use fallback::FallbackClient;
 pub use harness::{
     llm_config, wrap_client, wrap_client_shared, LiveClient, LlmSettings, SharedLiveClient,
 };
-pub use parse::extract_first_choice;
+pub use parse::{
+    extract_first_choice, is_single_fenced, json_field_was_string, json_payload_text,
+    parse_integer_value, parse_json_object, single_fenced_payload, JsonObjectPayload,
+    JsonPayloadError,
+};
 
 #[cfg(feature = "live")]
 pub use harness::{build_live_client_from_settings, build_shared_live_client_from_settings};
 #[cfg(feature = "live")]
-pub use live::{build_live_client, build_shared_live_client};
+pub use live::{build_live_backend, build_live_client, build_shared_live_client};
 #[cfg(feature = "ollama")]
 pub use ollama::{OllamaApi, OllamaClient};
 #[cfg(feature = "openai")]

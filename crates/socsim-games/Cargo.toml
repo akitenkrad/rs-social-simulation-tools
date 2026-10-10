@@ -10,6 +10,8 @@ license.workspace = true
 default = []
 core = ["dep:socsim-core", "dep:serde_json"]
 engine = ["core", "dep:socsim-engine"]
+llm = ["core", "dep:socsim-llm", "dep:sha2"]
+live = ["llm", "socsim-llm/live"]
 
 [dependencies]
 serde.workspace = true
@@ -17,7 +19,9 @@ rand.workspace = true
 thiserror.workspace = true
 socsim-core = { path = "../socsim-core", optional = true }
 socsim-engine = { path = "../socsim-engine", optional = true }
+socsim-llm = { path = "../socsim-llm", optional = true }
 serde_json = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
@@ -68,6 +72,61 @@ required-features = ["core", "engine"]
 name = "compile_fail"
 path = "tests/compile_fail.rs"
 required-features = ["core", "engine"]
+
+[[test]]
+name = "kind_catalog"
+path = "tests/kind_catalog.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "llm_parse"
+path = "tests/llm_parse.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
+name = "llm_number_parse"
+path = "tests/llm_number_parse.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
+name = "llm_cache_key"
+path = "tests/llm_cache_key.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
+name = "llm_store"
+path = "tests/llm_store.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
+name = "llm_backend_errors"
+path = "tests/llm_backend_errors.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
+name = "llm_batch"
+path = "tests/llm_batch.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
+name = "llm_retry"
+path = "tests/llm_retry.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
+name = "llm_determinism"
+path = "tests/llm_determinism.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
+name = "llm_manifest"
+path = "tests/llm_manifest.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
+name = "llm_driver_partition"
+path = "tests/llm_driver_partition.rs"
+required-features = ["llm", "engine"]
 
 [[example]]
 name = "ipd_pair"

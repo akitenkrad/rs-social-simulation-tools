@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::{DecisionRule, ExperimentState, RuleError, RuleKindId, StageGame};
+use crate::{DecisionRule, ExperimentState, RuleError, StageGame};
 
 pub struct RuleBook<G: StageGame, X: ExperimentState> {
     pub(crate) rules: BTreeMap<String, Arc<dyn DecisionRule<G, X>>>,
@@ -46,16 +46,7 @@ impl<G: StageGame, X: ExperimentState> RuleBook<G, X> {
             .ok_or_else(|| RuleError::UnknownKind(kind.to_owned()))
     }
 
-    pub(crate) fn kinds(&self) -> Vec<String> {
-        self.rules.keys().cloned().collect()
-    }
-
-    pub(crate) fn kind_id(&self, kind: &str) -> Result<RuleKindId, RuleError> {
-        self.rules
-            .keys()
-            .position(|name| name == kind)
-            .and_then(|index| u32::try_from(index).ok())
-            .map(RuleKindId)
-            .ok_or_else(|| RuleError::UnknownKind(kind.to_owned()))
+    pub(crate) fn get_optional(&self, kind: &str) -> Option<&Arc<dyn DecisionRule<G, X>>> {
+        self.rules.get(kind)
     }
 }

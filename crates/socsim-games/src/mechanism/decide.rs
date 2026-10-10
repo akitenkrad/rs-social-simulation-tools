@@ -68,7 +68,9 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
             } else {
                 let kind_id = policies.kind_of[state_slot as usize];
                 let kind = &policies.kinds[kind_id.0 as usize];
-                let rule = self.rules.get(kind).map_err(Self::mechanism_error)?;
+                let Some(rule) = self.rules.get_optional(kind) else {
+                    continue;
+                };
                 let opponents = plays.seats[encounter_start..encounter_end]
                     .iter()
                     .copied()
@@ -154,7 +156,9 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
             }
             let kind_id = policies.kind_of[state_slot as usize];
             let kind = &policies.kinds[kind_id.0 as usize];
-            let rule = self.rules.get(kind).map_err(Self::mechanism_error)?;
+            let Some(rule) = self.rules.get_optional(kind) else {
+                continue;
+            };
             let state = &mut policies.states[state_slot as usize];
             let record = step_history
                 .view(agent)
