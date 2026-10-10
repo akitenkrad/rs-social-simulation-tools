@@ -11,11 +11,13 @@ help: the trait `FiniteGame` is not implemented for `ContinuousLike`
    |
  5 | struct ContinuousLike;
    | ^^^^^^^^^^^^^^^^^^^^^
-help: the trait `FiniteGame` is implemented for `MatrixGame`
-  --> src/game/matrix.rs
-   |
-   | impl FiniteGame for MatrixGame {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `FiniteGame`:
+             BattleOfSexes
+             MatchingPennies
+             MatrixGame
+             PrisonersDilemma
+             RockPaperScissors
+             StagHunt
    = note: required for `socsim_games::TitForTat` to implement `DecisionRule<ContinuousLike, ()>`
 note: required by a bound in `require_rule`
   --> tests/compile_fail/tit_for_tat_requires_finite_game.rs:25:20

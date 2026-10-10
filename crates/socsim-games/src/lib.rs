@@ -1,4 +1,9 @@
 pub mod game;
+pub mod mixed;
+pub mod solve;
+
+pub use game::catalog;
+pub use mixed::MixedStrategy;
 
 #[cfg(feature = "llm")]
 pub mod llm;

@@ -14,6 +14,7 @@ llm = ["core", "dep:socsim-llm", "dep:sha2"]
 live = ["llm", "socsim-llm/live"]
 
 [dependencies]
+microlp = "0.6"
 serde.workspace = true
 rand.workspace = true
 thiserror.workspace = true

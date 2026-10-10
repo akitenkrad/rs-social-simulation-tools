@@ -3,8 +3,10 @@ use std::fmt::Debug;
 
 use thiserror::Error;
 
+pub mod catalog;
 mod matrix;
 
+pub(crate) use matrix::MAX_PROFILES;
 pub use matrix::{MatrixError, MatrixGame};
 
 /// An invalid action supplied to a stage game.

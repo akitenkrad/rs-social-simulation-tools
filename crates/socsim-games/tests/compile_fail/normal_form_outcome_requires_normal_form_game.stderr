@@ -9,11 +9,13 @@ help: the trait `NormalFormGame` is not implemented for `StageOnly`
    |
  3 | struct StageOnly;
    | ^^^^^^^^^^^^^^^^
-help: the trait `NormalFormGame` is implemented for `MatrixGame`
-  --> src/game/matrix.rs
-   |
-   | impl NormalFormGame for MatrixGame {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `NormalFormGame`:
+             BattleOfSexes
+             MatchingPennies
+             MatrixGame
+             PrisonersDilemma
+             RockPaperScissors
+             StagHunt
    = note: required for `NormalFormOutcome` to implement `OutcomeRule<StageOnly, ()>`
 note: required by a bound in `require_outcome`
   --> tests/compile_fail/normal_form_outcome_requires_normal_form_game.rs:21:8

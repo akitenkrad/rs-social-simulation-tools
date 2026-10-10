@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use super::{ActionError, FiniteGame, NormalFormGame, StageGame};
 
-const MAX_PROFILES: u128 = 1_000_000;
+pub(crate) const MAX_PROFILES: u128 = 1_000_000;
 const MAX_PAYOFF_ELEMENTS: u128 = 10_000_000;
 
 /// An error constructing a [`MatrixGame`].
