@@ -19,6 +19,7 @@ members = [
     "crates/socsim-survey",
     "crates/socsim-datasets",
     "crates/socsim-reproduce",
+    "crates/socsim-games",
 ]
 
 [workspace.package]

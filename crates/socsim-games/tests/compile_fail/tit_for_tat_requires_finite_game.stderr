@@ -1,0 +1,24 @@
+error[E0277]: the trait bound `ContinuousLike: FiniteGame` is not satisfied
+  --> tests/compile_fail/tit_for_tat_requires_finite_game.rs:28:18
+   |
+28 |     require_rule(&TitForTat::new(0));
+   |     ------------ ^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |     |
+   |     required by a bound introduced by this call
+   |
+help: the trait `FiniteGame` is not implemented for `ContinuousLike`
+  --> tests/compile_fail/tit_for_tat_requires_finite_game.rs:5:1
+   |
+ 5 | struct ContinuousLike;
+   | ^^^^^^^^^^^^^^^^^^^^^
+help: the trait `FiniteGame` is implemented for `MatrixGame`
+  --> src/game/matrix.rs
+   |
+   | impl FiniteGame for MatrixGame {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: required for `socsim_games::TitForTat` to implement `DecisionRule<ContinuousLike, ()>`
+note: required by a bound in `require_rule`
+  --> tests/compile_fail/tit_for_tat_requires_finite_game.rs:25:20
+   |
+25 | fn require_rule<R: DecisionRule<ContinuousLike, ()>>(_rule: &R) {}
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `require_rule`

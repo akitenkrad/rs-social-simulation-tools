@@ -1,0 +1,7 @@
+error[E0609]: no field `private_types` on type `MyPrivateView`
+  --> tests/compile_fail/private_view_does_not_expose_all_agents.rs:24:24
+   |
+24 |     let _ = ctx.view().private_types;
+   |                        ^^^^^^^^^^^^^ unknown field
+   |
+   = note: available field is: `mine`

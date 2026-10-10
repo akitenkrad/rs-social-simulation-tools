@@ -1,0 +1,17 @@
+error[E0599]: no method named `held` found for reference `&DecisionContext<'_, MatrixGame, ()>` in the current scope
+ --> tests/compile_fail/decision_context_hides_world_state.rs:5:17
+  |
+5 |     let _ = ctx.held(AgentId(0));
+  |                 ^^^^ private field, not a method
+
+error[E0599]: no method named `x` found for reference `&DecisionContext<'_, MatrixGame, ()>` in the current scope
+ --> tests/compile_fail/decision_context_hides_world_state.rs:6:17
+  |
+6 |     let _ = ctx.x();
+  |                 ^ private field, not a method
+  |
+help: there is a method `t` with a similar name
+  |
+6 -     let _ = ctx.x();
+6 +     let _ = ctx.t();
+  |

@@ -1,0 +1,75 @@
+[package]
+name        = "socsim-games"
+description = "Normal-form games and game-theoretic simulation components for socsim"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = []
+core = ["dep:socsim-core", "dep:serde_json"]
+engine = ["core", "dep:socsim-engine"]
+
+[dependencies]
+serde.workspace = true
+rand.workspace = true
+thiserror.workspace = true
+socsim-core = { path = "../socsim-core", optional = true }
+socsim-engine = { path = "../socsim-engine", optional = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+trybuild = "1"
+
+[[test]]
+name = "determinism_core"
+path = "tests/determinism_core.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "snapshot_resume_core"
+path = "tests/snapshot_resume_core.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "experiment_state"
+path = "tests/experiment_state.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "action_validation"
+path = "tests/action_validation.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "build_guards_core"
+path = "tests/build_guards_core.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "matching_fixed"
+path = "tests/matching_fixed.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "rule_kind_order"
+path = "tests/rule_kind_order.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "view_boundary"
+path = "tests/view_boundary.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "compile_fail"
+path = "tests/compile_fail.rs"
+required-features = ["core", "engine"]
+
+[[example]]
+name = "ipd_pair"
+path = "examples/ipd_pair.rs"
+required-features = ["core", "engine"]
