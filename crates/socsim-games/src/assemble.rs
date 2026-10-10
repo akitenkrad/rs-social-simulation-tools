@@ -7,8 +7,9 @@ use rand::seq::SliceRandom;
 use socsim_core::{derive_seed, AgentId, SimClock, SimRng};
 
 use crate::{
-    ExperimentState, GameError, GameWorld, InternalStepHistory, KindCatalog, MatchingState,
-    PlayArena, PolicyTable, RuleBook, RuleError, RuleInitContext, StageGame, Topology,
+    DecisionScope, ExperimentState, GameError, GameWorld, InternalPairHistory, InternalStepHistory,
+    KindCatalog, MatchingState, PlayArena, PolicyTable, RuleBook, RuleError, RuleInitContext,
+    StageGame, Topology,
 };
 
 #[cfg(feature = "engine")]
@@ -68,6 +69,7 @@ impl<A> Default for OnInvalidAction<A> {
 pub struct PlayOptions<A> {
     pub(crate) aggregation: PayoffAggregation,
     pub(crate) on_invalid_action: OnInvalidAction<A>,
+    pub(crate) decision_scope: DecisionScope,
 }
 
 impl<A> Default for PlayOptions<A> {
@@ -81,6 +83,7 @@ impl<A> PlayOptions<A> {
         Self {
             aggregation: PayoffAggregation::Sum,
             on_invalid_action: OnInvalidAction::Stop,
+            decision_scope: DecisionScope::PerStep,
         }
     }
 
@@ -91,6 +94,11 @@ impl<A> PlayOptions<A> {
 
     pub fn on_invalid_action(mut self, policy: OnInvalidAction<A>) -> Self {
         self.on_invalid_action = policy;
+        self
+    }
+
+    pub fn decision_scope(mut self, scope: DecisionScope) -> Self {
+        self.decision_scope = scope;
         self
     }
 }
@@ -183,6 +191,16 @@ where
         assignments.shuffle(&mut rng);
     }
 
+    let needs_pair_history = assignments.iter().try_fold(false, |needed, assignment| {
+        if needed {
+            return Ok(true);
+        }
+        match assignment {
+            AssignKind::Rule(kind) => catalog.needs_pair_history(kind),
+            AssignKind::Held => Ok(false),
+        }
+    })?;
+
     let ids: Vec<_> = (0..n_agents as u64).map(AgentId).collect();
     let kinds = catalog.kinds().map(str::to_owned).collect();
     let mut slot = Vec::with_capacity(n_agents);
@@ -226,6 +244,7 @@ where
         payoff: vec![0.0; n_agents],
         n_played: vec![0; n_agents],
         step_history: InternalStepHistory::new(n_agents, history_len),
+        pair_history: needs_pair_history.then(|| InternalPairHistory::new(history_len)),
         game,
         x,
         decision_root: derive_seed(seed, &[2]),
@@ -298,6 +317,7 @@ where
     }
     let context = MatchContext {
         t: world.clock.t(),
+        decision_scope: opts.decision_scope,
         ids: &world.ids,
         game: &world.game,
         topology: &world.topology,
@@ -312,14 +332,17 @@ where
         .seed(derive_seed(seed, &[1]))
         .add_mechanism(Box::new(crate::mechanism::MatchMechanism::<G, X, M>::new(
             matching,
+            opts.decision_scope,
         )))
         .add_mechanism(Box::new(crate::RuleDriver::new(
             rules,
             opts.on_invalid_action,
+            opts.decision_scope,
         )))
         .add_mechanism(Box::new(crate::mechanism::PlayMechanism::<G, X, O>::new(
             outcome,
             opts.aggregation,
+            opts.decision_scope,
         )));
     Ok(builder)
 }

@@ -12,9 +12,9 @@ use super::{
     ResponseStore,
 };
 use crate::{
-    DecisionContext, DecisionUnit, ExperimentState, GameError, GameWorld, KindCatalog,
-    LearnContext, MatchContext, Matching, OnInvalidAction, OutcomeRule, PlayOptions, PolicyTable,
-    RuleBook, RuleError, StageGame,
+    DecisionContext, DecisionScope, DecisionUnit, ExperimentState, GameError, GameWorld,
+    KindCatalog, LearnContext, MatchContext, Matching, OnInvalidAction, OutcomeRule, PlayOptions,
+    PolicyTable, RuleBook, RuleError, StageGame,
 };
 
 pub struct LlmSetup<G: StageGame, X: ExperimentState> {
@@ -93,7 +93,7 @@ impl<G: StageGame, X: ExperimentState> LlmDriver<G, X> {
 struct PendingDecision {
     agent: AgentId,
     agent_index: usize,
-    seat_index: usize,
+    seat_indices: Vec<usize>,
     role: usize,
     state_slot: usize,
     kind: String,
@@ -139,23 +139,26 @@ where
         step: &StepContext<'_, GameWorld<G, X>>,
     ) -> Result<Vec<PendingDecision>, SocsimError> {
         let world = &*step.world;
-        let mut seat_by_agent = vec![None; world.ids.len()];
+        let mut seats_by_agent = vec![Vec::new(); world.ids.len()];
         for (seat_index, &agent) in world.plays.seats.iter().enumerate() {
             let index = usize::try_from(agent.0)
                 .map_err(|_| Self::mechanism_error("agent index exceeds usize"))?;
-            let slot = seat_by_agent
+            let seats = seats_by_agent
                 .get_mut(index)
                 .ok_or_else(|| Self::mechanism_error(format!("unknown agent {}", agent.0)))?;
-            *slot = Some(seat_index);
+            seats.push(seat_index);
         }
 
         let mut pending = Vec::new();
         for &agent in step.agent_order {
             let agent_index = usize::try_from(agent.0)
                 .map_err(|_| Self::mechanism_error("agent index exceeds usize"))?;
-            let Some(seat_index) = seat_by_agent.get(agent_index).copied().flatten() else {
+            let seat_indices = seats_by_agent
+                .get(agent_index)
+                .ok_or_else(|| Self::mechanism_error(format!("unknown agent {}", agent.0)))?;
+            if seat_indices.is_empty() {
                 continue;
-            };
+            }
             let state_slot = *world
                 .policies
                 .slot
@@ -170,6 +173,18 @@ where
             let Some(rule) = self.rules.rules.get(kind) else {
                 continue;
             };
+            let roles = seat_indices
+                .iter()
+                .map(|seat_index| seat_index % world.plays.n_roles)
+                .collect::<BTreeSet<_>>();
+            if roles.len() > 1 {
+                return Err(Self::mechanism_error(RuleError::AmbiguousRole {
+                    agent: agent.0,
+                }));
+            }
+            let &seat_index = seat_indices
+                .last()
+                .expect("non-empty seat lists were checked above");
             let encounter_index = seat_index / world.plays.n_roles;
             let start = encounter_index * world.plays.n_roles;
             let end = start + world.plays.n_roles;
@@ -192,6 +207,7 @@ where
                 game: &world.game,
                 held: &world.held,
                 history: &world.step_history,
+                pair_history: world.pair_history.as_ref(),
                 x: &world.x,
             };
             let request = rule
@@ -200,7 +216,7 @@ where
             pending.push(PendingDecision {
                 agent,
                 agent_index,
-                seat_index,
+                seat_indices: seat_indices.clone(),
                 role,
                 state_slot,
                 kind: kind.clone(),
@@ -459,15 +475,17 @@ where
                         .map_err(|error| {
                             Self::mechanism_error(RuleError::InvalidAction(error.to_string()))
                         })?;
-                    finalized.push((decision.agent_index, decision.seat_index, action));
+                    finalized.push((decision.agent_index, decision.seat_indices, action));
                 }
             }
             pending = retry;
         }
 
-        for (agent_index, seat_index, action) in finalized {
+        for (agent_index, seat_indices, action) in finalized {
             step.world.held[agent_index] = action.clone();
-            step.world.plays.actions[seat_index] = Some(action);
+            for seat_index in seat_indices {
+                step.world.plays.actions[seat_index] = Some(action.clone());
+            }
         }
 
         let attempts = rates.attempts as f64;
@@ -521,6 +539,7 @@ where
             let context = LearnContext {
                 t: world.clock.t(),
                 me: agent,
+                scope: DecisionScope::PerStep,
                 record,
                 ids: &world.ids,
                 game: &world.game,
@@ -578,6 +597,11 @@ where
     M: Matching<G, X> + 'static,
     O: OutcomeRule<G, X> + 'static,
 {
+    if opts.decision_scope != DecisionScope::PerStep {
+        return Err(
+            RuleError::Unsupported("LLM rules support only per-step decisions".to_owned()).into(),
+        );
+    }
     if world.game.n_roles() != 2 {
         return Err(GameError::UnsupportedRoles {
             n_roles: world.game.n_roles(),
@@ -631,6 +655,7 @@ where
 
     let context = MatchContext {
         t: world.clock.t(),
+        decision_scope: opts.decision_scope,
         ids: &world.ids,
         game: &world.game,
         topology: &world.topology,
@@ -645,14 +670,17 @@ where
         .seed(derive_seed(seed, &[1]))
         .add_mechanism(Box::new(crate::mechanism::MatchMechanism::<G, X, M>::new(
             matching,
+            opts.decision_scope,
         )))
         .add_mechanism(Box::new(crate::RuleDriver::new(
             rules,
             opts.on_invalid_action,
+            opts.decision_scope,
         )))
         .add_mechanism(Box::new(LlmDriver::new(llm)))
         .add_mechanism(Box::new(crate::mechanism::PlayMechanism::<G, X, O>::new(
             outcome,
             opts.aggregation,
+            opts.decision_scope,
         ))))
 }

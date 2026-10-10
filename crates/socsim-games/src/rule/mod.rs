@@ -1,15 +1,19 @@
 mod book;
 mod builtin;
 mod catalog;
+mod learning;
 
 pub use book::RuleBook;
 pub use builtin::{Fixed, TitForTat, UniformRandom};
 pub use catalog::KindCatalog;
+pub use learning::{Automaton, FictitiousPlay, LogitChoice, Mixed, MyopicBestResponse, RothErev};
 
 use socsim_core::{AgentId, SimRng};
 use thiserror::Error;
 
-use crate::{DecisionContext, ExperimentState, LearnContext, RuleKindId, StageGame};
+use crate::{
+    DecisionContext, EncounterOutcome, ExperimentState, LearnContext, RuleKindId, StageGame,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
@@ -26,6 +30,8 @@ pub enum RuleError {
     Unsupported(String),
     #[error("LLM backend error: {0}")]
     Backend(String),
+    #[error("agent {agent} holds more than one role in a per-step decision")]
+    AmbiguousRole { agent: u64 },
 }
 
 pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
@@ -43,6 +49,20 @@ pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
         _ctx: &LearnContext<'_, G, X>,
     ) -> Result<(), RuleError> {
         Ok(())
+    }
+    fn learn_encounter(
+        &self,
+        _state: &mut X::PolicyState,
+        _outcome: &EncounterOutcome<'_, G::Action>,
+        _ctx: &LearnContext<'_, G, X>,
+    ) -> Result<(), RuleError> {
+        Ok(())
+    }
+    fn needs_encounter_learning(&self) -> bool {
+        false
+    }
+    fn needs_pair_history(&self) -> bool {
+        false
     }
 }
 

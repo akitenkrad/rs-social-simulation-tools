@@ -129,7 +129,37 @@ name = "llm_driver_partition"
 path = "tests/llm_driver_partition.rs"
 required-features = ["llm", "engine"]
 
+[[test]]
+name = "matching_semantics"
+path = "tests/matching_semantics.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "build_guards"
+path = "tests/build_guards.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "decision_scope"
+path = "tests/decision_scope.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "determinism_tournament"
+path = "tests/determinism_tournament.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "snapshot_resume_learning"
+path = "tests/snapshot_resume_learning.rs"
+required-features = ["core", "engine"]
+
 [[example]]
 name = "ipd_pair"
 path = "examples/ipd_pair.rs"
+required-features = ["core", "engine"]
+
+[[example]]
+name = "ipd_tournament"
+path = "examples/ipd_tournament.rs"
 required-features = ["core", "engine"]

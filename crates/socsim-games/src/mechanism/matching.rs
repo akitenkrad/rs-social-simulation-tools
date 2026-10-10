@@ -2,7 +2,9 @@ use std::marker::PhantomData;
 
 use socsim_core::{Mechanism, Phase, StepContext};
 
-use crate::{ArenaWriter, ExperimentState, GameWorld, MatchContext, Matching, StageGame};
+use crate::{
+    ArenaWriter, DecisionScope, ExperimentState, GameWorld, MatchContext, Matching, StageGame,
+};
 
 pub(crate) struct MatchMechanism<G, X, M>
 where
@@ -11,6 +13,7 @@ where
     M: Matching<G, X>,
 {
     matching: M,
+    decision_scope: DecisionScope,
     marker: PhantomData<fn() -> (G, X)>,
 }
 
@@ -20,9 +23,10 @@ where
     X: ExperimentState,
     M: Matching<G, X>,
 {
-    pub(crate) fn new(matching: M) -> Self {
+    pub(crate) fn new(matching: M, decision_scope: DecisionScope) -> Self {
         Self {
             matching,
+            decision_scope,
             marker: PhantomData,
         }
     }
@@ -68,6 +72,7 @@ where
                 } = step.world;
                 let context = MatchContext {
                     t: clock.t(),
+                    decision_scope: self.decision_scope,
                     ids,
                     game,
                     topology,

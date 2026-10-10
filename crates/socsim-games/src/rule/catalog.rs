@@ -122,4 +122,16 @@ impl<G: StageGame, X: ExperimentState> KindCatalog<G, X> {
             CatalogRule::Llm(rule) => rule.init_state(context, game),
         }
     }
+
+    pub(crate) fn needs_pair_history(&self, kind: &str) -> Result<bool, RuleError> {
+        let entry = self
+            .entries
+            .get(kind)
+            .ok_or_else(|| RuleError::UnknownKind(kind.to_owned()))?;
+        Ok(match &entry.rule {
+            CatalogRule::Rule(rule) => rule.needs_pair_history(),
+            #[cfg(feature = "llm")]
+            CatalogRule::Llm(_) => false,
+        })
+    }
 }

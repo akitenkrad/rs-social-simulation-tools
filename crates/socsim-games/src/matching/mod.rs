@@ -1,13 +1,15 @@
 mod fixed;
+mod round_robin;
 
 pub use fixed::FixedPlayers;
+pub use round_robin::RoundRobin;
 
 use serde::{Deserialize, Serialize};
 use socsim_core::{AgentId, SimRng};
 
 use crate::{
-    world::InternalStepHistory, ArenaWriter, ExperimentState, GameError, HistoryView, StageGame,
-    StepRecord, Topology,
+    world::InternalStepHistory, ArenaWriter, DecisionScope, ExperimentState, GameError,
+    HistoryView, StageGame, StepRecord, Topology,
 };
 
 pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
@@ -27,6 +29,7 @@ pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
 
 pub struct MatchContext<'a, G: StageGame, X: ExperimentState> {
     pub(crate) t: u64,
+    pub(crate) decision_scope: DecisionScope,
     pub(crate) ids: &'a [AgentId],
     pub(crate) game: &'a G,
     pub(crate) topology: &'a Topology,
@@ -38,6 +41,10 @@ pub struct MatchContext<'a, G: StageGame, X: ExperimentState> {
 impl<'a, G: StageGame, X: ExperimentState> MatchContext<'a, G, X> {
     pub fn t(&self) -> u64 {
         self.t
+    }
+
+    pub fn decision_scope(&self) -> DecisionScope {
+        self.decision_scope
     }
 
     pub fn ids(&self) -> &'a [AgentId] {
@@ -69,4 +76,5 @@ impl<'a, G: StageGame, X: ExperimentState> MatchContext<'a, G, X> {
 #[non_exhaustive]
 pub enum MatchingState {
     None,
+    RoundRobin { cursor: u64 },
 }

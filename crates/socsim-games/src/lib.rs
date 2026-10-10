@@ -1,4 +1,5 @@
 pub mod game;
+pub mod learn;
 pub mod mixed;
 pub mod solve;
 
@@ -9,6 +10,7 @@ pub use mixed::MixedStrategy;
 pub mod llm;
 
 pub use game::{ActionError, FiniteGame, MatrixError, MatrixGame, NormalFormGame, StageGame};
+pub use learn::{automaton::AutomatonKind, logit::EstimateMode, TieBreak};
 
 #[cfg(feature = "core")]
 pub mod assemble;
@@ -37,15 +39,15 @@ pub use assemble::{
 #[cfg(feature = "core")]
 pub use error::GameError;
 #[cfg(feature = "core")]
-pub use matching::{FixedPlayers, MatchContext, Matching, MatchingState};
+pub use matching::{FixedPlayers, MatchContext, Matching, MatchingState, RoundRobin};
 #[cfg(feature = "core")]
 pub use mechanism::RuleDriver;
 #[cfg(feature = "core")]
 pub use outcome::{NormalFormOutcome, OutcomeContext, OutcomeRule};
 #[cfg(feature = "core")]
 pub use rule::{
-    DecisionRule, Fixed, KindCatalog, RuleBook, RuleError, RuleInitContext, TitForTat,
-    UniformRandom,
+    Automaton, DecisionRule, FictitiousPlay, Fixed, KindCatalog, LogitChoice, Mixed,
+    MyopicBestResponse, RothErev, RuleBook, RuleError, RuleInitContext, TitForTat, UniformRandom,
 };
 #[cfg(feature = "core")]
 pub use view::{
@@ -53,10 +55,13 @@ pub use view::{
 };
 #[cfg(feature = "core")]
 pub use world::{
-    ArenaWriter, BuiltinPolicyState, Credit, EncounterId, EncounterRef, ExperimentState, GameWorld,
-    HistoryView, PeerHistory, PlayArena, PolicyTable, RuleKindId, Slot, Stateless, StepRecord,
-    TftState, Topology,
+    ArenaWriter, AutomatonPolicyState, BeliefState, BuiltinPolicyState, Credit, EncounterId,
+    EncounterRef, EstimateState, ExperimentState, GameWorld, HistoryView, PairView, PeerHistory,
+    PlayArena, PolicyTable, PropensityState, RuleKindId, Slot, Stateless, StepRecord, TftState,
+    Topology,
 };
 
+#[cfg(feature = "core")]
+pub(crate) use world::InternalPairHistory;
 #[cfg(feature = "core")]
 pub(crate) use world::InternalStepHistory;

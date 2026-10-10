@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use socsim_core::{Mechanism, Phase, SocsimError, StepContext};
 
 use crate::{
-    Credit, EncounterId, EncounterRef, ExperimentState, GameWorld, OutcomeContext, OutcomeRule,
-    PayoffAggregation, StageGame, StepRecord,
+    Credit, DecisionScope, EncounterId, EncounterRef, ExperimentState, GameWorld, OutcomeContext,
+    OutcomeRule, PayoffAggregation, StageGame, StepRecord,
 };
 
 pub(crate) struct PlayMechanism<G, X, O>
@@ -15,6 +15,7 @@ where
 {
     outcome: O,
     aggregation: PayoffAggregation,
+    decision_scope: DecisionScope,
     marker: PhantomData<fn() -> (G, X)>,
 }
 
@@ -24,10 +25,15 @@ where
     X: ExperimentState,
     O: OutcomeRule<G, X>,
 {
-    pub(crate) fn new(outcome: O, aggregation: PayoffAggregation) -> Self {
+    pub(crate) fn new(
+        outcome: O,
+        aggregation: PayoffAggregation,
+        decision_scope: DecisionScope,
+    ) -> Self {
         Self {
             outcome,
             aggregation,
+            decision_scope,
             marker: PhantomData,
         }
     }
@@ -92,6 +98,29 @@ where
             }
         }
 
+        if let Some(pair_history) = &mut world.pair_history {
+            for encounter_index in 0..world.plays.n_encounters() {
+                let start = encounter_index * world.plays.n_roles;
+                let end = start + world.plays.n_roles;
+                let seats = &world.plays.seats[start..end];
+                if seats.len() != 2 {
+                    continue;
+                }
+                let actions = world.plays.actions[start..end]
+                    .iter()
+                    .cloned()
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or_else(|| SocsimError::Mechanism("unfilled action seat".to_owned()))?;
+                pair_history.push(
+                    world.clock.t(),
+                    seats[0],
+                    seats[1],
+                    actions[0].clone(),
+                    actions[1].clone(),
+                );
+            }
+        }
+
         if self.aggregation == PayoffAggregation::Mean {
             for (payoff, &count) in world.payoff.iter_mut().zip(&world.n_played) {
                 if count != 0 {
@@ -105,12 +134,16 @@ where
             .iter()
             .map(|&agent| {
                 let index = agent.0 as usize;
-                let action = world
-                    .plays
-                    .seats
-                    .iter()
-                    .position(|seat| *seat == agent)
-                    .and_then(|seat| world.plays.actions[seat].clone());
+                let action = (self.decision_scope == DecisionScope::PerStep)
+                    .then(|| {
+                        world
+                            .plays
+                            .seats
+                            .iter()
+                            .position(|seat| *seat == agent)
+                            .and_then(|seat| world.plays.actions[seat].clone())
+                    })
+                    .flatten();
                 StepRecord {
                     action,
                     payoff: world.payoff[index],
