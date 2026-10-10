@@ -19,9 +19,11 @@
 | *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`）と `MatrixGame` | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません |
 | `core` | World（`GameWorld`），規則，利得規則，Matching，ビュー，`build_world` | `socsim-core` |
 | `engine` | `assemble`（`SimulationBuilder` を返す）．`core` を含意 | `socsim-core`，`socsim-engine` |
+| `llm` | LLM の決定規則，応答ストア，再生の manifest（[LLM による決定](#llm-による決定) を参照）．`core` を含意．Mechanism `game_llm_decide` と `assemble_with_llm` には `engine` も要る | `socsim-core`，`socsim-llm`（既定の feature だけ．ネットワークなし） |
+| `live` | `live_backend_factory()`（キャッシュなしの Ollama → OpenAI のバックエンド）．`llm` を含意 | `llm` と同じ＋`socsim-llm/live` |
 
-この crate は `socsim-llm`，`socsim-config`，`socsim-runner` のいずれにも依存しません．
-シミュレーションを走らせるには両方の feature が要ります．
+`llm` を有効にしなければ，この crate は `socsim-llm` に依存しません．`socsim-config` と `socsim-runner` には常に依存しません．
+シミュレーションを走らせるには `core` と `engine` が要ります．
 
 ```toml
 socsim-games = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-games", features = ["engine"] }
@@ -417,6 +419,9 @@ Interaction  game_play    OutcomeRule → payoffs → aggregation → history
 Reward       game_decide  learn_step (rule state)
 ```
 
+feature `llm` では，`assemble_with_llm` が 4 つ目の Mechanism [`game_llm_decide`](mechanisms/game-llm-decide.ja.md)（Decision，Reward）を
+`game_decide` と `game_play` の間に登録します．これは種類が LLM の規則であるエージェントの席を埋めます（[LLM による決定](#llm-による決定) を参照）．
+
 `assemble` の後に足した Mechanism（返されたビルダーの `.add_mechanism(...)`）は，各フェーズでゲームの Mechanism の後に動きます．
 したがって Reward フェーズの Mechanism はそのステップの利得を見られます．
 
@@ -472,6 +477,415 @@ PlayOptions::new()                                     // Sum + Stop
 
 ---
 
+## LLM による決定
+
+feature `llm` を有効にすると，エージェントの行動を言語モデルに決めさせられます．
+LLM の規則は `DecisionRule` ではありません．別の Mechanism [`game_llm_decide`](mechanisms/game-llm-decide.ja.md)（型は `LlmDriver`）が動かします．
+この Mechanism はそのステップの LLM の決定をすべて集めて 1 つのバッチとして送り，その後で行動を確定します．
+即決の規則（`game_decide`）と LLM の規則（`game_llm_decide`）は同じ World に混ぜられます．各種類はどちらか一方の Driver だけが担当します．
+
+```toml
+socsim-games  = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-games", features = ["llm", "engine"] }
+socsim-core   = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-core" }
+socsim-engine = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-engine" }
+socsim-llm    = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-llm" }
+```
+
+以下の型はすべて `socsim_games::llm` にあります．
+組込みの Ollama → OpenAI のバックエンドを使うときだけ，`socsim-games` に feature `live` を足します．テストとオフラインの再生にネットワークは要りません．
+
+### 二段階の決定：`prepare` → バッチ → `resolve`
+
+```rust
+pub trait LlmDecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
+    fn name(&self) -> &str;
+    fn init_state(&self, ctx: &RuleInitContext, game: &G) -> Result<X::PolicyState, RuleError>;
+    /// 第 1 段：要求を描画する．純粋で，乱数を使わず，状態は読むだけ．
+    fn prepare(
+        &self,
+        state: &X::PolicyState,
+        ctx: &DecisionContext<'_, G, X>,
+    ) -> Result<DecisionRequest, RuleError>;
+    /// 第 2 段：応答を行動・再試行・フォールバックのいずれかにする．
+    fn resolve(
+        &self,
+        state: &mut X::PolicyState,
+        req: &DecisionRequest,
+        reply: &LlmReply,
+        rctx: &mut ResolveContext<'_, G>,
+    ) -> Resolution<G::Action>;
+    /// Reward フェーズ．モデルは呼ばない．
+    fn learn_step(
+        &self,
+        state: &mut X::PolicyState,
+        ctx: &LearnContext<'_, G, X>,
+    ) -> Result<(), RuleError> { Ok(()) }
+}
+```
+
+- `prepare` は `DecisionRequest { system, prompt, attempt }` を返します（`attempt` は 0 から）．
+  生成の条件（temperature，seed，`max_tokens`，`think` など）は規則が決めるのではなく，
+  Driver が `LlmSetup` の `LlmConfig` と決定単位から付けます．
+- `resolve` は `LlmReply { text, thinking, usage, cache_hit }` と `ResolveContext { game, role, previous, fallback_rng, t }` を受け取ります．
+  `previous` は前のステップのエージェントの保持行動，`fallback_rng` は決定単位から導いたストリームです．
+  戻り値は `Resolution::Accept { action, flags }`，`Resolution::Retry(次の要求)`，`Resolution::GiveUp { action, fallback, violation }` のいずれかです．
+- モデルを呼ぶのは Driver の Decision フェーズの中**だけ**です．`learn_step`（Reward）は規則の状態を更新するだけです．
+
+### 2 つの Driver にまたがる種類：`KindCatalog` と `build_world_with`
+
+`build_world` が知っているのは `RuleBook` だけです．LLM の規則の種類があるときは，すべての種類を `KindCatalog` で表し，
+`build_world_with` で World を作ります（引数は `build_world` と同じで，`&rules` の代わりに `&catalog` を渡す）．
+
+```rust
+let catalog = KindCatalog::new()
+    .with_rules(&rules)?      // game_decide が担当する種類
+    .with_llm(&llm_rules)?;   // game_llm_decide が担当する種類
+```
+
+- 両方の表に登録した種類は `RuleError::DuplicateKind` です．
+- 種類 ID は全種類名の和集合の辞書順で振るので，どの Driver が担当するかにも登録順にもよりません．
+  結果は `catalog.kinds()`，`catalog.kind_id(kind)`，`catalog.driver_name(kind)`（`"game_decide"` か `"game_llm_decide"`）で見られます．
+- `build_world(.., &rules, ..)` は `build_world_with(.., &KindCatalog::from_rules(&rules), ..)` と同じです．
+- `assemble` は World の種類の一覧が自分の `RuleBook` と一致することを，`assemble_with_llm` は `rules` ＋ `llm_rules` の
+  カタログと一致することを検査します．違えば `GameError::InvalidKinds { expected, actual }` です．
+  したがって LLM の種類を含む World は `assemble_with_llm` で組み立てます．
+- 各 Driver は担当でない種類を飛ばします．`game_decide` は LLM のエージェントの席を空けたままにし，`game_llm_decide` がそれを埋めます．
+
+### 例：LLM のエージェント対 Tit-for-Tat
+
+バックエンドは `ScriptedClient` なので，このプログラムはオフラインで動きます．
+実際のモデルを呼ぶには，構築関数を `live_backend_factory()`（feature `live`）に替えます．
+
+```rust
+use std::sync::Arc;
+
+use socsim_games::llm::{
+    assemble_with_llm, BackendFactory, BackendIdentity, LabelParser, LlmPolicy,
+    LlmReplayManifest, LlmRuleBook, LlmSetup, MarkdownTableRenderer, OwnHistoryObs, ReplayMode,
+    ResponseStore, WithLlm,
+};
+use socsim_games::{
+    build_world_with, AssignGroup, AssignKind, Assignment, FixedPlayers, InitialActions,
+    KindCatalog, MatrixGame, NormalFormOutcome, PlayOptions, RuleBook, TitForTat,
+};
+use socsim_llm::mock::ScriptedClient;
+
+type X = WithLlm<()>; // 再生の manifest は実験状態に置く
+
+fn main() {
+    // モデルが答えるラベルを付けた囚人のジレンマ．
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap()
+    .with_labels(vec![
+        vec!["C".to_owned(), "D".to_owned()],
+        vec!["C".to_owned(), "D".to_owned()],
+    ])
+    .unwrap();
+
+    // 即決の規則 (game_decide) と LLM の規則 (game_llm_decide)．
+    let mut rules: RuleBook<MatrixGame, X> = RuleBook::new();
+    rules.register("tit_for_tat", Arc::new(TitForTat::new(0))).unwrap();
+    let mut llm_rules: LlmRuleBook<MatrixGame, X> = LlmRuleBook::new();
+    llm_rules
+        .register(
+            "llm",
+            Arc::new(LlmPolicy::new(
+                OwnHistoryObs::new(5),
+                MarkdownTableRenderer::default(),
+                LabelParser::strict(),
+            )),
+        )
+        .unwrap();
+
+    // 両方の Driver の全種類を 1 つのカタログに．
+    let catalog = KindCatalog::new()
+        .with_rules(&rules)
+        .unwrap()
+        .with_llm(&llm_rules)
+        .unwrap();
+
+    // 応答ストアとバックエンド．構築関数はワーカーごとに 1 回呼ばれる．
+    let store = ResponseStore::in_memory("ipd-llm", ReplayMode::RecordMisses);
+    let identity = BackendIdentity {
+        model: "scripted".to_owned(),
+        endpoint: "mock://scripted".to_owned(),
+    };
+    let backend: BackendFactory = Arc::new(|| {
+        Ok(Box::new(ScriptedClient::constant(
+            "scripted",
+            r#"{"action": "D", "reason": "defect"}"#,
+        )))
+    });
+
+    let seed = 7;
+    let rounds = 5;
+    let x = WithLlm {
+        inner: (),
+        llm: LlmReplayManifest::for_store(&store, identity.clone()),
+    };
+    let world = build_world_with(
+        game,
+        2,
+        x,
+        InitialActions::Same(0),
+        &catalog,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("llm".to_owned()), count: 1 },
+            AssignGroup { kind: AssignKind::Rule("tit_for_tat".to_owned()), count: 1 },
+        ]),
+        rounds,
+        rounds as u64,
+        seed,
+    )
+    .unwrap();
+
+    let setup = LlmSetup::new(llm_rules, store, backend, identity);
+    let mut simulation = assemble_with_llm(
+        world,
+        FixedPlayers::pairs(&[(0, 1)]),
+        rules,
+        setup,
+        NormalFormOutcome,
+        PlayOptions::new(),
+        seed,
+    )
+    .unwrap()
+    .build();
+
+    for _ in 0..rounds {
+        simulation.step().unwrap();
+        println!("held = {:?}", simulation.world().held());
+    }
+}
+```
+
+```text
+held = [1, 0]
+held = [1, 1]
+held = [1, 1]
+held = [1, 1]
+held = [1, 1]
+```
+
+`assemble_with_llm(world, matching, rules, llm, outcome, opts, seed)` は `assemble` と同じ引数に `LlmSetup` を足したもので，
+`X: HasLlmManifest` を要求し（[manifest](#manifest-と再開の保証) を参照），`game_match` → `game_decide` → `game_llm_decide` → `game_play` の順に登録します．
+`OnInvalidAction::Fallback` は `game_decide` の種類だけに効きます．その表には `RuleBook` の種類だけを書きます（LLM の種類を書くと `RuleError::UnknownKind`）．
+LLM の種類のフォールバックは `RetryProtocol` が受け持ちます．
+
+### `LlmPolicy` の部品
+
+`LlmPolicy::new(obs, renderer, parser)` は組込みの `LlmDecisionRule` です．
+エージェントが何を観測するか，それをどうプロンプトにするか，応答をどう行動にするか，の 3 つの部品を型引数にした 1 つの型です．
+
+```rust
+LlmPolicy::new(OwnHistoryObs::new(5), MarkdownTableRenderer::default(), LabelParser::strict())
+    .with_retry(RetryProtocol { max_retries: 2, fallback: Fallback::Previous })  // 既定: 1，Previous
+    .with_max_turns(32)                                                          // 既定: 16
+```
+
+状態は `X::PolicyState` の中の `LlmConversation { max_turns, turns }` なので，この規則は `X::PolicyState: Slot<LlmConversation>` を要求します
+（`BuiltinPolicyState` は feature `llm` のとき `Llm` の変種を持つ）．
+決定のたびに `ConversationTurn { t, action, attempts, gave_up, payoff }` を追記し（`action` は `Debug` の表記，`payoff` は Reward で埋まる），
+`max_turns` を超えたら古いものから捨てます．この記録は解析用で，プロンプトには再生しません．
+
+**観測**（`ObservationProvider<G, X>`．`DecisionContext` だけから作るので，[情報構造](#情報構造) の既定のビューが保たれる）：
+
+| 提供者 | `Obs` | 中身 |
+|---|---|---|
+| `OwnHistoryObs::new(window)` | `OwnHistory<G::Action>` | `t`，`role`，自分の直近 `window` 件の `StepRecord`（古い順），現在の各相手の直前の行動（無ければ `None`） |
+| `CountsObs`（`G: FiniteGame`） | `ActionCounts` | `role`，自分の直前の行動，現在の相手のうち直前に各行動を選んだ人数．`t` を持たないので，同じ状況のエージェントは同じプロンプトになり，呼出しを 1 回で共有する |
+
+**レンダラ**（`GameRenderer<G, Obs>`：`rules` → system プロンプト，`turn` → プロンプト，`feedback` → 再試行で末尾に足す文）：
+
+| レンダラ | 組み合わせる観測 | system プロンプト |
+|---|---|---|
+| `MarkdownTableRenderer`（`G: FiniteGame`） | `OwnHistoryObs` | `action_label` から作る利得表（2 役割なら双行列，それ以外は役割ごとの表）と，応答の形式 `{"action": "<action label>", "reason": "<reason>"}` |
+| `CountsRenderer`（`G: FiniteGame`） | `CountsObs` | 役割，選べるラベル，同じ応答の形式 |
+
+**パーサ**（`ActionParser<G>`）：
+
+- `LabelParser::strict()` — 応答は JSON のオブジェクト（そのままか，Markdown の単一のフェンス ```` ``` ```` / ```` ```json ```` で囲んだもの）で，
+  `"action"` の文字列が役割のラベルのどれかと完全に一致しなければなりません．それ以外は違反です．
+- `LabelParser::lenient()` — まず厳密な照合を試し，失敗したら応答のどこかで最初に現れたラベルを探し
+  （`socsim_llm::extract_first_choice`：大文字小文字を区別せず，語の境界で，最も早いものが勝つ），`ParseFlags::lenient_match` を立てます．
+  `.with_synonyms(label, &[..])` でそのラベルとみなす語を足せます．
+  **緩い照合は，全役割の全ラベルが ASCII の `[A-Za-z0-9_-]+` であることを要求します**．
+  これは規則の状態を初期化するときに検査するので，満たさなければ `build_world_with` が `RuleError::Unsupported` で失敗します．厳密な照合はどんなラベルも受け付けます．
+- `.require_reason(true)` は文字列の `"reason"` も要求します．理由が無ければ，緩い照合でも違反です．
+- `NumberParser::new(field).bounds(lo, hi).out_of_range(OutOfRange::Clamp)` は数値の応答のための単体の補助です（`parse_number(raw) -> ParseOutcome<f64>`）．
+  JSON の数値か数字の文字列（`value_was_string`）で，有限の値だけを受け付けます．範囲外は `Violation`（既定）か切り詰め（`clamped`）です．
+  `MatrixGame` 用の `ActionParser` ではありません．
+
+受理した応答は `ParseFlags { fenced, value_was_string, clamped, lenient_match }` を，拒否した応答は
+`Violation { kind, message }`（`ViolationKind::{Format, Label, Range, InvalidAction}`）を伴います．
+
+**再試行とフォールバック** — `RetryProtocol { max_retries, fallback }`．`attempt < max_retries` の間は，違反のたびに
+前のプロンプトにレンダラの `feedback` を足した再試行を作ります．そのステップの再試行はまとめて次のバッチとして送ります．
+それを過ぎるとフォールバックで諦めます．
+
+| `Fallback` | 行動 |
+|---|---|
+| `Previous`（既定） | 前のステップのエージェントの保持行動 |
+| `UniformRandom` | パーサが `fallback_rng`（決定単位から導く．エンジンのストリームは使わない）で一様に引く |
+| `Specified(action)` | `action` |
+
+Driver は確定した行動をすべて `check_action` で検査し，不正なら `RuleError::InvalidAction` でステップを止めます．
+
+### `game_llm_decide` の Decision の流れ
+
+1. **準備** — 種類が LLM の規則である席に着いたエージェントについて，スケジューラーの活性化の順に `prepare` を呼ぶ．
+2. **重複除去** — キャッシュのキー（後述）が同じ要求は 1 回だけ送る．
+3. **照会** — 主スレッドで各要求を `ResponseStore` から引く（`Live` を除く）．`ReplayOnly` で見つからなければステップを止める．
+4. **実行** — 見つからなかった要求だけを `LlmExecutor` に渡す．
+5. **確定** — 決定の順に `resolve` を呼ぶ．`Retry` の要求を集め，もう 1 つのバッチとして 2〜5 を繰り返す．`GiveUp` はフォールバックで確定する．
+6. **戻し** — 確定した行動を席と `held` に書く．
+
+**シード．** `temperature == 0` のとき，すべての要求は定数のシード `derive_seed(decision_root, &[0])` を使います．
+同じプロンプトはキー・呼出し・保存した記録を 1 つに共有します．
+それ以外の temperature では，シードは `derive_seed(decision_root, &[t, agent, 0, 0, attempt])`（決定と試行ごとに 1 つ）なので，
+エージェントが違えば要求も普通は違います．フォールバックのストリームは `derive_seed(decision_root, &[t, agent, 0, 0, u64::MAX])` です．
+Driver はエンジンのステップの乱数を引かないので，活性化の順やワーカーの数で結果は変わりません．
+
+**構成．**
+
+```rust
+let setup = LlmSetup::new(llm_rules, store, backend, identity)
+    .executor(LlmExecutor::Threaded { workers: 4 })   // 既定: Sequential
+    .options(options)                                 // 既定: ExecutorOptions::default()
+    .config(LlmConfig::deterministic());              // 既定．seed は常に上書きされる
+```
+
+`config` は各要求の `LlmConfig` の基になります．Driver は `seed` を上書きし，要求が system を持つとき（組込みの規則は常に持つ）は `system` も上書きします．
+
+### 応答ストア
+
+ゲームのシミュレーションでは `socsim_llm::PromptCache` の代わりに `ResponseStore` を使います．各要求は版付きのキーで識別します．
+
+```rust
+pub struct CacheKeyV1 {
+    pub version: u32,                 // 1
+    pub backend: BackendIdentity,     // { model, endpoint }
+    pub system: Option<String>,
+    pub prompt: String,
+    pub temperature_bits: u32,        // f32::to_bits．0.2 と 0.8 は別のキー (0.0 と -0.0 も別)
+    pub seed: u64,
+    pub omit_seed: bool,
+    pub max_tokens: Option<u32>,
+    pub think: Option<bool>,
+    pub allow_blank: bool,
+}
+```
+
+引くときのキーは `canonical_json()` の 64 bit FNV-1a です．キー全体を各 `ResponseRecord { key, text, thinking, usage, backend_metadata }` と一緒に保存し，
+当たるたびに比べるので，ダイジェストの衝突は応答として返さず検出します（`StoreError::KeyCollision`）．
+当たったときも思考とトークン数を復元するので，再生した呼出しは `cache_hit` 以外は実際の呼出しと同じ形で記録されます．
+
+| 構築 | 置き場所 |
+|---|---|
+| `ResponseStore::in_memory(store_id, mode)` | メモリだけ（テスト用） |
+| `ResponseStore::open(dir, mode, run_tag, seed)` | `dir/store_id`（最初に開いたときに作り，以後はそれを使う），`dir/base.jsonl`（読取り専用．無くてもよい），この実行のシャード `dir/shards/<run_tag>-<seed>.jsonl`（読み，追記する） |
+
+| `ReplayMode` | ストアの照会 | 見つからないとき | 書込み |
+|---|---|---|---|
+| `ReplayOnly` | する | ステップが失敗する | なし |
+| `RecordMisses` | する | バックエンドを呼ぶ | 新しい記録をこの実行のシャードへ |
+| `Live` | しない | （すべての要求がバックエンドへ行く） | なし |
+
+**シャードは頼んだときだけ統合されます．** `open` が読むのは基底と自分のシャードだけで，他の実行のシャードは読みません．
+記録した実行が終わった後（たとえば複数シードの掃引の後）に `ResponseStore::merge_shards(dir)` を呼ぶと，
+すべてのシャードを `base.jsonl` に取り込み（一意な一時ファイルに書いて rename する），シャードを消して，
+`MergeReport { records_added, duplicate_records, shards_merged }` を返します．
+同じキーで中身の違う記録があれば `StoreError::Conflict` です．統合すると基底のダイジェストが変わるので，統合の前に書いた manifest はストアと一致しなくなります．
+
+### 実行器とバックエンド
+
+```rust
+pub type BackendFactory = Arc<dyn Fn() -> Result<Box<dyn LlmClient>, LlmError> + Send + Sync>;
+```
+
+実行器はバックエンドを構築関数から**それを使うスレッドの中で**作ります（`LlmClient` は `Send` ではないため）．
+`Sequential` ではバッチごとに 1 回，`Threaded` ではワーカーごとに 1 回です．ストアに当たらなかった要求が 1 件もないバッチでは作りません．
+バックエンドはキャッシュを持ってはいけません（キャッシュは応答ストアです）．
+`live_backend_factory()`（feature `live`）は `socsim_llm::build_live_backend` を包みます．テストでは `socsim_llm::mock::ScriptedClient` を返します．
+
+| `LlmExecutor` | 呼出しを実行する場所 |
+|---|---|
+| `Sequential`（既定） | 主スレッドで 1 つずつ |
+| `Threaded { workers }` | 有界のキューで配った `workers` 本のスレッド．ストアへ書くのは主スレッドだけ |
+
+| `ExecutorOptions` のフィールド | 既定値 | 意味 |
+|---|---|---|
+| `timeout` | 120 秒 | 呼出しごと．**`Threaded` だけ**に効く（`Sequential` の呼出しは中断できない）．時間切れの呼出しは再送せず，ステップが失敗する |
+| `max_backend_retries` | 3 | バックエンドのエラーの後の再送の回数．使い切るとステップが `RuleError::Backend` で失敗する |
+| `backoff_base` | 1 秒 | k 回目の再送の前に `backoff_base × 2^(k-1)` 待つ |
+| `queue_per_worker` | 2 | キューの容量 = `workers × queue_per_worker` |
+
+`ExecutorOptions` は `#[non_exhaustive]` です．`ExecutorOptions::default()` から始めてフィールドに代入します．
+`workers == 0` や `queue_per_worker == 0` はバックエンドのエラーです．
+シードが決定単位で決まり，確定が決定の順に行われるので，`Sequential` と `Threaded` は同じ World を作ります．
+
+### manifest と再開の保証
+
+実際のモデルは同じ要求に違う応答を返しうるので，snapshot から正確に再開できるのは，再開後の実行が同じ応答を見る場合だけです．
+そこで World は，どの応答に対して実行したかを記録します．`WithLlm<X> { inner, llm }` は実験状態を包み（`PolicyState` と `view_for` は `inner` に委ねる），
+`LlmReplayManifest::for_store(&store, identity)` で作る `LlmReplayManifest { store_id, base_digest, mode, backend }` を持ちます．
+`assemble_with_llm` は `X: HasLlmManifest` を要求し，`WithLlm<X>` がそれを実装します．
+
+- Driver は毎回の Decision で，World の manifest を自分のストア（`store_id`，`base_digest`，`mode`）と `BackendIdentity` に照らします．
+  違いがあればステップを止めます．走っている途中のシミュレーションに restore した場合も，次の Decision で照合されます．
+- `verify_snapshot(&snapshot, &store, &identity)` は同じ照合を `restore` の前に行い，`GameError::ManifestMismatch` を返します．
+- 再開した実行が通しの実行と一致するのは，`ReplayOnly` の場合，または `RecordMisses` で再開後の全要求がストアに当たった場合
+  （`game.llm_call` の `cache_hit`，`llm.cache_hit_rate == 1`）**だけ**です．`Live` では何も保証しません．
+  モードは manifest の一部なので，snapshot を取ったときと同じモードで再開します．
+
+```rust
+// 記録し，シャードを基底に取り込む．
+let store = ResponseStore::open(dir, ReplayMode::RecordMisses, "record", seed)?;
+// ... このストアで組み立てて走らせる ...
+ResponseStore::merge_shards(dir)?;
+
+// オフラインで再生し，snapshot を取り，同じストアに対して再開する．
+let store = ResponseStore::open(dir, ReplayMode::ReplayOnly, "replay", seed)?;
+// ... 組み立て，走らせ，let snapshot = simulation.snapshot(); ...
+let store = ResponseStore::open(dir, ReplayMode::ReplayOnly, "resume", seed)?;
+verify_snapshot(&snapshot, &store, &identity)?;
+// ... このストアで組み立て，resumed.restore(snapshot) ...
+```
+
+### 記録されるもの
+
+LLM の決定が 1 つ以上あった Decision の最後に，Driver は表 `"game"` に 1 行を書きます（`record_row`）．
+
+| 列 | 分母 |
+|---|---|
+| `llm.parse_fail_rate` | 試行の数（論理的な呼出し．再試行を含む） |
+| `llm.clamp_rate`，`llm.value_was_string_rate`，`llm.lenient_rate` | 試行の数 |
+| `llm.cache_hit_rate` | 試行の数 |
+| `llm.retry_rate` | 決定の数（1 回以上再試行したエージェント） |
+| `llm.giveup_rate` | 決定の数（フォールバックしたエージェント） |
+
+試行はすべて（重複除去で呼出しを共有したものも）イベント `game.llm_call` として記録します．payload は次のとおりです．
+
+| キー | 値 |
+|---|---|
+| `agent`，`kind` | エージェントの添字と規則の種類 |
+| `unit`，`unit_index` | 決定単位（`"step"`）とその添字（`0`） |
+| `attempt`，`resolution` | 0 起点の試行番号．`"accept"`，`"retry"`，`"giveup"` |
+| `system`，`prompt` | 要求 |
+| `reply`，`thinking`，`usage` | 応答，思考，トークン数（ストアに当たったときも） |
+| `seed` | 生成のシード |
+| `cache_hit` | ストアから返したなら `true` |
+| `deduplicated` | 同じバッチの他のエージェントの呼出しを使い回したなら `true` |
+| `key` | 要求のキーのダイジェスト（小文字 16 桁の 16 進） |
+| `flags` | `ParseFlags`（`retry` / `giveup` ではすべて `false`） |
+
+LLM の決定が無いステップでは何も記録しません．
+
+---
+
 ## 決定論性と乱数ストリーム
 
 すべてのストリームは，`build_world` と `assemble` に渡す 1 つの `seed` から派生します．
@@ -480,7 +894,7 @@ PlayOptions::new()                                     // Sum + Stop
 |---|---|
 | `derive_seed(seed, &[0])` | World の初期化（`Assignment::Shuffled`） |
 | `derive_seed(seed, &[1])` | エンジン（スケジューラー，およびステップの RNG を通した `Matching` と `decide` の乱数） |
-| `derive_seed(seed, &[2])` | `decision_root`．World に保存され，決定時のストリームのために予約されている |
+| `derive_seed(seed, &[2])` | `decision_root`．World に保存される．`game_llm_decide` は生成のシードとフォールバックのストリームをここから導く（[シード](#game_llm_decide-の-decision-の流れ) を参照） |
 | `derive_seed(seed, &[3, agent, generation])` | 規則の状態の初期化（`RuleInitContext::init_seed`） |
 
 したがってゲームのシミュレーションではラベル `[2]` と `[3]` が予約済みです．独自のストリームには `[4]` 以上を使ってください

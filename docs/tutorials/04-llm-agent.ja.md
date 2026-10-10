@@ -160,6 +160,13 @@ cargo build -p socsim-llm --all-features --example tutorial_llm_agent
 
 `build_live_client`，`RunMetadata`，`llm_meta.json` サイドカーの永続化については [ライブラリAPIのLLMの節](../library.ja.md#ライブラリモードでの-llm-エージェントと結果出力) を参照してください．
 
+## 戦略形ゲームでの LLM エージェント
+
+エージェントが段階ゲーム（囚人のジレンマ，協調ゲームなど）を対戦するなら，Decision の Mechanism を自分で書く必要はありません．
+`socsim-games`（feature `llm`）の `game_llm_decide` が，ステップの LLM の決定をまとめてバッチにし，
+LLM のエージェントと規則で動くエージェントを同じ World に混ぜ，応答ストアから応答を再生し，呼出しを 1 つずつ記録します．
+[`docs/games.ja.md` の LLM による決定](../games.ja.md#llm-による決定) を参照してください．
+
 ## 次へ
 
 [T5 — シナリオパック](05-scenario-pack.ja.md)：メカニズムを `ModulePack` にまとめ，シナリオTOMLとCLIから駆動します．

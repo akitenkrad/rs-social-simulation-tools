@@ -24,6 +24,13 @@ The rule objects themselves are shared code. Every agent's rule state lives in
 the world's `PolicyTable`, so the mechanism holds no state that matters for a
 resumed run.
 
+`game_decide` drives only the kinds of its `RuleBook`. Which driver owns a kind
+is fixed by the `KindCatalog`: with the `llm` feature, kinds registered in an
+`LlmRuleBook` belong to [`game_llm_decide`](game-llm-decide.md), and
+`game_decide` skips those agents in both Decision and Reward, leaving their
+seats for `game_llm_decide`, which `assemble_with_llm` registers right after
+`game_decide`.
+
 ## 2. Theory & source
 
 A decision rule is a behavioural strategy for the repeated game: a map from
@@ -58,10 +65,13 @@ Registers **Decision** and **Reward**.
 
 - **Decision** — after `game_match` in the same phase (registration order), so
   the encounters exist. Agents are visited in the scheduler's activation order
-  (`ctx.agent_order`); unseated agents are skipped.
+  (`ctx.agent_order`); unseated agents and agents of LLM kinds are skipped.
+  With `assemble_with_llm`, `game_llm_decide` runs next in the same phase and
+  fills the LLM agents' seats.
 - **Reward** — after `game_play` (Interaction) has filled payoffs and appended
   the step history, so `learn_step` sees the complete step. Agents are visited
-  in sorted `AgentId` order; `Held` agents are skipped.
+  in sorted `AgentId` order; `Held` agents and agents of LLM kinds are skipped
+  (`game_llm_decide`'s Reward runs after this one).
 
 ## 5. State read/write contract
 
@@ -80,7 +90,8 @@ Registers **Decision** and **Reward**.
 - **Upstream:** `game_match` (Decision) must have written the encounters;
   `game_play` (Interaction) must have written payoffs and the step history
   before Reward.
-- **Downstream:** `game_play` requires every seat to hold an action.
+- **Downstream:** `game_play` requires every seat to hold an action; seats of
+  LLM agents are filled by `game_llm_decide`, registered after `game_decide`.
 - **Information structure:** the default view shows only opponents in the
   agent's own encounter (`opponent_history` returns `None` for anyone else);
   the whole world is readable only through `omniscient()`. During Decision,
@@ -93,6 +104,8 @@ Registers **Decision** and **Reward**.
 | `rules: RuleBook<G, X>` | — | structural | Passed to `assemble`; kinds registered by name. |
 | `opts.on_invalid_action` | `OnInvalidAction::Stop` | policy | `Stop`: an invalid action fails the step. `Fallback(map)`: replace by the kind's fallback action and record `game.invalid_action`. |
 
+The `Fallback` map covers this mechanism's kinds only; LLM kinds are not
+listed there (their fallback is the `RetryProtocol` of the LLM rule).
 With `Fallback`, `assemble` requires a fallback for every rule kind in use and
 checks each fallback with `check_action` for every role. The event payload is
 `{ "agent", "kind", "role", "action" }` (the rejected action, `Debug`-formatted).

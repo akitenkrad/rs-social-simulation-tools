@@ -21,9 +21,11 @@ allowed to see, and how to assemble a runnable simulation.
 | *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`) and `MatrixGame` | **none** — the default build depends on no `socsim-*` crate |
 | `core` | the world (`GameWorld`), rules, outcome rules, matching, views, `build_world` | `socsim-core` |
 | `engine` | `assemble` (returns a `SimulationBuilder`); implies `core` | `socsim-core`, `socsim-engine` |
+| `llm` | LLM-backed decision rules, the response store and the replay manifest (see [LLM decisions](#llm-decisions-feature-llm)); implies `core`. The `game_llm_decide` mechanism and `assemble_with_llm` also need `engine` | `socsim-core`, `socsim-llm` (default features only — no networking) |
+| `live` | `live_backend_factory()` (the cache-free Ollama → OpenAI backend); implies `llm` | as `llm`, plus `socsim-llm/live` |
 
-The crate depends on neither `socsim-llm`, `socsim-config` nor `socsim-runner`.
-A simulation needs both features:
+Without `llm`, the crate does not depend on `socsim-llm`; it never depends on
+`socsim-config` or `socsim-runner`. A simulation needs `core` and `engine`:
 
 ```toml
 socsim-games = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-games", features = ["engine"] }
@@ -447,6 +449,11 @@ Interaction  game_play    OutcomeRule → payoffs → aggregation → history
 Reward       game_decide  learn_step (rule state)
 ```
 
+With the `llm` feature, `assemble_with_llm` registers a fourth mechanism,
+[`game_llm_decide`](mechanisms/game-llm-decide.md) (Decision, Reward), between
+`game_decide` and `game_play`: it fills the seats of agents whose kind is an LLM
+rule (see [LLM decisions](#llm-decisions-feature-llm)).
+
 Mechanisms you add after `assemble` (`.add_mechanism(...)` on the returned
 builder) run after the game mechanisms within each phase — a `Reward`-phase
 mechanism therefore sees this step's payoffs.
@@ -511,6 +518,476 @@ PlayOptions::new()                                     // Sum + Stop
 
 ---
 
+## LLM decisions (feature `llm`)
+
+With the `llm` feature, an agent's action can come from a language model. LLM
+rules are not `DecisionRule`s: they are driven by a separate mechanism,
+[`game_llm_decide`](mechanisms/game-llm-decide.md) (`LlmDriver`), which collects
+every LLM decision of the step, sends them as one batch, and only then fixes the
+actions. Immediate rules (`game_decide`) and LLM rules (`game_llm_decide`) can be
+mixed in the same world — each kind is owned by exactly one of the two drivers.
+
+```toml
+socsim-games  = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-games", features = ["llm", "engine"] }
+socsim-core   = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-core" }
+socsim-engine = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-engine" }
+socsim-llm    = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-llm" }
+```
+
+Everything below lives in `socsim_games::llm`. Add the `live` feature (to
+`socsim-games`) only when you want the built-in Ollama → OpenAI backend; tests
+and offline replays need no networking.
+
+### Two-stage decisions: `prepare` → batch → `resolve`
+
+```rust
+pub trait LlmDecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
+    fn name(&self) -> &str;
+    fn init_state(&self, ctx: &RuleInitContext, game: &G) -> Result<X::PolicyState, RuleError>;
+    /// Stage 1: render the request. Pure; no RNG; the state is read-only.
+    fn prepare(
+        &self,
+        state: &X::PolicyState,
+        ctx: &DecisionContext<'_, G, X>,
+    ) -> Result<DecisionRequest, RuleError>;
+    /// Stage 2: turn the reply into an action, a retry, or a fallback.
+    fn resolve(
+        &self,
+        state: &mut X::PolicyState,
+        req: &DecisionRequest,
+        reply: &LlmReply,
+        rctx: &mut ResolveContext<'_, G>,
+    ) -> Resolution<G::Action>;
+    /// Reward phase. Never calls the model.
+    fn learn_step(
+        &self,
+        state: &mut X::PolicyState,
+        ctx: &LearnContext<'_, G, X>,
+    ) -> Result<(), RuleError> { Ok(()) }
+}
+```
+
+- `prepare` returns a `DecisionRequest { system, prompt, attempt }` (`attempt`
+  starts at 0). The generation conditions — temperature, seed, `max_tokens`,
+  `think`, … — are not chosen by the rule; the driver attaches them from the
+  `LlmConfig` in `LlmSetup` and from the decision unit.
+- `resolve` receives the `LlmReply { text, thinking, usage, cache_hit }` and a
+  `ResolveContext { game, role, previous, fallback_rng, t }`, where `previous`
+  is the agent's held action from the previous step and `fallback_rng` is a
+  stream derived from the decision unit. It returns
+  `Resolution::Accept { action, flags }`, `Resolution::Retry(next_request)` or
+  `Resolution::GiveUp { action, fallback, violation }`.
+- The model is called **only** inside the driver's Decision phase.
+  `learn_step` (Reward) only updates the rule's state.
+
+### Kinds across two drivers: `KindCatalog` and `build_world_with`
+
+`build_world` only knows a `RuleBook`. When some kinds are LLM rules, describe
+every kind with a `KindCatalog` and build the world with `build_world_with`
+(same arguments as `build_world`, with `&catalog` in place of `&rules`):
+
+```rust
+let catalog = KindCatalog::new()
+    .with_rules(&rules)?      // kinds owned by game_decide
+    .with_llm(&llm_rules)?;   // kinds owned by game_llm_decide
+```
+
+- A kind registered by both books is `RuleError::DuplicateKind`.
+- Kind ids follow the sorted union of all kind names, so they do not depend on
+  which driver owns a kind or on registration order. `catalog.kinds()`,
+  `catalog.kind_id(kind)` and `catalog.driver_name(kind)` (`"game_decide"` or
+  `"game_llm_decide"`) expose the result.
+- `build_world(.., &rules, ..)` is exactly
+  `build_world_with(.., &KindCatalog::from_rules(&rules), ..)`.
+- `assemble` checks that the world's kind list equals its `RuleBook`'s, and
+  `assemble_with_llm` that it equals the catalog of `rules` + `llm_rules`; a
+  difference is `GameError::InvalidKinds { expected, actual }`. A world with LLM
+  kinds is therefore assembled with `assemble_with_llm`.
+- Each driver skips the kinds it does not own: `game_decide` leaves the seats of
+  LLM agents empty, and `game_llm_decide` fills them.
+
+### Example: an LLM agent against Tit-for-Tat
+
+The backend here is `ScriptedClient`, so the program runs offline. Replace the
+factory with `live_backend_factory()` (feature `live`) to call a real model.
+
+```rust
+use std::sync::Arc;
+
+use socsim_games::llm::{
+    assemble_with_llm, BackendFactory, BackendIdentity, LabelParser, LlmPolicy,
+    LlmReplayManifest, LlmRuleBook, LlmSetup, MarkdownTableRenderer, OwnHistoryObs, ReplayMode,
+    ResponseStore, WithLlm,
+};
+use socsim_games::{
+    build_world_with, AssignGroup, AssignKind, Assignment, FixedPlayers, InitialActions,
+    KindCatalog, MatrixGame, NormalFormOutcome, PlayOptions, RuleBook, TitForTat,
+};
+use socsim_llm::mock::ScriptedClient;
+
+type X = WithLlm<()>; // the replay manifest lives in the experiment state
+
+fn main() {
+    // Prisoner's dilemma with labels the model answers with.
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap()
+    .with_labels(vec![
+        vec!["C".to_owned(), "D".to_owned()],
+        vec!["C".to_owned(), "D".to_owned()],
+    ])
+    .unwrap();
+
+    // Immediate rules (game_decide) and LLM rules (game_llm_decide).
+    let mut rules: RuleBook<MatrixGame, X> = RuleBook::new();
+    rules.register("tit_for_tat", Arc::new(TitForTat::new(0))).unwrap();
+    let mut llm_rules: LlmRuleBook<MatrixGame, X> = LlmRuleBook::new();
+    llm_rules
+        .register(
+            "llm",
+            Arc::new(LlmPolicy::new(
+                OwnHistoryObs::new(5),
+                MarkdownTableRenderer::default(),
+                LabelParser::strict(),
+            )),
+        )
+        .unwrap();
+
+    // One catalog of every kind, across both drivers.
+    let catalog = KindCatalog::new()
+        .with_rules(&rules)
+        .unwrap()
+        .with_llm(&llm_rules)
+        .unwrap();
+
+    // Response store + backend. The backend factory is called once per worker.
+    let store = ResponseStore::in_memory("ipd-llm", ReplayMode::RecordMisses);
+    let identity = BackendIdentity {
+        model: "scripted".to_owned(),
+        endpoint: "mock://scripted".to_owned(),
+    };
+    let backend: BackendFactory = Arc::new(|| {
+        Ok(Box::new(ScriptedClient::constant(
+            "scripted",
+            r#"{"action": "D", "reason": "defect"}"#,
+        )))
+    });
+
+    let seed = 7;
+    let rounds = 5;
+    let x = WithLlm {
+        inner: (),
+        llm: LlmReplayManifest::for_store(&store, identity.clone()),
+    };
+    let world = build_world_with(
+        game,
+        2,
+        x,
+        InitialActions::Same(0),
+        &catalog,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("llm".to_owned()), count: 1 },
+            AssignGroup { kind: AssignKind::Rule("tit_for_tat".to_owned()), count: 1 },
+        ]),
+        rounds,
+        rounds as u64,
+        seed,
+    )
+    .unwrap();
+
+    let setup = LlmSetup::new(llm_rules, store, backend, identity);
+    let mut simulation = assemble_with_llm(
+        world,
+        FixedPlayers::pairs(&[(0, 1)]),
+        rules,
+        setup,
+        NormalFormOutcome,
+        PlayOptions::new(),
+        seed,
+    )
+    .unwrap()
+    .build();
+
+    for _ in 0..rounds {
+        simulation.step().unwrap();
+        println!("held = {:?}", simulation.world().held());
+    }
+}
+```
+
+```text
+held = [1, 0]
+held = [1, 1]
+held = [1, 1]
+held = [1, 1]
+held = [1, 1]
+```
+
+`assemble_with_llm(world, matching, rules, llm, outcome, opts, seed)` takes the
+same arguments as `assemble` plus the `LlmSetup`, requires
+`X: HasLlmManifest` (see [manifest](#manifest-and-what-a-resume-guarantees)),
+and registers `game_match` → `game_decide` → `game_llm_decide` → `game_play`.
+`OnInvalidAction::Fallback` applies to `game_decide` kinds only: list only
+`RuleBook` kinds in its map (an LLM kind there is `RuleError::UnknownKind`); LLM
+kinds fall back through their `RetryProtocol`.
+
+### Building blocks of `LlmPolicy`
+
+`LlmPolicy::new(obs, renderer, parser)` is the built-in `LlmDecisionRule`. It
+is one generic type over three parts — what the agent observes, how that
+becomes a prompt, and how the reply becomes an action:
+
+```rust
+LlmPolicy::new(OwnHistoryObs::new(5), MarkdownTableRenderer::default(), LabelParser::strict())
+    .with_retry(RetryProtocol { max_retries: 2, fallback: Fallback::Previous })  // default: 1, Previous
+    .with_max_turns(32)                                                          // default: 16
+```
+
+Its state is an `LlmConversation { max_turns, turns }` in `X::PolicyState`, so
+the policy requires `X::PolicyState: Slot<LlmConversation>`
+(`BuiltinPolicyState` has an `Llm` variant under `llm`). Each decision appends a
+`ConversationTurn { t, action, attempts, gave_up, payoff }` (`action` is the
+`Debug` form; `payoff` is filled in Reward); the oldest turn is dropped beyond
+`max_turns`. The record is for analysis — it is not replayed into the prompt.
+
+**Observations** (`ObservationProvider<G, X>`, built from the `DecisionContext`
+only — the information structure of [default views](#information-structure-default-views-view_for-and-omniscient)
+holds):
+
+| Provider | `Obs` | Content |
+|---|---|---|
+| `OwnHistoryObs::new(window)` | `OwnHistory<G::Action>` | `t`, `role`, own last `window` `StepRecord`s (oldest first), and the last action of each current opponent (`None` if it has none) |
+| `CountsObs` (`G: FiniteGame`) | `ActionCounts` | `role`, own last action, and how many current opponents last played each action. It has no `t`, so agents in the same situation produce the same prompt and share one call |
+
+**Renderers** (`GameRenderer<G, Obs>`: `rules` → the system prompt, `turn` → the
+prompt, `feedback` → the text appended on a retry):
+
+| Renderer | Pairs with | System prompt |
+|---|---|---|
+| `MarkdownTableRenderer` (`G: FiniteGame`) | `OwnHistoryObs` | the payoff table from `action_label` (a bimatrix for two roles, one table per role otherwise) and the reply format `{"action": "<action label>", "reason": "<reason>"}` |
+| `CountsRenderer` (`G: FiniteGame`) | `CountsObs` | the role, the available labels, and the same reply format |
+
+**Parsers** (`ActionParser<G>`):
+
+- `LabelParser::strict()` — the reply must be a JSON object, bare or in a single
+  Markdown fence (```` ``` ```` or ```` ```json ````), whose `"action"` string
+  equals one of the role's labels exactly. Anything else is a violation.
+- `LabelParser::lenient()` — tries the strict match first; if it fails, finds
+  the first label mentioned anywhere in the reply
+  (`socsim_llm::extract_first_choice`: case-insensitive, on word boundaries,
+  earliest wins) and sets `ParseFlags::lenient_match`.
+  `.with_synonyms(label, &[..])` adds words that count as that label.
+  **Lenient matching requires every label of every role to be ASCII
+  `[A-Za-z0-9_-]+`**; this is checked when rule state is initialised, so
+  `build_world_with` fails with `RuleError::Unsupported` otherwise. Strict
+  matching accepts any label.
+- `.require_reason(true)` additionally requires a string `"reason"` field; a
+  missing reason is a violation even in lenient mode.
+- `NumberParser::new(field).bounds(lo, hi).out_of_range(OutOfRange::Clamp)` is
+  a standalone helper (`parse_number(raw) -> ParseOutcome<f64>`) for numeric
+  answers: a JSON number or a numeric string (`value_was_string`), finite only;
+  out of range is `Violation` (default) or clamped (`clamped`). It is not an
+  `ActionParser` for `MatrixGame`.
+
+Each accepted reply carries `ParseFlags { fenced, value_was_string, clamped,
+lenient_match }`; each rejected one a `Violation { kind, message }` with
+`ViolationKind::{Format, Label, Range, InvalidAction}`.
+
+**Retries and fallbacks** — `RetryProtocol { max_retries, fallback }`. While
+`attempt < max_retries`, a violation produces a retry whose prompt is the
+previous prompt plus the renderer's `feedback`; all retries of a step are sent
+together as the next batch. After that the policy gives up with the fallback:
+
+| `Fallback` | Action |
+|---|---|
+| `Previous` (default) | the agent's held action from the previous step |
+| `UniformRandom` | a uniform draw by the parser, from `fallback_rng` (derived from the decision unit; never the engine stream) |
+| `Specified(action)` | `action` |
+
+The driver checks every final action with `check_action`; an invalid one stops
+the step with `RuleError::InvalidAction`.
+
+### One Decision step of `game_llm_decide`
+
+1. **Prepare** — for every seated agent whose kind is an LLM kind, in the
+   scheduler's activation order, call `prepare`.
+2. **Deduplicate** — requests with the same cache key (below) are sent once.
+3. **Look up** — on the main thread, look each request up in the
+   `ResponseStore` (not in `Live` mode). A miss under `ReplayOnly` stops the step.
+4. **Execute** — send only the misses to the `LlmExecutor`.
+5. **Resolve** — call `resolve` in decision order; collect `Retry` requests and
+   repeat 2–5 for them as one more batch; `GiveUp` fixes the fallback.
+6. **Write back** — write every fixed action to its seat and to `held`.
+
+**Seeds.** With `temperature == 0` every request uses the constant seed
+`derive_seed(decision_root, &[0])`, so identical prompts share one key, one call
+and one stored record. With any other temperature, the seed is
+`derive_seed(decision_root, &[t, agent, 0, 0, attempt])` (one per decision and
+attempt), so requests from different agents generally differ. The fallback
+stream is `derive_seed(decision_root, &[t, agent, 0, 0, u64::MAX])`. The driver
+never draws from the engine's step RNG, so the order of activation and the
+number of workers do not change the result.
+
+**Setup.**
+
+```rust
+let setup = LlmSetup::new(llm_rules, store, backend, identity)
+    .executor(LlmExecutor::Threaded { workers: 4 })   // default: Sequential
+    .options(options)                                 // default: ExecutorOptions::default()
+    .config(LlmConfig::deterministic());              // default; the seed is always overwritten
+```
+
+`config` is the base of every request's `LlmConfig`; the driver overwrites its
+`seed`, and its `system` whenever the request has one (the built-in policy always
+does).
+
+### Response store
+
+`ResponseStore` replaces `socsim_llm::PromptCache` for game simulations. Each
+request is identified by a versioned key:
+
+```rust
+pub struct CacheKeyV1 {
+    pub version: u32,                 // 1
+    pub backend: BackendIdentity,     // { model, endpoint }
+    pub system: Option<String>,
+    pub prompt: String,
+    pub temperature_bits: u32,        // f32::to_bits, so 0.2 and 0.8 differ (and 0.0 / -0.0 too)
+    pub seed: u64,
+    pub omit_seed: bool,
+    pub max_tokens: Option<u32>,
+    pub think: Option<bool>,
+    pub allow_blank: bool,
+}
+```
+
+The lookup key is the 64-bit FNV-1a of `canonical_json()`; the full key is
+stored with each `ResponseRecord { key, text, thinking, usage,
+backend_metadata }` and compared on every hit, so a digest collision is
+detected (`StoreError::KeyCollision`) rather than served. A hit restores the
+thinking trace and token usage, so a replayed call is recorded exactly like a
+live one except for `cache_hit`.
+
+| Constructor | Storage |
+|---|---|
+| `ResponseStore::in_memory(store_id, mode)` | memory only (tests) |
+| `ResponseStore::open(dir, mode, run_tag, seed)` | `dir/store_id` (created on first open, then reused), `dir/base.jsonl` (read-only; may be absent) and this run's shard `dir/shards/<run_tag>-<seed>.jsonl` (read, and appended to) |
+
+| `ReplayMode` | Store lookup | On a miss | Writes |
+|---|---|---|---|
+| `ReplayOnly` | yes | the step fails | none |
+| `RecordMisses` | yes | the backend is called | the new record, to this run's shard |
+| `Live` | no | (every request goes to the backend) | none |
+
+**Shards are merged only when you ask.** `open` reads the base and its own
+shard, not other runs' shards. Call `ResponseStore::merge_shards(dir)` after
+the runs that recorded (for example after a multi-seed sweep) to fold every
+shard into `base.jsonl` (written to a unique temporary file and renamed) and
+delete the shards; it returns a `MergeReport { records_added,
+duplicate_records, shards_merged }`. Two records with the same key and
+different content are `StoreError::Conflict`. Merging changes the base digest,
+so a manifest written before the merge no longer matches the store.
+
+### Executor and backends
+
+```rust
+pub type BackendFactory = Arc<dyn Fn() -> Result<Box<dyn LlmClient>, LlmError> + Send + Sync>;
+```
+
+The executor builds its backend from the factory **in the thread that uses it**
+(an `LlmClient` is not `Send`): once per batch for `Sequential`, once per worker
+for `Threaded`, and not at all for a batch in which every request hit the store. The backend must not cache — the response store is the cache.
+`live_backend_factory()` (feature `live`) wraps `socsim_llm::build_live_backend`;
+in tests return a `socsim_llm::mock::ScriptedClient`.
+
+| `LlmExecutor` | Runs calls on |
+|---|---|
+| `Sequential` (default) | the main thread, one at a time |
+| `Threaded { workers }` | `workers` threads, fed through a bounded queue; only the main thread writes to the store |
+
+| `ExecutorOptions` field | Default | Meaning |
+|---|---|---|
+| `timeout` | 120 s | per call; **`Threaded` only** (a `Sequential` call cannot be interrupted). A timed-out call is not resent and fails the step |
+| `max_backend_retries` | 3 | resends after a backend error; when exhausted the step fails with `RuleError::Backend` |
+| `backoff_base` | 1 s | the k-th resend waits `backoff_base × 2^(k-1)` |
+| `queue_per_worker` | 2 | queue capacity = `workers × queue_per_worker` |
+
+`ExecutorOptions` is `#[non_exhaustive]`: start from `ExecutorOptions::default()`
+and assign fields. `workers == 0` or `queue_per_worker == 0` is a backend error.
+Because seeds come from the decision unit and resolution follows the decision
+order, `Sequential` and `Threaded` produce identical worlds.
+
+### Manifest and what a resume guarantees
+
+A real model can answer the same request differently, so a snapshot resumes
+exactly only if the resumed run sees the same responses. The world therefore
+records which responses it was run against: `WithLlm<X> { inner, llm }` wraps
+your experiment state (delegating `PolicyState` and `view_for` to `inner`) and
+carries an `LlmReplayManifest { store_id, base_digest, mode, backend }`, built
+with `LlmReplayManifest::for_store(&store, identity)`. `assemble_with_llm`
+requires `X: HasLlmManifest`, which `WithLlm<X>` implements.
+
+- On every Decision the driver compares the world's manifest with its own
+  store (`store_id`, `base_digest`, `mode`) and `BackendIdentity`; any
+  difference stops the step. A snapshot restored into a simulation that has
+  already run is therefore checked on its next Decision as well.
+- `verify_snapshot(&snapshot, &store, &identity)` performs the same check
+  before you call `restore` and returns `GameError::ManifestMismatch`.
+- A resumed run matches the uninterrupted run **only** under `ReplayOnly`, or
+  under `RecordMisses` when every request after the resume hit the store
+  (`cache_hit` in `game.llm_call`, `llm.cache_hit_rate == 1`). Under `Live`
+  nothing is guaranteed. The mode is part of the manifest, so resume with the
+  mode the snapshot was taken with.
+
+```rust
+// Record, then fold the shards into the base.
+let store = ResponseStore::open(dir, ReplayMode::RecordMisses, "record", seed)?;
+// ... build with this store and run ...
+ResponseStore::merge_shards(dir)?;
+
+// Replay offline, snapshot, and resume against the same store.
+let store = ResponseStore::open(dir, ReplayMode::ReplayOnly, "replay", seed)?;
+// ... build, run, let snapshot = simulation.snapshot(); ...
+let store = ResponseStore::open(dir, ReplayMode::ReplayOnly, "resume", seed)?;
+verify_snapshot(&snapshot, &store, &identity)?;
+// ... build with this store, then resumed.restore(snapshot) ...
+```
+
+### What is recorded
+
+At the end of each Decision with at least one LLM decision, the driver writes a
+row to table `"game"` (`record_row`):
+
+| Column | Denominator |
+|---|---|
+| `llm.parse_fail_rate` | attempts (logical calls, retries included) |
+| `llm.clamp_rate`, `llm.value_was_string_rate`, `llm.lenient_rate` | attempts |
+| `llm.cache_hit_rate` | attempts |
+| `llm.retry_rate` | decisions (agents that needed at least one retry) |
+| `llm.giveup_rate` | decisions (agents that fell back) |
+
+Every attempt — including one that shared a deduplicated call — is recorded as
+an event `game.llm_call` with payload:
+
+| Key | Value |
+|---|---|
+| `agent`, `kind` | agent index and rule kind |
+| `unit`, `unit_index` | decision unit (`"step"`) and its index (`0`) |
+| `attempt`, `resolution` | 0-based attempt; `"accept"`, `"retry"` or `"giveup"` |
+| `system`, `prompt` | the request |
+| `reply`, `thinking`, `usage` | the response, the thinking trace and token usage (also on a store hit) |
+| `seed` | the generation seed |
+| `cache_hit` | `true` if served by the store |
+| `deduplicated` | `true` if this attempt reused another agent's call in the same batch |
+| `key` | the request key's digest, 16 lowercase hex digits |
+| `flags` | `ParseFlags` (all `false` for `retry` / `giveup`) |
+
+Steps without any LLM decision record nothing.
+
+---
+
 ## Determinism & RNG streams
 
 Every stream derives from the one `seed` passed to `build_world` and `assemble`:
@@ -519,7 +996,7 @@ Every stream derives from the one `seed` passed to `build_world` and `assemble`:
 |---|---|
 | `derive_seed(seed, &[0])` | world initialisation (`Assignment::Shuffled`) |
 | `derive_seed(seed, &[1])` | the engine (scheduler, `Matching` and `decide` draws via the step RNG) |
-| `derive_seed(seed, &[2])` | `decision_root`, stored in the world and reserved for decision-time streams |
+| `derive_seed(seed, &[2])` | `decision_root`, stored in the world; `game_llm_decide` derives its generation seeds and fallback streams from it (see [Seeds](#one-decision-step-of-game_llm_decide)) |
 | `derive_seed(seed, &[3, agent, generation])` | rule-state initialisation (`RuleInitContext::init_seed`) |
 
 Labels `[2]` and `[3]` are therefore reserved in a game simulation — use `[4]`

@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 1040 770" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>socsim mechanisms across the 6-phase tick loop</title>
-<desc>The documented mechanisms placed in the phase(s) they fire in: PreStep, Environment, Decision, Interaction, Reward, PostStep. The Interaction column also holds the eight general mechanisms hegselmann_krause, deffuant, social_judgement, lorenz, si_contagion, threshold_contagion, axelrod, and group_conformity from the general socsim-mechanisms crate. The three socsim-games mechanisms are drawn as amber dashed chips: game_match (PreStep and Decision), game_decide (Decision and Reward), and game_play (Interaction). Arrows show the fixed per-step phase order; the curved arrow closes the loop for the next step.</desc>
+<desc>The documented mechanisms placed in the phase(s) they fire in: PreStep, Environment, Decision, Interaction, Reward, PostStep. The Interaction column also holds the eight general mechanisms hegselmann_krause, deffuant, social_judgement, lorenz, si_contagion, threshold_contagion, axelrod, and group_conformity from the general socsim-mechanisms crate. The four socsim-games mechanisms are drawn as amber dashed chips: game_match (PreStep and Decision), game_decide (Decision and Reward), game_llm_decide (feature llm; drawn in Decision, it also runs in Reward), and game_play (Interaction). Arrows show the fixed per-step phase order; the curved arrow closes the loop for the next step.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -117,6 +117,8 @@
   <text x="435" y="370" fill="#7A3E0C" text-anchor="middle">game_match</text>
   <rect x="360" y="386" width="150" height="28" rx="8" fill="#FAEEDA" stroke="#B5651D" stroke-width="1.2" stroke-dasharray="5 3"/>
   <text x="435" y="404" fill="#7A3E0C" text-anchor="middle">game_decide</text>
+  <rect x="360" y="420" width="150" height="28" rx="8" fill="#FAEEDA" stroke="#B5651D" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="435" y="438" fill="#7A3E0C" text-anchor="middle">game_llm_decide</text>
   <rect x="520" y="596" width="150" height="28" rx="8" fill="#FAEEDA" stroke="#B5651D" stroke-width="1.2" stroke-dasharray="5 3"/>
   <text x="595" y="614" fill="#7A3E0C" text-anchor="middle">game_play</text>
   <rect x="680" y="208" width="150" height="28" rx="8" fill="#FAEEDA" stroke="#B5651D" stroke-width="1.2" stroke-dasharray="5 3"/>

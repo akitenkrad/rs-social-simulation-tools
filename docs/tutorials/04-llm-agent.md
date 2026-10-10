@@ -160,6 +160,15 @@ cargo build -p socsim-llm --all-features --example tutorial_llm_agent
 
 See the [Library API LLM section](../library.md#llm-agents-and-result-output-in-library-mode) for `build_live_client`, `RunMetadata`, and persisting an `llm_meta.json` sidecar.
 
+## LLM agents in normal-form games
+
+If your agents play a stage game (prisoner's dilemma, coordination, …), you do
+not need to write the Decision mechanism yourself: `socsim-games` (feature
+`llm`) provides `game_llm_decide`, which batches every LLM decision of a step,
+mixes LLM agents with rule-driven ones in the same world, replays responses from
+a response store, and records each call. See
+[LLM decisions in `docs/games.md`](../games.md#llm-decisions-feature-llm).
+
 ## Next
 
 [T5 — A scenario pack](05-scenario-pack.md): package mechanisms into a `ModulePack` and drive them from scenario TOML and the CLI.

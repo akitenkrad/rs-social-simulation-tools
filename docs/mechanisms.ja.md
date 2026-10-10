@@ -8,10 +8,10 @@
 メカニズムはニューラルネットワーク層のように合成され，各メカニズムが `WorldState` を読み書きし，
 エンジンがそれらを毎ステップ固定順序で実行します．
 
-このカタログでは，socsim に同梱されている**31個**のメカニズムを解説します．内訳は，
+このカタログでは，socsim に同梱されている**32個**のメカニズムを解説します．内訳は，
 公表された経験的知見に対してキャリブレーション済みの参照用[HR ライフサイクル](usecases.ja.md)メカニズム10個，
 [組織的沈黙](packs/organizational-silence.ja.md)メカニズム9個（沈黙動機＋スパイラル＋階層型ネットワーク上の閾値カスケード），
-学習可能な MARL `policy` メカニズム1個，[`socsim-games`](games.ja.md) クレートの戦略形ゲームのメカニズム3個（`game_match`，`game_decide`，`game_play`），および8個の社会ダイナミクスメカニズム
+学習可能な MARL `policy` メカニズム1個，[`socsim-games`](games.ja.md) クレートの戦略形ゲームのメカニズム4個（`game_match`，`game_decide`，`game_llm_decide`，`game_play`），および8個の社会ダイナミクスメカニズム
 （`hegselmann_krause`，`deffuant`，`social_judgement`，`lorenz`，`si_contagion`，`threshold_contagion`，`axelrod`，`group_conformity`）
 — 汎用の非 HR `socsim-mechanisms` クレート — です．
 
@@ -33,7 +33,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 同一フェーズ内ではシナリオでの宣言順（＝挿入順）に発火します．破線の緑矢印は，1ステップ内での**共有状態の受け渡し**を示します．
 たとえば `turnover` が `departed_this_step` を設定し，PostStep で `knowledge_loss` がそれを読み取ります．
 
-## 31個のメカニズム
+## 32個のメカニズム
 
 | メカニズム | フェーズ | 出典 | 種別 | 概要 |
 |---|---|---|---|---|
@@ -59,6 +59,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`policy`](mechanisms/policy-mechanism.ja.md) | Decision | MARL (§14.1) | learnable | 学習済み RL ポリシーをドロップイン型 Decision メカニズムとして利用する（ライブラリ専用）． |
 | [`game_match`](mechanisms/game-match.ja.md) | PreStep, Decision | matching protocol | structural | ステップごとの対戦の状態を空にし，`Matching` がそのステップの対戦の席にエージェントを着ける（ライブラリ専用）． |
 | [`game_decide`](mechanisms/game-decide.ja.md) | Decision, Reward | decision rules (e.g. Axelrod 1984) | rule-driven | 席に着いた各エージェントの `DecisionRule` が検査済みの行動を選び，対戦の後に規則が `learn_step` する．規則の状態は World にある（ライブラリ専用）． |
+| [`game_llm_decide`](mechanisms/game-llm-decide.ja.md) | Decision, Reward | LLM agents in repeated games | LLM-driven | LLM の種類のエージェントが要求を描画し，それをバッチにまとめ，重複を除き，応答ストアから再生するかバックエンドへ送り，再試行とフォールバックを交えて検査済みの行動にする（feature `llm`．ライブラリ専用）． |
 | [`game_play`](mechanisms/game-play.ja.md) | Interaction | normal-form payoffs | structural | 対戦ごとに `OutcomeRule` で利得を計算し，エージェントごとに集計（`Sum`/`Mean`）してステップ履歴に記録する（ライブラリ専用）． |
 | [`hegselmann_krause`](mechanisms/hegselmann-krause.ja.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | ε 以内の意見の選択された平均へ向かう同期的な有界信頼更新（ライブラリ専用）． |
 | [`deffuant`](mechanisms/deffuant.ja.md) | Interaction | Deffuant et al. (2000) | bounded-confidence | ペアの有界信頼更新：ε 以内の2エージェントが率 μ で収束する（ライブラリ専用）． |
@@ -69,7 +70,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`axelrod`](mechanisms/axelrod.ja.md) | Interaction | Axelrod (1997) | cultural dissemination | 出会いのたびに類似度に等しい確率で異なる特徴を1つコピーする（ライブラリ専用）． |
 | [`group_conformity`](mechanisms/group-conformity.ja.md) | Interaction | DeGroot (1974) | within-group averaging | 各エージェントが自グループの平均意見へ向けて割合 α だけ移動し，グループは独立に収束する（ライブラリ専用）． |
 
-3つの `game_*` 行は `socsim_games::assemble` がまとめて登録するもので，[戦略形ゲーム](games.ja.md)のページで文脈とともに説明しています．いずれもライブラリ専用です．
+`game_*` の行は `socsim_games::assemble`（`game_match`，`game_decide`，`game_play`）か `socsim_games::llm::assemble_with_llm`（4 つすべて）がまとめて登録するもので，[戦略形ゲーム](games.ja.md)のページで文脈とともに説明しています．いずれもライブラリ専用です．
 最後の8行は，汎用の（非 HR）[`socsim-mechanisms`](architecture.ja.md#クレートワークスペース)クレートの
 メンバーであり，HR ライフサイクルクレートおよび組織的沈黙クレートとは区別される再利用可能でドメイン非依存な社会ダイナミクスの構成要素
 （意見ダイナミクス，ネットワーク伝播，文化伝播）です．

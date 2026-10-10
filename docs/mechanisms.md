@@ -9,13 +9,13 @@ a single `apply` method — and is composed with other mechanisms over the share
 like neural-network layers: each reads and writes the `WorldState`, and the
 engine runs them in a fixed order every step.
 
-This catalog documents the **thirty-one** mechanisms that ship with socsim:
+This catalog documents the **thirty-two** mechanisms that ship with socsim:
 the ten reference [HR lifecycle](usecases.md) mechanisms (calibrated against
 published empirical findings), the nine
 [organisational-silence](packs/organizational-silence.md) mechanisms (silence
 motives + spiral + threshold cascade on a hierarchical network), the learnable
-MARL `policy` mechanism, the three normal-form game mechanisms of the
-[`socsim-games`](games.md) crate (`game_match`, `game_decide`, `game_play`),
+MARL `policy` mechanism, the four normal-form game mechanisms of the
+[`socsim-games`](games.md) crate (`game_match`, `game_decide`, `game_llm_decide`, `game_play`),
 and the eight social-dynamics mechanisms
 (`hegselmann_krause`, `deffuant`, `social_judgement`, `lorenz`, `si_contagion`,
 `threshold_contagion`, `axelrod`, `group_conformity`) — the general, non-HR
@@ -43,7 +43,7 @@ within a phase, mechanisms fire in scenario/insertion order. The dashed green
 arrows show **shared-state hand-offs** within a single step — e.g. `turnover`
 populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 
-## The thirty-one mechanisms
+## The thirty-two mechanisms
 
 | Mechanism | Phase | Source | Kind | Summary |
 |---|---|---|---|---|
@@ -69,6 +69,7 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`policy`](mechanisms/policy-mechanism.md) | Decision | MARL (§14.1) | learnable | A learned RL policy as a drop-in Decision mechanism (library-only). |
 | [`game_match`](mechanisms/game-match.md) | PreStep, Decision | matching protocol | structural | Clears the per-step play state, then the `Matching` seats agents into this step's encounters (library-only). |
 | [`game_decide`](mechanisms/game-decide.md) | Decision, Reward | decision rules (e.g. Axelrod 1984) | rule-driven | Each seated agent's `DecisionRule` chooses a checked action; after play, rules `learn_step` — rule state lives in the world (library-only). |
+| [`game_llm_decide`](mechanisms/game-llm-decide.md) | Decision, Reward | LLM agents in repeated games | LLM-driven | Agents of LLM kinds render requests that are batched, deduplicated, replayed from a response store or sent to the backend, and parsed into checked actions with retries and fallbacks (feature `llm`; library-only). |
 | [`game_play`](mechanisms/game-play.md) | Interaction | normal-form payoffs | structural | `OutcomeRule` payoffs per encounter, aggregated per agent (`Sum`/`Mean`), recorded in the step history (library-only). |
 | [`hegselmann_krause`](mechanisms/hegselmann-krause.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | Synchronous bounded-confidence update toward the chosen mean of opinions within ε (library-only). |
 | [`deffuant`](mechanisms/deffuant.md) | Interaction | Deffuant et al. (2000) | bounded-confidence | Pairwise bounded-confidence update: two agents within ε converge by a rate μ (library-only). |
@@ -79,9 +80,10 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`axelrod`](mechanisms/axelrod.md) | Interaction | Axelrod (1997) | cultural dissemination | On each encounter copy one differing feature with probability equal to similarity (library-only). |
 | [`group_conformity`](mechanisms/group-conformity.md) | Interaction | DeGroot (1974) | within-group averaging | Each agent moves a fraction α toward its group's mean opinion; groups converge independently (library-only). |
 
-The three `game_*` rows are registered together by `socsim_games::assemble`
-and are documented in context on the [normal-form games](games.md) page; they
-are library-only. The last eight rows are the members of the general (non-HR)
+The `game_*` rows are registered together by `socsim_games::assemble`
+(`game_match`, `game_decide`, `game_play`) or `socsim_games::llm::assemble_with_llm`
+(all four) and are documented in context on the [normal-form games](games.md)
+page; they are library-only. The last eight rows are the members of the general (non-HR)
 [`socsim-mechanisms`](architecture.md#crate-workspace) crate — reusable,
 domain-agnostic social-dynamics building blocks (opinion dynamics, network contagion,
 and cultural dissemination) distinct from the HR-lifecycle and

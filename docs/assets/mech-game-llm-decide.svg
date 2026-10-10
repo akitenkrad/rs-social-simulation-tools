@@ -1,0 +1,94 @@
+<svg width="100%" viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>game_llm_decide mechanism data flow</title>
+<desc>Decision and Reward mechanism from socsim-games (LlmDriver, feature llm). In Decision, for each seated agent whose kind is an LLM rule, in activation order, it reads the seat, the agent's rule state (LlmConversation) from the PolicyTable, held actions, history and the view of X, and calls the rule's prepare to render a request. The step's requests are deduplicated, looked up in the ResponseStore on the main thread, and only the misses are sent to the LlmExecutor. Each reply is resolved into an action, a retry (sent in a further batch) or a fallback, checked with check_action, and written to the seat and to held. Under RecordMisses new responses are appended to the run's shard; every attempt is recorded as a game.llm_call event and the step's rates as a game row. In Reward it calls learn_step for every agent of its kinds. The driver does not use the engine RNG: seeds are derived from decision_root and the decision unit.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="754" height="374" rx="18" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<!-- phase strip: Decision + Reward active -->
+<g class="body" font-size="11.5">
+  <rect x="40"  y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="94"  y="45" fill="#6B6A64" text-anchor="middle">PreStep</text>
+  <rect x="156" y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="210" y="45" fill="#6B6A64" text-anchor="middle">Environment</text>
+  <rect x="272" y="28" width="108" height="26" rx="7" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+  <text x="326" y="45" fill="#534AB7" text-anchor="middle" font-weight="700">Decision</text>
+  <rect x="388" y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="442" y="45" fill="#6B6A64" text-anchor="middle">Interaction</text>
+  <rect x="504" y="28" width="108" height="26" rx="7" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+  <text x="558" y="45" fill="#534AB7" text-anchor="middle" font-weight="700">Reward</text>
+  <rect x="620" y="28" width="100" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="670" y="45" fill="#6B6A64" text-anchor="middle">PostStep</text>
+</g>
+
+<!-- input state -->
+<g>
+  <rect x="40" y="104" width="170" height="164" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
+  <text class="body" x="125" y="96" font-size="13" fill="#0F6E56" text-anchor="middle" font-weight="600">reads</text>
+  <text class="mono" x="56" y="132" font-size="12.5" fill="#0B5040">PlayArena.seats</text>
+  <text class="mono" x="56" y="154" font-size="12.5" fill="#0B5040">PolicyTable (s_i)</text>
+  <text class="mono" x="56" y="176" font-size="12.5" fill="#0B5040">held · history</text>
+  <text class="mono" x="56" y="198" font-size="12.5" fill="#0B5040">view_for(me)</text>
+  <text class="mono" x="56" y="220" font-size="12.5" fill="#0B5040">ResponseStore</text>
+  <text class="body" x="56" y="240" font-size="11" fill="#3C7E6C">X: replay manifest</text>
+  <text class="body" x="56" y="257" font-size="11" fill="#3C7E6C">Reward: step record</text>
+</g>
+
+<!-- mechanism box -->
+<g>
+  <rect x="262" y="86" width="236" height="196" rx="14" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.6"/>
+  <text class="title" x="380" y="114" font-size="18" fill="#332E6E" text-anchor="middle">game_llm_decide</text>
+  <text class="body"  x="380" y="134" font-size="12" fill="#6B6A64" text-anchor="middle">LlmDriver · two-stage LLM decision</text>
+  <line x1="282" y1="146" x2="478" y2="146" stroke="#C7C2E8" stroke-width="1"/>
+  <text class="body" x="280" y="164" font-size="11" fill="#534AB7" font-weight="700">Decision</text>
+  <text class="mono" x="280" y="181" font-size="11" fill="#332E6E">req = rule.prepare(s_i, ctx)</text>
+  <text class="mono" x="280" y="197" font-size="11" fill="#332E6E">dedupe → store → executor</text>
+  <text class="mono" x="280" y="213" font-size="11" fill="#332E6E">resolve: a | retry | fallback</text>
+  <text class="mono" x="280" y="229" font-size="11" fill="#332E6E">check_action(role, a)</text>
+  <text class="body" x="280" y="249" font-size="11" fill="#534AB7" font-weight="700">Reward</text>
+  <text class="mono" x="280" y="266" font-size="11" fill="#332E6E">rule.learn_step(s_i, ctx)</text>
+</g>
+
+<!-- output state -->
+<g>
+  <rect x="550" y="104" width="170" height="164" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
+  <text class="body" x="635" y="96" font-size="13" fill="#0F6E56" text-anchor="middle" font-weight="600">writes</text>
+  <text class="mono" x="566" y="132" font-size="12.5" fill="#0B5040">PlayArena.actions</text>
+  <text class="mono" x="566" y="154" font-size="12.5" fill="#0B5040">held</text>
+  <text class="mono" x="566" y="176" font-size="12.5" fill="#0B5040">LlmConversation</text>
+  <text class="body" x="566" y="198" font-size="11" fill="#3C7E6C">RecordMisses: store shard</text>
+  <text class="body" x="566" y="220" font-size="11" fill="#3C7E6C">event</text>
+  <text class="mono" x="602" y="220" font-size="10.5" fill="#3C7E6C">game.llm_call</text>
+  <text class="body" x="566" y="240" font-size="11" fill="#3C7E6C">row</text>
+  <text class="mono" x="592" y="240" font-size="10.5" fill="#3C7E6C">game: llm.*_rate</text>
+  <text class="body" x="566" y="257" font-size="11" fill="#3C7E6C">Reward: conversation</text>
+</g>
+
+<!-- arrows -->
+<path d="M210 184 H259" stroke="#534AB7" stroke-width="1.6" marker-end="url(#hr)"/>
+<path d="M498 184 H547" stroke="#534AB7" stroke-width="1.6" marker-end="url(#hr)"/>
+
+<!-- seed note (no engine RNG) -->
+<g>
+  <rect x="235" y="294" width="290" height="22" rx="9" fill="#FBFAF6" stroke="#534AB7" stroke-width="1" stroke-dasharray="4 3"/>
+  <text class="mono" x="380" y="309" font-size="11" fill="#534AB7" text-anchor="middle">seed = derive_seed(decision_root, unit)</text>
+</g>
+
+<!-- footnote -->
+<text class="body" x="380" y="340" font-size="12" fill="#6B6A64" text-anchor="middle">Decision: activation order, seated LLM-kind agents only · Reward: sorted AgentId, LLM-kind agents only</text>
+<text class="body" x="380" y="358" font-size="11.5" fill="#9A988F" text-anchor="middle">No engine RNG · only the main thread writes the store · Sequential and Threaded give identical worlds</text>
+
+</svg>

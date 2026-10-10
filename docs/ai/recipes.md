@@ -892,6 +892,121 @@ For logprob-based choices use `complete_with_logprobs` (live builds), e.g.
   openai}.rs`; the usages above match the example/tests but open those files if
   you construct a backend directly.
 
+### Recipe 8b — LLM agents in a normal-form game (`socsim-games`, feature `llm`)
+
+**When to use.** The agents play a stage game (Recipe 10) and some or all of
+them choose actions with an LLM. Do **not** hand-write a Decision mechanism:
+`socsim-games` ships `game_llm_decide`, which batches and deduplicates the
+step's LLM calls, replays them from a response store, runs them on worker
+threads if asked, and records every call — while immediate rules
+(`TitForTat`, …) keep running in `game_decide` in the same world.
+
+**Dependencies.**
+
+```toml
+socsim-games  = { git = "...", branch = "main", package = "socsim-games", features = ["llm", "engine"] }  # + "live" for the real backend
+socsim-core   = { git = "...", branch = "main", package = "socsim-core" }
+socsim-engine = { git = "...", branch = "main", package = "socsim-engine" }
+socsim-llm    = { git = "...", branch = "main", package = "socsim-llm" }   # LlmConfig, mock::ScriptedClient
+```
+
+**Steps.**
+1. Experiment state: wrap yours in `WithLlm<X>` (`X = ()` → `type X = WithLlm<()>`). It carries the
+   `LlmReplayManifest`; `assemble_with_llm` requires `X: HasLlmManifest`. Your `X::PolicyState`
+   must implement `Slot<LlmConversation>` (`BuiltinPolicyState` does).
+2. Rules: immediate kinds in a `RuleBook`; LLM kinds in an `LlmRuleBook`, usually
+   `LlmPolicy::new(obs, renderer, parser)` — `OwnHistoryObs::new(k)` + `MarkdownTableRenderer`, or
+   `CountsObs` + `CountsRenderer` (dedupes well); `LabelParser::strict()` (any labels) or
+   `::lenient()` (ASCII `[A-Za-z0-9_-]+` labels only). Retries/fallback via `.with_retry(RetryProtocol { .. })`.
+3. Kinds: `KindCatalog::new().with_rules(&rules)?.with_llm(&llm_rules)?`, then
+   `build_world_with(game, n, x, initial, &catalog, &assignment, history_len, t_max, seed)`.
+4. Setup: `ResponseStore` (`in_memory` for tests, `open(dir, mode, run_tag, seed)` for runs),
+   `BackendIdentity { model, endpoint }`, a `BackendFactory` (tests: a closure returning
+   `ScriptedClient`; live: `socsim_games::llm::live_backend_factory()`), then
+   `LlmSetup::new(llm_rules, store, backend, identity)` (+ `.executor(..)`, `.options(..)`, `.config(..)`).
+5. Assemble: `assemble_with_llm(world, matching, rules, setup, outcome, opts, seed)?.build()`.
+
+**Code (offline, `ScriptedClient`).**
+
+```rust
+use std::sync::Arc;
+use socsim_games::llm::{
+    assemble_with_llm, BackendFactory, BackendIdentity, CountsObs, CountsRenderer, LabelParser,
+    LlmPolicy, LlmReplayManifest, LlmRuleBook, LlmSetup, ReplayMode, ResponseStore, WithLlm,
+};
+use socsim_games::{
+    build_world_with, AssignGroup, AssignKind, Assignment, FixedPlayers, InitialActions,
+    KindCatalog, MatrixGame, NormalFormOutcome, PlayOptions, RuleBook, TitForTat,
+};
+use socsim_llm::mock::ScriptedClient;
+
+type X = WithLlm<()>;
+
+fn main() {
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    ).unwrap()
+    .with_labels(vec![vec!["C".into(), "D".into()], vec!["C".into(), "D".into()]]).unwrap();
+
+    let mut rules: RuleBook<MatrixGame, X> = RuleBook::new();
+    rules.register("tit_for_tat", Arc::new(TitForTat::new(0))).unwrap();
+    let mut llm_rules: LlmRuleBook<MatrixGame, X> = LlmRuleBook::new();
+    llm_rules.register("llm", Arc::new(LlmPolicy::new(
+        CountsObs, CountsRenderer::default(), LabelParser::strict(),
+    ))).unwrap();
+    let catalog = KindCatalog::new().with_rules(&rules).unwrap().with_llm(&llm_rules).unwrap();
+
+    let store = ResponseStore::in_memory("test", ReplayMode::RecordMisses);
+    let identity = BackendIdentity { model: "scripted".into(), endpoint: "mock://scripted".into() };
+    // Tests: inject a factory that returns ScriptedClient (built inside each worker thread).
+    let backend: BackendFactory = Arc::new(|| Ok(Box::new(
+        ScriptedClient::constant("scripted", r#"{"action":"C","reason":"cooperate"}"#),
+    )));
+
+    let seed = 3;
+    let x = WithLlm { inner: (), llm: LlmReplayManifest::for_store(&store, identity.clone()) };
+    let world = build_world_with(
+        game, 4, x, InitialActions::Same(0), &catalog,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("llm".into()), count: 2 },
+            AssignGroup { kind: AssignKind::Rule("tit_for_tat".into()), count: 2 },
+        ]),
+        10, 10, seed,
+    ).unwrap();
+
+    let setup = LlmSetup::new(llm_rules, store, backend, identity);
+    let mut sim = assemble_with_llm(
+        world, FixedPlayers::pairs(&[(0, 2), (1, 3)]), rules, setup,
+        NormalFormOutcome, PlayOptions::new(), seed,
+    ).unwrap().build();
+    for _ in 0..10 { sim.step().unwrap(); }
+    assert_eq!(sim.world().held(), &[0, 0, 0, 0]);
+}
+```
+
+**Gotchas.**
+- `build_world` / `assemble` do not know LLM kinds: use `build_world_with` + `assemble_with_llm`
+  (plain `assemble` on such a world → `GameError::InvalidKinds`). A kind in both books →
+  `RuleError::DuplicateKind`.
+- `OnInvalidAction::Fallback` maps `RuleBook` kinds only; LLM kinds fall back through `RetryProtocol`
+  (`Previous` by default). A final invalid action stops the step.
+- The `BackendFactory` must return a **cache-free** client (the store is the cache); it is called inside
+  each worker thread, once per batch / worker (not at all when every request hit the store). Never wrap it in `CachingClient`.
+- At temperature 0 all requests share one seed, so identical prompts are one call (good for
+  `CountsObs`). At temperature > 0 each agent/attempt has its own seed.
+- `ReplayOnly` fails the step on a miss; `RecordMisses` appends misses to this run's shard; `Live`
+  ignores the store. **Call `ResponseStore::merge_shards(dir)` yourself** after recording runs —
+  `open` reads only the base and its own shard. Merging changes `base_digest`.
+- Resume is exact only under `ReplayOnly`, or `RecordMisses` with every post-resume request a hit.
+  `verify_snapshot(&snap, &store, &identity)?` before `restore`, with the same `mode`; the driver
+  also re-checks the manifest on every Decision.
+- `ExecutorOptions` is `#[non_exhaustive]` — `let mut o = ExecutorOptions::default(); o.timeout = ..;`.
+  `timeout` only works with `LlmExecutor::Threaded { workers }`.
+- Metrics: per-step row `"game"` (`llm.*_rate`) and one `game.llm_call` event per attempt.
+- Full reference: [`docs/games.md` § LLM decisions](../games.md#llm-decisions-feature-llm) and
+  [`docs/mechanisms/game-llm-decide.md`](../mechanisms/game-llm-decide.md).
+
 ---
 
 ## Recipe 9 — Output & logging
@@ -1108,6 +1223,7 @@ rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
   `ctx.omniscient()` deliberately gives up that information structure.
 - See also [`docs/games.md`](../games.md) and the `game_match` /
   `game_decide` / `game_play` pages under `docs/mechanisms/`.
+- LLM-driven players: see [Recipe 8b — LLM agents in a normal-form game](#recipe-8b--llm-agents-in-a-normal-form-game-socsim-games-feature-llm).
 
 ---
 

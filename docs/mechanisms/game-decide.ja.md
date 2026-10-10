@@ -19,6 +19,10 @@
 規則のオブジェクトそのものは共有されるコードです．各エージェントの規則の状態は World の `PolicyTable` にあるので，
 この Mechanism は再開後の実行に影響する状態を持ちません．
 
+`game_decide` が動かすのは自分の `RuleBook` の種類だけです．どの Driver が種類を担当するかは `KindCatalog` で決まります．
+feature `llm` では，`LlmRuleBook` に登録した種類は [`game_llm_decide`](game-llm-decide.ja.md) の担当で，
+`game_decide` はそれらのエージェントを Decision でも Reward でも飛ばします．その席は，`assemble_with_llm` が `game_decide` のすぐ後に登録する `game_llm_decide` が埋めます．
+
 ## 2. 理論と出典
 
 決定規則は，繰り返しゲームにおける行動戦略です．エージェントが知っていることから行動への写像と，内部状態の更新からなります．
@@ -47,9 +51,10 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
 **Decision** と **Reward** に登録されます．
 
 - **Decision** — 同じフェーズで `game_match` の後（登録順）に動くので，対戦ができています．
-  エージェントはスケジューラーの活性化の順（`ctx.agent_order`）に訪れ，席のないエージェントは飛ばします．
+  エージェントはスケジューラーの活性化の順（`ctx.agent_order`）に訪れ，席のないエージェントと LLM の種類のエージェントは飛ばします．
+  `assemble_with_llm` では，同じフェーズで次に `game_llm_decide` が動き，LLM のエージェントの席を埋めます．
 - **Reward** — `game_play`（Interaction）が利得とステップ履歴を書いた後なので，`learn_step` はステップ全体を見ます．
-  エージェントは `AgentId` の昇順に訪れ，`Held` のエージェントは飛ばします．
+  エージェントは `AgentId` の昇順に訪れ，`Held` のエージェントと LLM の種類のエージェントは飛ばします（`game_llm_decide` の Reward はこの後に動く）．
 
 ## 5. 状態の読み書きコントラクト
 
@@ -66,7 +71,7 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
 ## 6. 依存関係と順序制約
 
 - **上流：** `game_match`（Decision）が対戦を書いていること．Reward の前に `game_play`（Interaction）が利得とステップ履歴を書いていること．
-- **下流：** `game_play` はすべての席に行動があることを要求します．
+- **下流：** `game_play` はすべての席に行動があることを要求します．LLM のエージェントの席は，`game_decide` の後に登録される `game_llm_decide` が埋めます．
 - **情報構造：** 既定のビューで見えるのは，自分の対戦の相手だけです（それ以外の相手に対して `opponent_history` は `None` を返す）．
   World 全体は `omniscient()` からだけ読めます．Decision の間に `omniscient()` から読む `held` は，活性化の順序に依存することがあります．
 
@@ -77,6 +82,7 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
 | `rules: RuleBook<G, X>` | — | structural | `assemble` に渡す．種類は名前で登録する． |
 | `opts.on_invalid_action` | `OnInvalidAction::Stop` | policy | `Stop`：不正な行動でステップが失敗する．`Fallback(map)`：種類ごとの代替行動に差し替え，`game.invalid_action` を記録する． |
 
+`Fallback` の表が対象にするのはこの Mechanism の種類だけです．LLM の種類は書きません（そのフォールバックは LLM の規則の `RetryProtocol` が持つ）．
 `Fallback` のとき，`assemble` は使われているすべての規則の種類に代替行動があることを要求し，各代替行動を全役割で `check_action` により検査します．
 イベントの payload は `{ "agent", "kind", "role", "action" }`（拒否された行動を `Debug` 形式で）です．
 
