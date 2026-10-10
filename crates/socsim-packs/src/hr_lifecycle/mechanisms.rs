@@ -518,7 +518,8 @@ impl Mechanism<HrWorld> for HiringMechanism {
             }
         }
 
-        let mut new_ids: Vec<(crate::hr_lifecycle::world::Employee, socsim_core::AgentId)> = Vec::new();
+        let mut new_ids: Vec<(crate::hr_lifecycle::world::Employee, socsim_core::AgentId)> =
+            Vec::new();
 
         for (team_idx, count) in team_counts.iter_mut().enumerate() {
             while *count < target {
@@ -526,15 +527,17 @@ impl Mechanism<HrWorld> for HiringMechanism {
                 let true_theta = crate::hr_lifecycle::world::Employee::draw_theta(&normal, ctx.rng);
                 // Selection signal with validity ρ (standardized; recorded for
                 // future selection gates, hire is unconditional for now).
-                let z_theta =
-                    (true_theta - crate::hr_lifecycle::calibration::THETA_MEAN) / crate::hr_lifecycle::calibration::THETA_SD;
+                let z_theta = (true_theta - crate::hr_lifecycle::calibration::THETA_MEAN)
+                    / crate::hr_lifecycle::calibration::THETA_SD;
                 let noise: f64 = normal.sample(ctx.rng);
                 let noise_scale = (1.0 - self.rho_si * self.rho_si).sqrt();
                 let _signal = self.rho_si * z_theta + noise_scale * noise;
 
                 let is_toxic = ctx.rng.gen::<f64>() < self.p_toxic;
                 let id = ctx.world.alloc_id();
-                let emp = crate::hr_lifecycle::world::Employee::new(true_theta, team_idx, is_toxic, ctx.rng);
+                let emp = crate::hr_lifecycle::world::Employee::new(
+                    true_theta, team_idx, is_toxic, ctx.rng,
+                );
                 new_ids.push((emp, id));
                 *count += 1;
             }

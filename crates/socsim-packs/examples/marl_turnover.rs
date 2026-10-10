@@ -17,14 +17,14 @@ use std::rc::Rc;
 use socsim_config::{ModulePack, Params, Registry};
 use socsim_core::{SimClock, SimRng};
 use socsim_engine::{SequentialScheduler, Simulation, SimulationBuilder};
+use socsim_marl::{
+    DiscretePolicyNet, MarlTrainer, NetConfig, PolicyMechanism, TrainConfig, TrajectoryBuffer,
+};
 use socsim_packs::hr_lifecycle::marl::{
     TurnoverActionApplier, TurnoverObsEncoder, TurnoverPrepMechanism, TurnoverReward,
     TURNOVER_OBS_DIM,
 };
 use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
-use socsim_marl::{
-    DiscretePolicyNet, MarlTrainer, NetConfig, PolicyMechanism, TrainConfig, TrajectoryBuffer,
-};
 
 const N_TEAMS: usize = 4;
 const TEAM_SIZE: usize = 6;
@@ -121,7 +121,10 @@ fn main() {
         TurnoverObsEncoder,
         TurnoverActionApplier,
     ));
-    let mut sim = with_hr_stack(SimulationBuilder::new(build_world(1000)).seed(1000), turnover);
+    let mut sim = with_hr_stack(
+        SimulationBuilder::new(build_world(1000)).seed(1000),
+        turnover,
+    );
     sim.run().unwrap();
     let remaining = sim.world().employee_count();
     println!("  headcount: {initial} → {remaining}");

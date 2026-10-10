@@ -208,7 +208,11 @@ impl Mechanism<OpinionWorld> for OpinionMetricsMechanism {
         // Cache the convergence diagnostic on the world too.
         ctx.world.last_max_delta = max_delta;
         // A clean +∞ does not serialise well; record it as a sentinel on step 0.
-        let recorded_delta = if max_delta.is_finite() { max_delta } else { 0.0 };
+        let recorded_delta = if max_delta.is_finite() {
+            max_delta
+        } else {
+            0.0
+        };
 
         ctx.recorder.record_metric(t, "clusters", clusters);
         ctx.recorder.record_metric(t, "variance", variance);
@@ -265,11 +269,9 @@ pub fn register(reg: &mut socsim_config::Registry<OpinionWorld>) {
         let alpha = p.get_f64("alpha", 0.5);
         let rejection = p.get_f64("rejection", 0.8);
         let repulsion = p.get_f64("repulsion", 0.2);
-        Ok(
-            Box::new(SocialJudgementMechanism::new(
-                epsilon, alpha, rejection, repulsion,
-            )) as Box<dyn socsim_core::Mechanism<OpinionWorld>>,
-        )
+        Ok(Box::new(SocialJudgementMechanism::new(
+            epsilon, alpha, rejection, repulsion,
+        )) as Box<dyn socsim_core::Mechanism<OpinionWorld>>)
     });
     reg.register("lorenz", |p: &Params| {
         let epsilon = p.get_f64("epsilon", 0.4);

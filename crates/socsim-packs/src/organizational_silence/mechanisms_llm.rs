@@ -14,12 +14,12 @@ use serde::Deserialize;
 
 use socsim_config::Params;
 use socsim_core::{AgentId, Mechanism, Phase, Result, SocsimError, StepContext};
-#[cfg(test)]
-use socsim_llm::{wrap_client, PromptCache};
 use socsim_llm::{
     build_live_client_from_settings, llm_config, LiveClient, LlmConfig, LlmSettings,
     MetadataCollector,
 };
+#[cfg(test)]
+use socsim_llm::{wrap_client, PromptCache};
 
 use crate::organizational_silence::world::{Expression, Motive, SilenceWorld};
 
@@ -67,13 +67,13 @@ impl VoiceDecisionLlmMechanism {
             temperature: p.get_f64("temperature", 0.0) as f32,
             seed: p.get_u64("seed", 42),
             cache_path: Some(
-                p.get_str("cache_path", "runs/silence_cache.json").to_owned(),
+                p.get_str("cache_path", "runs/silence_cache.json")
+                    .to_owned(),
             ),
             think: None,
         };
-        let client = build_live_client_from_settings(&settings).map_err(|e| {
-            SocsimError::Mechanism(format!("failed to build live LLM client: {e}"))
-        })?;
+        let client = build_live_client_from_settings(&settings)
+            .map_err(|e| SocsimError::Mechanism(format!("failed to build live LLM client: {e}")))?;
         Ok(Self {
             client,
             collector: MetadataCollector::new(),
@@ -190,9 +190,10 @@ impl Mechanism<SilenceWorld> for VoiceDecisionLlmMechanism {
                 continue;
             }
             let prompt = Self::build_prompt(ctx.world, id);
-            let resp = self.client.complete(&prompt, &self.cfg).map_err(|e| {
-                SocsimError::Mechanism(format!("LLM call failed: {e}"))
-            })?;
+            let resp = self
+                .client
+                .complete(&prompt, &self.cfg)
+                .map_err(|e| SocsimError::Mechanism(format!("LLM call failed: {e}")))?;
             self.collector.record(resp.metadata.clone());
             let (expression, motive) = Self::parse_response(&resp.text);
             if let Some(emp) = ctx.world.employees.get_mut(&id) {

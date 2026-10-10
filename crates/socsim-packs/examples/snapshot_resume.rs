@@ -19,8 +19,16 @@ fn mechanisms() -> Vec<Box<dyn Mechanism<HrWorld>>> {
     HrLifecyclePack.register(&mut reg);
     let p = Params::empty();
     [
-        "learning_curve", "peer_effect", "ocb", "toxic_spread", "fit", "hiring", "turnover",
-        "socialization", "knowledge_loss", "org_performance",
+        "learning_curve",
+        "peer_effect",
+        "ocb",
+        "toxic_spread",
+        "fit",
+        "hiring",
+        "turnover",
+        "socialization",
+        "knowledge_loss",
+        "org_performance",
     ]
     .iter()
     .map(|name| reg.build(name, &p).unwrap())
@@ -82,6 +90,10 @@ fn main() {
         && full.world().employee_count() == resumed.world().employee_count();
     println!(
         "\nResumed run matches uninterrupted run: {}",
-        if identical { "YES (bit-identical)" } else { "NO" }
+        if identical {
+            "YES (bit-identical)"
+        } else {
+            "NO"
+        }
     );
 }

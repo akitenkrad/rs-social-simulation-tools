@@ -26,9 +26,9 @@
 //! variant `voice_decision_rule` is always available.
 
 pub mod calibration;
+mod mechanisms;
 #[cfg(feature = "organizational-silence-llm")]
 pub mod mechanisms_llm;
-mod mechanisms;
 mod world;
 
 pub use mechanisms::OrganizationalSilencePack;

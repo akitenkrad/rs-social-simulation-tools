@@ -10,20 +10,17 @@ use std::rc::Rc;
 use socsim_config::{ModulePack, Params, Registry};
 use socsim_core::{Mechanism, SimClock, SimRng};
 use socsim_engine::{SequentialScheduler, Simulation, SimulationBuilder};
+use socsim_marl::{
+    DiscretePolicyNet, EpisodeStat, MarlTrainer, NetConfig, PolicyMechanism, TrainConfig,
+    TrajectoryBuffer,
+};
 use socsim_packs::hr_lifecycle::marl::{
     TurnoverActionApplier, TurnoverObsEncoder, TurnoverPrepMechanism, TurnoverReward,
     TURNOVER_OBS_DIM,
 };
 use socsim_packs::hr_lifecycle::{HrLifecyclePack, HrWorld};
-use socsim_marl::{
-    DiscretePolicyNet, EpisodeStat, MarlTrainer, NetConfig, PolicyMechanism, TrainConfig,
-    TrajectoryBuffer,
-};
 
-fn build_sim(
-    seed: u64,
-    turnover: Box<dyn Mechanism<HrWorld>>,
-) -> Simulation<HrWorld> {
+fn build_sim(seed: u64, turnover: Box<dyn Mechanism<HrWorld>>) -> Simulation<HrWorld> {
     let mut rng = SimRng::from_seed(seed ^ 0xABCD);
     let mut world = HrWorld::new(3, 6, 4, 0.1, &mut rng);
     world.clock = SimClock::new(18);
@@ -60,9 +57,7 @@ fn train(seed: u64) -> Vec<EpisodeStat> {
                 episodes: 30,
                 seed: 7,
             },
-            |policy: Rc<RefCell<DiscretePolicyNet>>,
-             buffer: Rc<RefCell<TrajectoryBuffer>>,
-             s| {
+            |policy: Rc<RefCell<DiscretePolicyNet>>, buffer: Rc<RefCell<TrajectoryBuffer>>, s| {
                 let turnover = Box::new(PolicyMechanism::collecting(
                     policy,
                     TurnoverObsEncoder,

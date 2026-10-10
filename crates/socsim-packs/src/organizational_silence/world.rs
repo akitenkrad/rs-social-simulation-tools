@@ -92,19 +92,13 @@ impl Employee {
     ///
     /// `private_concern ~ N(0, 0.3)` so most agents are nearly neutral, with
     /// a long-tailed minority of strongly critical/positive members.
-    fn new(
-        level: u8,
-        team: usize,
-        normal01: &Normal<f64>,
-        rng: &mut SimRng,
-    ) -> Self {
+    fn new(level: u8, team: usize, normal01: &Normal<f64>, rng: &mut SimRng) -> Self {
         let private_concern = {
             let z: f64 = normal01.sample(rng);
             (0.3 * z).clamp(-1.0, 1.0)
         };
         let fear = (F_MEAN + F_SD * normal01.sample(rng)).clamp(0.0, 1.0);
-        let psych_safety =
-            (PSAFETY_MEAN + PSAFETY_SD * normal01.sample(rng)).clamp(0.0, 1.0);
+        let psych_safety = (PSAFETY_MEAN + PSAFETY_SD * normal01.sample(rng)).clamp(0.0, 1.0);
         let ivt_strength = rng.gen::<f64>();
         let voice_threshold =
             (THETA_VOICE_MEAN + THETA_VOICE_SD * normal01.sample(rng)).clamp(0.0, 1.0);

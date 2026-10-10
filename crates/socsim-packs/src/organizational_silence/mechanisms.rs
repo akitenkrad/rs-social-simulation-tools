@@ -353,12 +353,8 @@ impl Mechanism<SilenceWorld> for VoiceDecisionRuleMechanism {
                     emp.silence_motive = None;
                 } else {
                     emp.expression = Expression::Silence;
-                    emp.silence_motive = Some(Self::classify_motive(
-                        fear,
-                        ivt,
-                        u_k,
-                        emp.private_concern,
-                    ));
+                    emp.silence_motive =
+                        Some(Self::classify_motive(fear, ivt, u_k, emp.private_concern));
                 }
             }
         }
@@ -457,9 +453,7 @@ impl Mechanism<SilenceWorld> for PreferenceFalsificationCascadeMechanism {
                 .world
                 .employees
                 .iter()
-                .filter(|(_, e)| {
-                    e.expression == Expression::Silence && e.private_concern < 0.0
-                })
+                .filter(|(_, e)| e.expression == Expression::Silence && e.private_concern < 0.0)
                 .map(|(id, _)| *id)
                 .collect();
             candidates.sort();
@@ -561,8 +555,7 @@ impl Mechanism<SilenceWorld> for OrgPerformanceMechanism {
         // Sort for determinism (distinct_clusters sorts internally, but
         // sorting upstream makes the `concerns` Vec itself deterministic).
         concerns.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let clusters = socsim_metrics::stats::distinct_clusters(&concerns, self.cluster_tol)
-            as f64;
+        let clusters = socsim_metrics::stats::distinct_clusters(&concerns, self.cluster_tol) as f64;
 
         // Motive mix over silent agents.
         let mut acq = 0usize;
@@ -737,8 +730,7 @@ impl Mechanism<SilenceWorld> for OrgLearningMechanism {
         } else {
             // Silent climate: tacit knowledge drains slowly.
             for team in ctx.world.teams.iter_mut() {
-                team.knowledge_stock =
-                    (team.knowledge_stock * (1.0 - self.decay_rate)).max(0.0);
+                team.knowledge_stock = (team.knowledge_stock * (1.0 - self.decay_rate)).max(0.0);
             }
         }
         Ok(())
@@ -778,7 +770,9 @@ impl ModulePack<SilenceWorld> for OrganizationalSilencePack {
             Ok(Box::new(SilenceSpiralMechanism::from_params(p)))
         });
         reg.register("prefalse_cascade", |p| {
-            Ok(Box::new(PreferenceFalsificationCascadeMechanism::from_params(p)))
+            Ok(Box::new(
+                PreferenceFalsificationCascadeMechanism::from_params(p),
+            ))
         });
         reg.register("org_performance", |p| {
             Ok(Box::new(OrgPerformanceMechanism::from_params(p)))
@@ -1017,9 +1011,7 @@ mod tests {
     #[test]
     fn classify_motive_picks_prosocial_when_open_supervisor_and_critical_concern() {
         let m = VoiceDecisionRuleMechanism::classify_motive(
-            /* fear */ 0.9,
-            /* ivt */ 0.1,
-            /* supervisor_openness */ 0.5,
+            /* fear */ 0.9, /* ivt */ 0.1, /* supervisor_openness */ 0.5,
             /* private_concern */ -0.3,
         );
         assert_eq!(m, Motive::Prosocial);
