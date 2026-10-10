@@ -73,7 +73,9 @@ networks), `socsim-grid` (spatial), `socsim-packs` (bundled CLI packs),
 `socsim-mechanisms` (opinion/contagion/cultural/group catalog), `socsim-marl`
 (learnable policies), `socsim-llm` (LLM agents), `socsim-games` (normal-form
 games: stage games, decision rules, matching, payoffs; features `core` /
-`engine`; no `socsim-llm`). Library-only data/IO:
+`engine`, `socsim-llm` only with feature `llm`; built-in classic games and
+finite-game solvers — Nash, dominance, minimax, logit QRE — in the default
+build). Library-only data/IO:
 `socsim-results` (run dirs, CSV/JSON), `socsim-metrics` (stats/distribution/
 agreement), `socsim-survey` (config-driven recode engine), `socsim-datasets`
 (dataset schemas + registry + optional acquisition), `socsim-reproduce`

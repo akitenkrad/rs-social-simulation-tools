@@ -10,7 +10,10 @@ the rules learn from what happened — once per step, inside the ordinary
 
 The crate is library-only (no `ModulePack`, not wired into the `socsim` binary).
 This page covers the building blocks, where their state lives, what a rule is
-allowed to see, and how to assemble a runnable simulation.
+allowed to see, and how to assemble a runnable simulation. Separately from the
+simulation, the crate ships classic games and solvers for finite games — Nash
+equilibria, dominance, minimax and logit QRE (see
+[Solving finite games](#solving-finite-games)).
 
 ---
 
@@ -18,7 +21,7 @@ allowed to see, and how to assemble a runnable simulation.
 
 | Feature | Adds | socsim dependencies |
 |---|---|---|
-| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`) and `MatrixGame` | **none** — the default build depends on no `socsim-*` crate |
+| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`), `MatrixGame`, the built-in games (`catalog`), mixed strategies (`mixed`) and the solvers (`solve`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
 | `core` | the world (`GameWorld`), rules, outcome rules, matching, views, `build_world` | `socsim-core` |
 | `engine` | `assemble` (returns a `SimulationBuilder`); implies `core` | `socsim-core`, `socsim-engine` |
 | `llm` | LLM-backed decision rules, the response store and the replay manifest (see [LLM decisions](#llm-decisions-feature-llm)); implies `core`. The `game_llm_decide` mechanism and `assemble_with_llm` also need `engine` | `socsim-core`, `socsim-llm` (default features only — no networking) |
@@ -147,6 +150,56 @@ it is part of a snapshot.
 
 The simulation layer currently assembles **two-role** encounters only:
 `assemble` rejects any other `n_roles()` with `GameError::UnsupportedRoles`.
+
+### Built-in games: `catalog`
+
+`socsim_games::catalog` provides five classic two-player games. Each one
+implements `FiniteGame`, so it plugs into `build_world`, the built-in rules and
+the [solvers](#solving-finite-games) exactly like a `MatrixGame`; `to_matrix()`
+converts it to an equivalent `MatrixGame` with the same labels. Action labels
+are ASCII, and where the game has a cooperative side (`C`, `stag`) it is action
+`0`.
+
+| Type | Actions `0, 1, …` | Constructors | Checked at construction |
+|---|---|---|---|
+| `PrisonersDilemma` | `C`, `D` | `new(T, R, P, S)`; `weak(b)` = `new(b, 1, 0, 0)` | `T > R > P ≥ S` (`P = S` is allowed, so `weak(b)` needs `b > 1`) |
+| `BattleOfSexes` | `B`, `V` | `new(a, b)`; `Default`: `a = [[2, -1], [-1, 1]]`, `b = [[1, -1], [-1, 2]]` | `(B, B)` and `(V, V)` are strict equilibria; role 0 strictly prefers `(B, B)`, role 1 strictly prefers `(V, V)` |
+| `MatchingPennies` | `H`, `T` | `new(a, b)`; `Default`: `a = [[-1, 1], [1, -1]]`, `b = -a` | zero-sum (`b == -a` entry by entry) and no pure equilibrium |
+| `StagHunt` | `stag`, `hare` | `new(a, b)`; `Default`: `a = [[9, 0], [8, 7]]`, `b = [[9, 8], [0, 7]]` | `(stag, stag)` and `(hare, hare)` are strict equilibria, and `(stag, stag)` gives each role strictly more than `(hare, hare)` |
+| `RockPaperScissors` | `R`, `P`, `S` | `new(win, loss)`; `Default`: `win = loss = 1` | `win > 0` and `loss > 0` |
+
+`a[i][j]` / `b[i][j]` are role 0's / role 1's payoffs when role 0 plays `i` and
+role 1 plays `j`, as in `MatrixGame::bimatrix`. The prisoner's dilemma gives
+role 0 `[[R, S], [T, P]]` and role 1 the transpose. It deliberately has no
+`Default`: there is no single standard set of `T, R, P, S`, so the payoffs are
+always written out. In the default matching pennies, role 0 wins when the
+coins differ. In rock–paper–scissors the winner receives `win`, the loser
+`-loss` and a tie `0`; with the default `win = loss = 1` this is the standard
+antisymmetric zero-sum form (with `win ≠ loss` the game is not zero-sum).
+
+Every constructor returns `Result<_, CatalogError>`: `NonFinite` for a NaN or
+infinite payoff, `Condition(_)` when the payoffs lack the game's defining
+shape. The types serialise with serde, and deserialisation runs the same
+checks, so an invalid game cannot be loaded from a snapshot or a file either.
+
+```rust
+use socsim_games::catalog::{PrisonersDilemma, RockPaperScissors};
+use socsim_games::{FiniteGame, NormalFormGame};
+
+fn main() {
+    // T > R > P >= S is checked when the game is built.
+    let pd = PrisonersDilemma::new(5.0, 3.0, 1.0, 0.0).unwrap();
+    assert!(PrisonersDilemma::new(3.0, 3.0, 1.0, 0.0).is_err()); // T = R
+
+    println!("{} vs {}: {}", pd.action_label(0, 0), pd.action_label(1, 1), pd.payoff(0, &[0, 1]));
+    // C vs D: 0
+
+    let rps = RockPaperScissors::default(); // win = 1, loss = 1
+    let matrix = rps.to_matrix();           // the same payoffs as a MatrixGame
+    println!("{} beats {}: {}", matrix.action_label(0, 1), matrix.action_label(1, 0), matrix.payoff(0, &[1, 0]));
+    // P beats R: 1
+}
+```
 
 ---
 
@@ -1004,3 +1057,388 @@ and above for your own streams (see the
 [RNG labelling convention](library.md#rng-stream-labeling-convention)). Agents
 learn in sorted `AgentId` order and decide in the scheduler's activation order;
 with the same seed and the same code a run is reproducible step for step.
+
+---
+
+## Solving finite games
+
+Independently of the simulation, the crate computes equilibria and related
+solution concepts of any `FiniteGame` — a `MatrixGame`, a
+[built-in game](#built-in-games-catalog) or your own type. Mixed strategies
+live in `socsim_games::mixed`, the solvers in `socsim_games::solve`. Both are in
+the default build: no feature flag and no `socsim-*` crate are needed (the
+linear programs are solved with the pure-Rust `microlp` crate).
+
+### Mixed strategies
+
+A `MixedStrategy` is a validated probability vector over one role's actions,
+in action-index order:
+
+| Constructor | Result |
+|---|---|
+| `MixedStrategy::new(probs)` | the vector as given (it is not renormalised); `MixedError::NotADistribution` if it is empty, has a NaN, infinite or negative entry, or its sum differs from 1 by more than `1e-9` |
+| `MixedStrategy::uniform(n)` | `1/n` on each of `n` actions |
+| `MixedStrategy::pure(n, action)` | probability 1 on `action` |
+
+A mixed profile is a slice with one `MixedStrategy` per role. These functions
+evaluate it for any number of roles, enumerating every action profile:
+
+| Function | Returns |
+|---|---|
+| `mixed::expected_payoff(&game, role, &profile)` | the role's expected payoff `F_i(σ)` |
+| `mixed::action_payoffs(&game, role, &profile)` | `F_i(s_i, σ_-i)` for every pure action `s_i` of the role |
+| `mixed::regrets(&game, &profile)` | per role: best pure-action payoff minus expected payoff |
+| `mixed::regret(&game, &profile)` | the maximum of `regrets` |
+
+A profile with the wrong number of roles or a vector of the wrong length is a
+`MixedError::{RoleCount, Dimension}`.
+
+Mixed strategies are a solver-side concept only. In a simulation a decision
+rule always returns one `G::Action` — an action index for a `FiniteGame` — and
+a `MixedStrategy` is never an action. A rule that is meant to play a mix draws
+an action from it with its own RNG.
+
+### Tolerance and verification
+
+All comparisons in the solvers use one tolerance per game, scaled by its
+payoffs:
+
+```text
+tol = 1e-10 × max(1, max payoff − min payoff)    (over all roles and all profiles)
+```
+
+`solve::tolerance(&game)` returns it. A solver does not trust its method on its
+own: every solver that returns an equilibrium recomputes the regret of the
+profile it found against the original game, attaches it (the `regret` field),
+and returns the result only when that regret is at most `tol`. Before solving,
+every solver checks the game: at least one role, no role without actions, at
+most 10⁶ action profiles (`SolveError::TooLarge`) and only finite payoffs
+(`SolveError::NonFinitePayoff`).
+
+Mixed equilibria are returned as `Equilibrium { strategies, payoffs, regret }`:
+one `MixedStrategy` and one expected payoff per role, plus the verified maximum
+regret. `is_pure()` is true when every strategy puts probability 1 on a single
+action.
+
+### Solvers at a glance
+
+| Function | Players | Returns | Limits |
+|---|---|---|---|
+| `pure_nash(&game)` | n | `Vec<PureNash>`: every pure equilibrium | enumerates all profiles (≤ 10⁶) |
+| `iterated_strict_dominance(&game)` | n | `DominanceResult`: surviving actions and the elimination log | pure strict dominance only |
+| `support_enumeration(&game)` | 2 | `EquilibriumSet`: all equilibria of a nondegenerate game, plus `findings` | ≤ 2²⁰ support pairs (up to 10 × 10) |
+| `lemke_howson(&game, &options)` | 2 | `LemkeHowsonResult`: one equilibrium | which one depends on the dropped label |
+| `zero_sum_minimax(&game)` | 2, zero-sum | `MinimaxSolution`: value and optimal strategies | LP; primal and dual both solved and checked |
+| `maximin_security_level(&game, role)` | 2 | `SecurityLevel`: one role's maximin guarantee | LP; primal and dual both solved and checked |
+| `logit_qre(&game, &options)` | n | `QreSolution`: one logit QRE at the given λ | local fixed-point iteration, not branch tracking |
+
+Errors are `SolveError`: `UnsupportedRoles` for a role count a solver does not
+accept, `NotZeroSum`, `InvalidLabel`, `MaxPivots`, `Lp(LpFailure)`,
+`VerificationFailed { duality_gap, regret }`, `NotConverged { residual,
+iterations }`, `InvalidOptions` and `Mixed(MixedError)`, besides the game
+checks above.
+
+### `pure_nash`
+
+Visits every action profile in lexicographic order (role 0's action is the
+most significant index, the last role's varies fastest) and keeps each profile
+in which no role gains more than `tol` by a unilateral deviation. Returns
+`PureNash { profile, payoffs, regret }` in that order. Because the enumeration
+is exhaustive, the list is every pure equilibrium of the game (up to `tol`); the
+cost is the number of profiles times the total number of actions, and games
+above 10⁶ profiles are rejected.
+
+### `iterated_strict_dominance`
+
+In each round, for every role at once, removes every surviving action that is
+strictly dominated by another surviving **pure** action of the same role —
+worse by more than `tol` against every surviving combination of the other
+roles' actions — and repeats until a round removes nothing. Returns
+`DominanceResult { surviving, eliminated }`: per role the surviving action
+indices in ascending order, and one `Elimination { round, role, action }` per
+removed action (rounds start at 1).
+
+Elimination by strict dominance never removes a Nash equilibrium, and its end
+result does not depend on the order of removal. Two common variants are left
+out on purpose:
+
+- **Weak dominance** is not used: its result can depend on the order of
+  removal, and it can remove equilibria.
+- **Domination by a mixed strategy** is not checked: an action that is
+  dominated only by a mix of other actions survives here. Detecting it needs a
+  linear program per action. The surviving set can therefore be larger than
+  under the textbook definition that allows mixed dominators.
+
+### `support_enumeration`
+
+Two players only. For every pair of non-empty supports (role 0's as the outer
+key, role 1's as the inner, each in lexicographic order of ascending action
+indices) it solves the indifference equations, rejects the support when a
+probability is negative or an action outside the support does better, and
+verifies the regret of the candidate. Returns `EquilibriumSet { equilibria,
+findings }`; an equilibrium found again within `tol` keeps its first
+occurrence.
+
+**When it finds all equilibria.** In a nondegenerate game every equilibrium is
+the unique solution of the equations on its support, so every equilibrium is
+found (and their number is odd). In a degenerate game a support's system can be
+rank-deficient or ill-conditioned; such a support is not guessed at but
+reported in `findings`:
+
+| `SupportFinding` | Meaning |
+|---|---|
+| `Degenerate { support, reason }` | rank-deficient system with no verified point |
+| `Component { support, base, directions }` | a verified point `base` on a positive-dimensional set of equilibria, with null-space `directions` (each flattened as role 0's probabilities followed by role 1's); `base` is also added to `equilibria` |
+| `Inconclusive { support, reason }` | the system is ill-conditioned (condition estimate above 10¹²) or non-finite, or the final verification failed |
+
+No point is ever reported as an equilibrium without passing the regret check.
+`is_complete()` is true when `findings` is empty: every support was decided,
+and for a nondegenerate game `equilibria` is then the full set.
+
+**Limits.** Exactly two roles (`UnsupportedRoles` otherwise). The number of
+support pairs `(2^m − 1)(2^n − 1)` must be at most 2²⁰, so 10 × 10 is accepted
+and 11 × 10 is not (`TooLarge`, whose `profiles` field then carries the
+support-pair count). The arithmetic is floating point — there is no exact
+rational arithmetic — so a nearly degenerate game is decided by `tol`.
+
+### `lemke_howson`
+
+Two players only. Follows one complementary-pivoting path and returns exactly
+one equilibrium, `LemkeHowsonResult { equilibrium, pivots }`.
+
+| `LemkeHowsonOptions` | Default | Meaning |
+|---|---|---|
+| `dropped_label` | `0` | the label dropped at the start; labels `0..m` are role 0's actions, `m..m+n` role 1's, for an `m × n` game |
+| `max_pivots` | `100_000` | stop with `SolveError::MaxPivots { limit }` after this many pivots |
+
+Set them with `LemkeHowsonOptions::default().with_dropped_label(k).with_max_pivots(n)`;
+a label `≥ m + n` is `InvalidLabel`. Before pivoting, each player's payoffs are
+shifted by a constant so that every entry is strictly positive (this does not
+change the equilibria); the result is verified against the original, unshifted
+game. Ties in the minimum-ratio test, which occur in degenerate games, are
+broken by a lexicographic rule on the current inverse basis; if even that rule
+ties, the solver stops with `Lp(LpFailure::Internal)`.
+
+**What to expect.** In a nondegenerate game every dropped label leads to an
+equilibrium. Which one depends on the label, and some equilibria are not
+reached from any label: the method may return a pure equilibrium even when a
+mixed one exists (in the Battle of the Sexes below, every label ends at a pure
+equilibrium). To list all equilibria, use `support_enumeration`.
+
+### `zero_sum_minimax` and `maximin_security_level`
+
+Both solve a pair of linear programs with `microlp`: the primal (the
+maximising role's mixed strategy and the payoff it can guarantee) and the dual
+(the opponent's mixed strategy and the payoff it can hold the first role to).
+
+`zero_sum_minimax(&game)` requires two roles and a zero-sum game
+(`|u_0 + u_1| ≤ tol` at every profile; otherwise `NotZeroSum`). By the minimax
+theorem every finite two-player zero-sum game has a value, and the primal and
+dual optima both equal it. Before returning, the solver checks that the duality
+gap `|primal − dual|`, the regret of the strategy pair, the gap between role
+0's expected payoff and the value, and the gap between each role's best
+pure-action payoff and the value (`+value` for role 0, `-value` for role 1) are
+all at most `tol`; otherwise it returns `VerificationFailed { duality_gap,
+regret }`. It returns `MinimaxSolution { value, row, col, duality_gap, regret }`,
+with `value` from role 0's point of view. When the optimal strategies are not
+unique, which optimal pair is returned is up to the LP solver.
+
+`maximin_security_level(&game, role)` accepts any two-player game, zero-sum or
+not. It returns `SecurityLevel { level, strategy, duality_gap }`: the largest
+payoff `level` that `role` can guarantee against every pure action of the
+opponent, and a mixed strategy achieving it. The solver checks the duality gap
+and that the strategy actually guarantees `level` against every opponent action
+(within `tol`). A role other than 0 or 1 is `InvalidOptions`. In a general-sum
+game this is a guarantee, not an equilibrium strategy.
+
+If the LP backend reports the problem infeasible or unbounded, is interrupted,
+stops at a feasible but not optimal point, or fails internally, the solver
+returns `SolveError::Lp(LpFailure::{Infeasible, Unbounded, Interrupted,
+NotOptimal, Internal})` instead of a result.
+
+### `logit_qre`
+
+Finds a logit quantal response equilibrium at one precision λ for any number of
+players: a profile in which each role's strategy is the softmax of
+`λ × action_payoffs` against the others. Starting from `init` (or the uniform
+profile), it repeats the damped update
+
+```text
+σ_i ← (1 − damping) σ_i + damping × softmax(λ F_i(·, σ_-i))
+```
+
+until the fixed-point residual (the largest absolute difference between `σ`
+and its logit response) is at most `tol`.
+
+| `QreOptions` | Default | Meaning |
+|---|---|---|
+| `lambda` | (argument of `QreOptions::new(lambda)`) | precision; finite and `≥ 0`; `0` gives the uniform profile whatever `init` is |
+| `init` | `None` (uniform) | starting profile, set with `.with_init(profile)` |
+| `damping` | `0.1` | in `(0, 1]`, set with `.with_damping(d)` |
+| `tol` | `1e-12` | finite and `> 0`, set with `.with_tol(t)` |
+| `max_iter` | `100_000` | positive, set with `.with_max_iter(n)` |
+
+Invalid options are `InvalidOptions`; an `init` of the wrong shape is a
+`MixedError`. The residual is recomputed on the profile that is returned, and
+`QreSolution { lambda, strategies, residual, regrets, iterations }` is returned
+only when it is at most `tol`; otherwise the result is `NotConverged { residual,
+iterations }`. There is no fallback to the last iterate.
+
+**This is a local search, not principal-branch tracking.** A game can have
+several logit QREs at the same λ, and the iteration converges to whichever
+fixed point it reaches from `init`; different starting profiles can land on
+different QRE branches (see the stag hunt below). For a large λ the damped
+iteration may fail to settle; lower the damping, or raise λ in steps and pass
+each solution as the `init` of the next. That usually follows one branch, but
+it is not guaranteed to pass through folds or bifurcations of the QRE
+correspondence.
+
+A logit QRE is not a Nash equilibrium at finite λ. `regrets` holds the
+ordinary (unregularised) regret of each role at the returned profile; at an
+exact logit QRE it is at most `ln |S_i| / λ`, where `|S_i|` is the role's
+number of actions, so it shrinks as λ grows. The solver reports this regret but
+does not use it as an acceptance test.
+
+### Examples
+
+**Battle of the Sexes: all equilibria vs. one path.** Support enumeration finds
+the two pure equilibria and the mixed one; Lemke–Howson reaches only the pure
+ones, whichever label is dropped:
+
+```rust
+use socsim_games::catalog::BattleOfSexes;
+use socsim_games::solve::{
+    lemke_howson, pure_nash, support_enumeration, tolerance, LemkeHowsonOptions,
+};
+
+fn main() {
+    // Role 0 prefers (B, B) with 2, role 1 prefers (V, V) with 2;
+    // miscoordination gives both -1.
+    let game = BattleOfSexes::default();
+    println!("tol = {:e}", tolerance(&game).unwrap());
+
+    let pure: Vec<_> = pure_nash(&game).unwrap().into_iter().map(|e| e.profile).collect();
+    println!("pure: {pure:?}");
+
+    let all = support_enumeration(&game).unwrap();
+    println!("complete: {}", all.is_complete());
+    for eq in &all.equilibria {
+        println!(
+            "  {:.4?} {:.4?} payoffs {:.4?}",
+            eq.strategies[0].probs(),
+            eq.strategies[1].probs(),
+            eq.payoffs
+        );
+    }
+
+    // Labels 0..2 are role 0's actions, 2..4 are role 1's.
+    for label in 0..4 {
+        let found = lemke_howson(&game, &LemkeHowsonOptions::default().with_dropped_label(label))
+            .unwrap();
+        println!(
+            "  label {label}: {:?} {:?} ({} pivots)",
+            found.equilibrium.strategies[0].probs(),
+            found.equilibrium.strategies[1].probs(),
+            found.pivots
+        );
+    }
+}
+```
+
+```text
+tol = 3e-10
+pure: [[0, 0], [1, 1]]
+complete: true
+  [1.0000, 0.0000] [1.0000, 0.0000] payoffs [2.0000, 1.0000]
+  [0.6000, 0.4000] [0.4000, 0.6000] payoffs [0.2000, 0.2000]
+  [0.0000, 1.0000] [0.0000, 1.0000] payoffs [1.0000, 2.0000]
+  label 0: [1.0, 0.0] [1.0, 0.0] (2 pivots)
+  label 1: [0.0, 1.0] [0.0, 1.0] (2 pivots)
+  label 2: [1.0, 0.0] [1.0, 0.0] (2 pivots)
+  label 3: [0.0, 1.0] [0.0, 1.0] (2 pivots)
+```
+
+The payoff range is 2 − (−1) = 3, hence `tol = 3e-10`. In the mixed
+equilibrium each role plays its preferred action with probability 0.6 and
+expects 0.2.
+
+**Rock–Paper–Scissors: minimax.** The value is 0 and both optimal strategies
+are uniform. The Battle of the Sexes is not zero-sum, but each role still has a
+security level:
+
+```rust
+use socsim_games::catalog::{BattleOfSexes, RockPaperScissors};
+use socsim_games::solve::{maximin_security_level, zero_sum_minimax};
+
+fn main() {
+    let rps = RockPaperScissors::default();
+    let solution = zero_sum_minimax(&rps).unwrap();
+    println!("value {:.6}", solution.value);
+    println!("row {:.6?}", solution.row.probs());
+    println!("col {:.6?}", solution.col.probs());
+    println!("gap {:e}, regret {:e}", solution.duality_gap, solution.regret);
+
+    // A general-sum game has no minimax value, but each role still has a
+    // maximin guarantee.
+    let bos = BattleOfSexes::default();
+    assert!(zero_sum_minimax(&bos).is_err()); // NotZeroSum
+    let guard = maximin_security_level(&bos, 0).unwrap();
+    println!("BoS role 0 guarantees {:.6} with {:.6?}", guard.level, guard.strategy.probs());
+}
+```
+
+```text
+value 0.000000
+row [0.333333, 0.333333, 0.333333]
+col [0.333333, 0.333333, 0.333333]
+gap 0e0, regret 5.551115123125783e-17
+BoS role 0 guarantees 0.200000 with [0.400000, 0.600000]
+```
+
+The exact low-order digits of `regret` come from floating-point rounding; what
+the solver guarantees is `regret ≤ tol`.
+
+**Stag hunt: QRE branches.** Raising λ from the uniform start follows the
+branch towards `(hare, hare)`; at λ = 5 a start at `(stag, stag)` lands on a
+different QRE close to `(stag, stag)`:
+
+```rust
+use socsim_games::catalog::StagHunt;
+use socsim_games::solve::{logit_qre, QreOptions};
+use socsim_games::MixedStrategy;
+
+fn main() {
+    let game = StagHunt::default();
+
+    // Raise lambda step by step, starting each solve from the previous one.
+    let mut previous = None;
+    for lambda in [0.5, 1.0, 2.0, 5.0] {
+        let mut options = QreOptions::new(lambda);
+        if let Some(init) = previous.take() {
+            options = options.with_init(init);
+        }
+        let qre = logit_qre(&game, &options).unwrap();
+        println!(
+            "lambda {lambda}: P(stag) = {:.4}, regrets {:.4?}",
+            qre.strategies[0].probs()[0],
+            qre.regrets
+        );
+        previous = Some(qre.strategies);
+    }
+
+    // The same lambda from a different start lands on a different fixed point.
+    let stag = MixedStrategy::pure(2, 0).unwrap();
+    let qre = logit_qre(&game, &QreOptions::new(5.0).with_init(vec![stag.clone(), stag])).unwrap();
+    println!("lambda 5 from (stag, stag): P(stag) = {:.4}", qre.strategies[0].probs()[0]);
+}
+```
+
+```text
+lambda 0.5: P(stag) = 0.0334, regrets [0.2246, 0.2246]
+lambda 1: P(stag) = 0.0009, regrets [0.0064, 0.0064]
+lambda 2: P(stag) = 0.0000, regrets [0.0000, 0.0000]
+lambda 5: P(stag) = 0.0000, regrets [0.0000, 0.0000]
+lambda 5 from (stag, stag): P(stag) = 0.9901
+```
+
+Each regret stays below `ln 2 / λ` (about 1.39 at λ = 0.5).

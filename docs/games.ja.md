@@ -9,6 +9,7 @@
 
 この crate はライブラリ専用です（`ModulePack` を持たず，`socsim` バイナリには組み込まれていません）．
 このページでは，部品，その状態の置き場所，規則が見てよい情報，実行可能なシミュレーションの組み立て方を説明します．
+シミュレーションとは別に，古典的なゲームと有限ゲームのソルバー（Nash 均衡，支配，ミニマックス，ロジット QRE）も提供します（[有限ゲームを解く](#有限ゲームを解く) を参照）．
 
 ---
 
@@ -16,7 +17,7 @@
 
 | feature | 追加されるもの | socsim への依存 |
 |---|---|---|
-| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`）と `MatrixGame` | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません |
+| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`），`MatrixGame`，組込みのゲーム（`catalog`），混合戦略（`mixed`），ソルバー（`solve`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
 | `core` | World（`GameWorld`），規則，利得規則，Matching，ビュー，`build_world` | `socsim-core` |
 | `engine` | `assemble`（`SimulationBuilder` を返す）．`core` を含意 | `socsim-core`，`socsim-engine` |
 | `llm` | LLM の決定規則，応答ストア，再生の manifest（[LLM による決定](#llm-による決定) を参照）．`core` を含意．Mechanism `game_llm_decide` と `assemble_with_llm` には `engine` も要る | `socsim-core`，`socsim-llm`（既定の feature だけ．ネットワークなし） |
@@ -142,6 +143,51 @@ cargo run -p socsim-games --example ipd_pair --features core,engine
 
 シミュレーション層が現在組み立てるのは **2 役割**の対戦だけです．
 それ以外の `n_roles()` は `assemble` が `GameError::UnsupportedRoles` で拒否します．
+
+### 組込みのゲーム：`catalog`
+
+`socsim_games::catalog` は古典的な 2 人ゲームを 5 つ提供します．どれも `FiniteGame` を実装しているので，
+`MatrixGame` と同じように `build_world`，組込みの規則，[ソルバー](#有限ゲームを解く) に渡せます．
+`to_matrix()` は同じラベルを持つ等価な `MatrixGame` に変換します．
+行動のラベルは ASCII で，協力側を持つゲーム（`C`，`stag`）ではそれが行動 `0` です．
+
+| 型 | 行動 `0, 1, …` | コンストラクタ | 構築時に確かめる条件 |
+|---|---|---|---|
+| `PrisonersDilemma` | `C`，`D` | `new(T, R, P, S)`；`weak(b)` ＝ `new(b, 1, 0, 0)` | `T > R > P ≥ S`（`P = S` を許すので，`weak(b)` には `b > 1` が要る） |
+| `BattleOfSexes` | `B`，`V` | `new(a, b)`；`Default`：`a = [[2, -1], [-1, 1]]`，`b = [[1, -1], [-1, 2]]` | `(B, B)` と `(V, V)` が狭義の均衡で，役割 0 は `(B, B)` を，役割 1 は `(V, V)` を狭義に好む |
+| `MatchingPennies` | `H`，`T` | `new(a, b)`；`Default`：`a = [[-1, 1], [1, -1]]`，`b = -a` | ゼロ和（要素ごとに `b == -a`）で，純粋戦略の均衡を持たない |
+| `StagHunt` | `stag`，`hare` | `new(a, b)`；`Default`：`a = [[9, 0], [8, 7]]`，`b = [[9, 8], [0, 7]]` | `(stag, stag)` と `(hare, hare)` が狭義の均衡で，`(stag, stag)` はどちらの役割にも `(hare, hare)` より狭義に大きい利得を与える |
+| `RockPaperScissors` | `R`，`P`，`S` | `new(win, loss)`；`Default`：`win = loss = 1` | `win > 0` かつ `loss > 0` |
+
+`a[i][j]` / `b[i][j]` は，役割 0 が `i`，役割 1 が `j` を選んだときの役割 0 / 役割 1 の利得です（`MatrixGame::bimatrix` と同じ）．
+囚人のジレンマは役割 0 に `[[R, S], [T, P]]` を，役割 1 にその転置を与えます．
+標準の `T, R, P, S` は一通りには決まらないので，囚人のジレンマには意図して `Default` を用意していません．利得は必ず書き下します．
+既定のマッチング・ペニーでは，硬貨の面が異なるときに役割 0 が勝ちます．
+じゃんけんでは勝者が `win`，敗者が `-loss`，引き分けが `0` を受け取ります．
+既定の `win = loss = 1` では標準の反対称なゼロ和の形になります（`win ≠ loss` のときはゼロ和ではありません）．
+
+どのコンストラクタも `Result<_, CatalogError>` を返します．利得に NaN や無限大があれば `NonFinite`，
+利得がそのゲームを定める形をしていなければ `Condition(_)` です．
+これらの型は serde で直列化でき，逆直列化でも同じ検査が走るので，不正なゲームを snapshot やファイルから読み込むこともできません．
+
+```rust
+use socsim_games::catalog::{PrisonersDilemma, RockPaperScissors};
+use socsim_games::{FiniteGame, NormalFormGame};
+
+fn main() {
+    // T > R > P >= S is checked when the game is built.
+    let pd = PrisonersDilemma::new(5.0, 3.0, 1.0, 0.0).unwrap();
+    assert!(PrisonersDilemma::new(3.0, 3.0, 1.0, 0.0).is_err()); // T = R
+
+    println!("{} vs {}: {}", pd.action_label(0, 0), pd.action_label(1, 1), pd.payoff(0, &[0, 1]));
+    // C vs D: 0
+
+    let rps = RockPaperScissors::default(); // win = 1, loss = 1
+    let matrix = rps.to_matrix();           // the same payoffs as a MatrixGame
+    println!("{} beats {}: {}", matrix.action_label(0, 1), matrix.action_label(1, 0), matrix.payoff(0, &[1, 0]));
+    // P beats R: 1
+}
+```
 
 ---
 
@@ -900,3 +946,318 @@ LLM の決定が無いステップでは何も記録しません．
 したがってゲームのシミュレーションではラベル `[2]` と `[3]` が予約済みです．独自のストリームには `[4]` 以上を使ってください
 （[RNG ストリームのラベル付け規約](library.ja.md#rngストリームのラベル付け規約) を参照）．
 学習は `AgentId` の昇順で，決定はスケジューラーの活性化の順で行われます．同じ seed と同じコードなら，実行はステップごとに再現されます．
+
+---
+
+## 有限ゲームを解く
+
+シミュレーションとは別に，この crate は任意の `FiniteGame`（`MatrixGame`，[組込みのゲーム](#組込みのゲームcatalog)，自作の型）の
+均衡とそれに関連する解概念を直接計算します．混合戦略は `socsim_games::mixed` に，ソルバーは `socsim_games::solve` にあります．
+どちらも既定のビルドに含まれ，feature も `socsim-*` crate も要りません（線形計画は純 Rust の `microlp` crate で解きます）．
+
+### 混合戦略
+
+`MixedStrategy` は 1 つの役割の行動上の確率ベクトルで，検査済みのものです．並びは行動の番号順です．
+
+| コンストラクタ | 結果 |
+|---|---|
+| `MixedStrategy::new(probs)` | 与えたベクトルそのもの（正規化し直さない）．空のとき，NaN・無限大・負の要素があるとき，和と 1 の差が `1e-9` を超えるときは `MixedError::NotADistribution` |
+| `MixedStrategy::uniform(n)` | `n` 個の行動それぞれに `1/n` |
+| `MixedStrategy::pure(n, action)` | `action` に確率 1 |
+
+混合戦略の組は，役割ごとに 1 つの `MixedStrategy` を並べたスライスです．次の関数は役割の数を問わずこれを評価します（行動の組をすべて列挙します）．
+
+| 関数 | 返すもの |
+|---|---|
+| `mixed::expected_payoff(&game, role, &profile)` | その役割の期待利得 `F_i(σ)` |
+| `mixed::action_payoffs(&game, role, &profile)` | その役割の各純粋行動 `s_i` に対する `F_i(s_i, σ_-i)` |
+| `mixed::regrets(&game, &profile)` | 役割ごとの後悔（最良の純粋行動の利得 − 期待利得） |
+| `mixed::regret(&game, &profile)` | `regrets` の最大値 |
+
+役割の数が合わない組や長さの合わないベクトルは `MixedError::{RoleCount, Dimension}` になります．
+
+混合戦略はソルバー側だけの概念です．シミュレーションでは決定規則は常に 1 つの `G::Action`（`FiniteGame` なら行動の番号）を返し，
+`MixedStrategy` が行動になることはありません．混合を打つ規則は，自分の RNG でそこから行動を 1 つ引きます．
+
+### 許容誤差と検証
+
+ソルバー内の比較はすべて，ゲームごとに利得の幅で尺度を合わせた 1 つの許容誤差を使います．
+
+```text
+tol = 1e-10 × max(1, 利得の最大値 − 利得の最小値)    （全役割・全行動の組にわたって）
+```
+
+`solve::tolerance(&game)` がこれを返します．ソルバーは手法そのものを信用しません．
+均衡を返すソルバーはどれも，見つけた組の後悔を元のゲームで計算し直して添え（`regret` フィールド），
+後悔が `tol` 以下のときに限って結果を返します．
+解く前には，どのソルバーもゲームを検査します．役割が 1 つ以上あること，行動のない役割がないこと，
+行動の組が 10⁶ 以下であること（`SolveError::TooLarge`），利得がすべて有限であること（`SolveError::NonFinitePayoff`）です．
+
+混合戦略の均衡は `Equilibrium { strategies, payoffs, regret }` で返ります．役割ごとの `MixedStrategy` と期待利得，
+そして検証済みの最大の後悔です．`is_pure()` は，すべての戦略が 1 つの行動に確率 1 を置くとき真です．
+
+### ソルバーの一覧
+
+| 関数 | プレイヤー | 返すもの | 制限 |
+|---|---|---|---|
+| `pure_nash(&game)` | n 人 | `Vec<PureNash>`：純粋戦略の均衡すべて | 行動の組をすべて列挙（10⁶ 以下） |
+| `iterated_strict_dominance(&game)` | n 人 | `DominanceResult`：残った行動と除去の記録 | 純粋戦略による強支配だけ |
+| `support_enumeration(&game)` | 2 人 | `EquilibriumSet`：非退化なゲームの均衡すべてと `findings` | 台の組が 2²⁰ 以下（10 × 10 まで） |
+| `lemke_howson(&game, &options)` | 2 人 | `LemkeHowsonResult`：均衡 1 つ | どれが返るかは落とすラベルで決まる |
+| `zero_sum_minimax(&game)` | 2 人，ゼロ和 | `MinimaxSolution`：ゲームの値と最適戦略 | 線形計画．主問題と双対問題を両方解いて検査する |
+| `maximin_security_level(&game, role)` | 2 人 | `SecurityLevel`：1 つの役割のマキシミン保証水準 | 線形計画．主問題と双対問題を両方解いて検査する |
+| `logit_qre(&game, &options)` | n 人 | `QreSolution`：与えた λ でのロジット QRE 1 つ | 局所的な不動点反復であり，分枝の追跡ではない |
+
+エラーは `SolveError` です．上のゲームの検査のほか，ソルバーが受け付けない役割の数の `UnsupportedRoles`，
+`NotZeroSum`，`InvalidLabel`，`MaxPivots`，`Lp(LpFailure)`，`VerificationFailed { duality_gap, regret }`，
+`NotConverged { residual, iterations }`，`InvalidOptions`，`Mixed(MixedError)` があります．
+
+### `pure_nash`
+
+行動の組を辞書式の順（役割 0 の行動がもっとも上位の桁，最後の役割の行動がもっとも速く変わる）にすべて訪れ，
+どの役割も一方的な逸脱で `tol` を超えて得をしない組を残します．
+`PureNash { profile, payoffs, regret }` をこの順で返します．列挙は網羅的なので，この一覧はゲームの純粋戦略の均衡のすべてです（`tol` の範囲で）．
+費用は行動の組の数×行動の総数で，行動の組が 10⁶ を超えるゲームは拒否します．
+
+### `iterated_strict_dominance`
+
+各ラウンドで，すべての役割について同時に，同じ役割の別の残っている**純粋**行動に強支配される行動
+（残っている他の役割の行動のどの組み合わせに対しても `tol` を超えて劣る行動）をすべて取り除き，
+何も取り除かれなくなるまで繰り返します．`DominanceResult { surviving, eliminated }` を返します．
+`surviving` は役割ごとの残った行動の番号（昇順），`eliminated` は取り除いた行動ごとの `Elimination { round, role, action }`（ラウンドは 1 から数える）です．
+
+強支配による除去は Nash 均衡を取り除かず，最終結果は取り除く順序に依存しません．よく使われる 2 つの変種は意図して入れていません．
+
+- **弱支配**は使いません．結果が取り除く順序に依存しうるうえ，均衡を取り除くことがあるからです．
+- **混合戦略による支配**は調べません．他の行動の混合にだけ支配される行動は，ここでは残ります．
+  これを検出するには行動ごとに線形計画を解く必要があります．そのため，混合戦略による支配を認める教科書の定義より，残る集合が大きくなることがあります．
+
+### `support_enumeration`
+
+2 人ゲームだけを扱います．空でない台の組（役割 0 の台を外側，役割 1 の台を内側のキーとし，それぞれ昇順の行動番号の辞書式順）をすべて調べ，
+無差別条件の方程式を解き，負の確率が出たときや台の外の行動のほうが良いときはその台を退け，候補の後悔を検証します．
+`EquilibriumSet { equilibria, findings }` を返します．`tol` の範囲で同じ均衡がもう一度見つかったときは，最初のものを残します．
+
+**すべての均衡が見つかる条件．** 非退化なゲームでは，各均衡はその台での方程式のただ 1 つの解なので，均衡はすべて見つかります（その数は奇数です）．
+退化したゲームでは，台の方程式の階数が落ちたり条件が悪かったりします．そうした台は推測で埋めず，`findings` に報告します．
+
+| `SupportFinding` | 意味 |
+|---|---|
+| `Degenerate { support, reason }` | 階数が落ちていて，検証済みの点がない |
+| `Component { support, base, directions }` | 正の次元を持つ均衡の集合の上の検証済みの点 `base` と，零空間の方向 `directions`（それぞれ役割 0 の確率，続けて役割 1 の確率と平坦に並べたもの）．`base` は `equilibria` にも加える |
+| `Inconclusive { support, reason }` | 方程式の条件が悪い（条件数の推定が 10¹² を超える）か有限でない，または最後の検証に失敗した |
+
+後悔の検査を通らない点を均衡として報告することはありません．`is_complete()` は `findings` が空のとき真です．
+このときすべての台に決着がついており，非退化なゲームなら `equilibria` が均衡の全体です．
+
+**制限．** 役割はちょうど 2 つです（それ以外は `UnsupportedRoles`）．台の組の数 `(2^m − 1)(2^n − 1)` は 2²⁰ 以下でなければならず，
+10 × 10 は受け付け，11 × 10 は受け付けません（`TooLarge`．このとき `profiles` フィールドには台の組の数が入ります）．
+計算は浮動小数点で行い，厳密な有理数演算はしないので，退化に近いゲームの判定は `tol` で決まります．
+
+### `lemke_howson`
+
+2 人ゲームだけを扱います．相補ピボットの経路を 1 本たどり，均衡をちょうど 1 つ返します（`LemkeHowsonResult { equilibrium, pivots }`）．
+
+| `LemkeHowsonOptions` | 既定値 | 意味 |
+|---|---|---|
+| `dropped_label` | `0` | 最初に落とすラベル．`m × n` のゲームでは，ラベル `0..m` が役割 0 の行動，`m..m+n` が役割 1 の行動 |
+| `max_pivots` | `100_000` | ピボットがこの回数に達したら `SolveError::MaxPivots { limit }` で止める |
+
+`LemkeHowsonOptions::default().with_dropped_label(k).with_max_pivots(n)` で設定します．`m + n` 以上のラベルは `InvalidLabel` です．
+ピボットの前に，各プレイヤーの利得を定数だけずらしてすべての要素を正にします（均衡は変わりません）．結果は，ずらす前の元のゲームで検証します．
+退化したゲームで起きる最小比テストの同点は，その時点の基底の逆行列による辞書式の規則で解消します．その規則でもなお同点なら，`Lp(LpFailure::Internal)` で止まります．
+
+**何が返るか．** 非退化なゲームでは，どのラベルを落としても均衡に着きます．どの均衡に着くかはラベルで決まり，どのラベルからも着かない均衡もあります．
+混合戦略の均衡があっても純粋戦略の均衡が返ることがあります（下の男女の争いでは，どのラベルでも純粋戦略の均衡に着きます）．
+均衡をすべて列挙するには `support_enumeration` を使ってください．
+
+### `zero_sum_minimax` と `maximin_security_level`
+
+どちらも `microlp` で線形計画の組を解きます．主問題（最大化する役割の混合戦略と，それで保証できる利得）と，
+双対問題（相手の混合戦略と，それで最初の役割を抑え込める利得）です．
+
+`zero_sum_minimax(&game)` は 2 つの役割とゼロ和（すべての行動の組で `|u_0 + u_1| ≤ tol`．そうでなければ `NotZeroSum`）を要求します．
+ミニマックス定理により有限の 2 人ゼロ和ゲームはどれも値を持ち，主問題と双対問題の最適値はどちらもそれに等しくなります．
+返す前に，双対ギャップ `|主問題 − 双対問題|`，戦略の組の後悔，役割 0 の期待利得と値の差，
+各役割の最良の純粋行動の利得と値の差（役割 0 は `+value`，役割 1 は `-value`）がすべて `tol` 以下であることを確かめ，
+そうでなければ `VerificationFailed { duality_gap, regret }` を返します．
+返すのは `MinimaxSolution { value, row, col, duality_gap, regret }` で，`value` は役割 0 から見た値です．
+最適戦略が一意でないとき，どの最適な組が返るかは線形計画ソルバー次第です．
+
+`maximin_security_level(&game, role)` はゼロ和かどうかを問わず任意の 2 人ゲームを受け付けます．
+`SecurityLevel { level, strategy, duality_gap }` を返します．`level` は `role` が相手のどの純粋行動に対しても保証できる最大の利得で，
+`strategy` はそれを達成する混合戦略です．双対ギャップと，その戦略が相手のどの行動に対しても実際に `level` を保証すること（`tol` の範囲で）を確かめます．
+0 と 1 以外の役割は `InvalidOptions` です．一般和ゲームでは，これは保証であって均衡戦略ではありません．
+
+線形計画のバックエンドが実行不能・非有界を報告したとき，中断されたとき，最適でない実行可能解で止まったとき，内部で失敗したときは，
+結果ではなく `SolveError::Lp(LpFailure::{Infeasible, Unbounded, Interrupted, NotOptimal, Internal})` を返します．
+
+### `logit_qre`
+
+1 つの精度 λ でのロジット量的応答均衡（QRE）を，プレイヤーの数を問わず求めます．
+各役割の戦略が，他の役割に対する `λ × action_payoffs` のソフトマックスに一致する組です．
+`init`（なければ一様な組）から始めて，減衰つきの更新
+
+```text
+σ_i ← (1 − damping) σ_i + damping × softmax(λ F_i(·, σ_-i))
+```
+
+を，不動点の残差（`σ` とそのロジット応答の差の絶対値の最大）が `tol` 以下になるまで繰り返します．
+
+| `QreOptions` | 既定値 | 意味 |
+|---|---|---|
+| `lambda` | （`QreOptions::new(lambda)` の引数） | 精度．有限で `0` 以上．`0` なら `init` によらず一様な組になる |
+| `init` | `None`（一様） | 初期の組．`.with_init(profile)` で設定 |
+| `damping` | `0.1` | `(0, 1]` の範囲．`.with_damping(d)` で設定 |
+| `tol` | `1e-12` | 有限で正．`.with_tol(t)` で設定 |
+| `max_iter` | `100_000` | 正．`.with_max_iter(n)` で設定 |
+
+不正なオプションは `InvalidOptions`，形の合わない `init` は `MixedError` です．残差は返す組で計算し直し，
+それが `tol` 以下のときに限って `QreSolution { lambda, strategies, residual, regrets, iterations }` を返します．
+そうでなければ結果は `NotConverged { residual, iterations }` です．最後の反復値で代用することはありません．
+
+**これは局所的な探索であって，主分枝の追跡ではありません．** 同じ λ でもゲームが複数のロジット QRE を持つことがあり，
+反復は `init` からたどり着いた不動点に収束します．初期値が違えば別の QRE の分枝に着くことがあります（下の鹿狩りを参照）．
+λ が大きいと減衰つきの反復が落ち着かないことがあります．そのときは減衰を小さくするか，λ を段階的に上げ，各解を次の `init` に渡してください．
+こうすると多くの場合 1 本の分枝をたどれますが，QRE の対応の折り返しや分岐を越えられる保証はありません．
+
+有限の λ ではロジット QRE は Nash 均衡ではありません．`regrets` は返した組での各役割の通常の（正則化しない）後悔です．
+厳密なロジット QRE ではこれは `ln |S_i| / λ` 以下（`|S_i|` はその役割の行動の数）なので，λ が大きくなるほど小さくなります．
+ソルバーはこの後悔を報告しますが，受け入れの判定には使いません．
+
+### 例
+
+**男女の争い：すべての均衡と 1 本の経路．** 台の列挙は 2 つの純粋戦略の均衡と混合戦略の均衡を見つけます．
+Lemke–Howson は，どのラベルを落としても純粋戦略の均衡にしか着きません．
+
+```rust
+use socsim_games::catalog::BattleOfSexes;
+use socsim_games::solve::{
+    lemke_howson, pure_nash, support_enumeration, tolerance, LemkeHowsonOptions,
+};
+
+fn main() {
+    // Role 0 prefers (B, B) with 2, role 1 prefers (V, V) with 2;
+    // miscoordination gives both -1.
+    let game = BattleOfSexes::default();
+    println!("tol = {:e}", tolerance(&game).unwrap());
+
+    let pure: Vec<_> = pure_nash(&game).unwrap().into_iter().map(|e| e.profile).collect();
+    println!("pure: {pure:?}");
+
+    let all = support_enumeration(&game).unwrap();
+    println!("complete: {}", all.is_complete());
+    for eq in &all.equilibria {
+        println!(
+            "  {:.4?} {:.4?} payoffs {:.4?}",
+            eq.strategies[0].probs(),
+            eq.strategies[1].probs(),
+            eq.payoffs
+        );
+    }
+
+    // Labels 0..2 are role 0's actions, 2..4 are role 1's.
+    for label in 0..4 {
+        let found = lemke_howson(&game, &LemkeHowsonOptions::default().with_dropped_label(label))
+            .unwrap();
+        println!(
+            "  label {label}: {:?} {:?} ({} pivots)",
+            found.equilibrium.strategies[0].probs(),
+            found.equilibrium.strategies[1].probs(),
+            found.pivots
+        );
+    }
+}
+```
+
+```text
+tol = 3e-10
+pure: [[0, 0], [1, 1]]
+complete: true
+  [1.0000, 0.0000] [1.0000, 0.0000] payoffs [2.0000, 1.0000]
+  [0.6000, 0.4000] [0.4000, 0.6000] payoffs [0.2000, 0.2000]
+  [0.0000, 1.0000] [0.0000, 1.0000] payoffs [1.0000, 2.0000]
+  label 0: [1.0, 0.0] [1.0, 0.0] (2 pivots)
+  label 1: [0.0, 1.0] [0.0, 1.0] (2 pivots)
+  label 2: [1.0, 0.0] [1.0, 0.0] (2 pivots)
+  label 3: [0.0, 1.0] [0.0, 1.0] (2 pivots)
+```
+
+利得の幅は 2 − (−1) = 3 なので `tol = 3e-10` です．混合戦略の均衡では，各役割が自分の好む行動を確率 0.6 で選び，期待利得は 0.2 です．
+
+**じゃんけん：ミニマックス．** 値は 0 で，最適戦略はどちらも一様です．男女の争いはゼロ和ではありませんが，各役割は保証水準を持ちます．
+
+```rust
+use socsim_games::catalog::{BattleOfSexes, RockPaperScissors};
+use socsim_games::solve::{maximin_security_level, zero_sum_minimax};
+
+fn main() {
+    let rps = RockPaperScissors::default();
+    let solution = zero_sum_minimax(&rps).unwrap();
+    println!("value {:.6}", solution.value);
+    println!("row {:.6?}", solution.row.probs());
+    println!("col {:.6?}", solution.col.probs());
+    println!("gap {:e}, regret {:e}", solution.duality_gap, solution.regret);
+
+    // A general-sum game has no minimax value, but each role still has a
+    // maximin guarantee.
+    let bos = BattleOfSexes::default();
+    assert!(zero_sum_minimax(&bos).is_err()); // NotZeroSum
+    let guard = maximin_security_level(&bos, 0).unwrap();
+    println!("BoS role 0 guarantees {:.6} with {:.6?}", guard.level, guard.strategy.probs());
+}
+```
+
+```text
+value 0.000000
+row [0.333333, 0.333333, 0.333333]
+col [0.333333, 0.333333, 0.333333]
+gap 0e0, regret 5.551115123125783e-17
+BoS role 0 guarantees 0.200000 with [0.400000, 0.600000]
+```
+
+`regret` の下位の桁は浮動小数点の丸めによるものです．ソルバーが保証するのは `regret ≤ tol` です．
+
+**鹿狩り：QRE の分枝．** 一様な初期値から λ を上げていくと `(hare, hare)` へ向かう分枝をたどります．
+λ = 5 で `(stag, stag)` から始めると，`(stag, stag)` に近い別の QRE に着きます．
+
+```rust
+use socsim_games::catalog::StagHunt;
+use socsim_games::solve::{logit_qre, QreOptions};
+use socsim_games::MixedStrategy;
+
+fn main() {
+    let game = StagHunt::default();
+
+    // Raise lambda step by step, starting each solve from the previous one.
+    let mut previous = None;
+    for lambda in [0.5, 1.0, 2.0, 5.0] {
+        let mut options = QreOptions::new(lambda);
+        if let Some(init) = previous.take() {
+            options = options.with_init(init);
+        }
+        let qre = logit_qre(&game, &options).unwrap();
+        println!(
+            "lambda {lambda}: P(stag) = {:.4}, regrets {:.4?}",
+            qre.strategies[0].probs()[0],
+            qre.regrets
+        );
+        previous = Some(qre.strategies);
+    }
+
+    // The same lambda from a different start lands on a different fixed point.
+    let stag = MixedStrategy::pure(2, 0).unwrap();
+    let qre = logit_qre(&game, &QreOptions::new(5.0).with_init(vec![stag.clone(), stag])).unwrap();
+    println!("lambda 5 from (stag, stag): P(stag) = {:.4}", qre.strategies[0].probs()[0]);
+}
+```
+
+```text
+lambda 0.5: P(stag) = 0.0334, regrets [0.2246, 0.2246]
+lambda 1: P(stag) = 0.0009, regrets [0.0064, 0.0064]
+lambda 2: P(stag) = 0.0000, regrets [0.0000, 0.0000]
+lambda 5: P(stag) = 0.0000, regrets [0.0000, 0.0000]
+lambda 5 from (stag, stag): P(stag) = 0.9901
+```
+
+どの後悔も `ln 2 / λ`（λ = 0.5 で約 1.39）を下回っています．
