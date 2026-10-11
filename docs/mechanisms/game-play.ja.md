@@ -19,6 +19,9 @@
 5. `PayoffAggregation`（`Sum` か `Mean`）を適用します．
 6. エージェントごとに `StepRecord { action, payoff, n_played }` を 1 つステップ履歴に追記します．
    `DecisionScope::PerAgentRole` と `PerEncounter` では，エージェントが 1 ステップの中で違う行動を出しうるので，`action` は `None` です．
+7. `assemble_with_aggregates`（`G: AggregateGame`）で組み立てたときは，対戦ごとに 1 回（`EncounterId` の順）`aggregate_into` を呼び，
+   各値をそのステップの対戦にわたって集約し（`Sum`，または `Mean`．対戦の無いステップでは `Mean` は定義されない），
+   `t` をキーとする 1 行を World の集計値の表（長さ `aggregate_history_len` の環）に追記します．
 
 ## 2. 理論と出典
 
@@ -38,7 +41,7 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 ![game_play data flow](../assets/mech-game-play.svg)
 
 対戦（`seats`，`credit`，`actions`）と，`OutcomeContext` を通してゲーム・`X`・保持行動・トポロジーを読みます．
-席ごとの利得，エージェントごとの `payoff` と `n_played`，（有効なら）対の履歴，ステップ履歴を書きます．
+席ごとの利得，エージェントごとの `payoff` と `n_played`，（有効なら）対の履歴，ステップ履歴，`assemble_with_aggregates` なら集計値の行を書きます．
 
 ## 4. 6フェーズループにおける位置
 
@@ -55,6 +58,7 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 | `GameWorld.n_played` | ✓ | ✓ | エージェントが席に着いた対戦ごとに 1 増やす． |
 | 対の履歴 | | ✓ | `build_world` が作ったとき（規則が求めたとき）だけ．2 席の対戦ごとに `(t, 双方の行動)` を 1 件，`EncounterId` の順に，利得の計算の後で書く．組ごとに長さ `history_len` の環． |
 | ステップ履歴（`StepRecord`） | | ✓ | エージェントごとに 1 件．席のないエージェントの `action` は `None`．`PerAgentRole` / `PerEncounter` ではすべてのエージェントで `None`．長さ `history_len` の環． |
+| 集計値の表 | | ✓ | `assemble_with_aggregates` のときだけ．ステップ履歴の後に 1 行 `(t, values)`，`AggregateSpec` ごとに `Option<f64>` を 1 つ．有限でない値はステップを失敗させる．World のフィールド `aggregate`（それ以外では World の JSON から省かれる）．長さ `aggregate_history_len` の環． |
 | `game`，`x`，`held`，`topology`，`clock.t` | ✓ | | `OutcomeContext` を通して． |
 
 ## 6. 依存関係と順序制約
@@ -64,6 +68,8 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 - **下流：** `game_decide`（Reward）は `learn_encounter` / `learn_step` のために新しいステップの記録と対戦の結果を読みます．
   次のステップの `DecisionContext::my_history`，`opponent_history`，`pair_history` は，ここで書いた履歴を読みます．
   対の履歴は Interaction で書かれるので，決定から自分のステップが見えることはありません．
+  集計値の表も同じで，`DecisionContext::aggregate_history()` に見えるのは終わった前のステップだけです．
+  [`game_metrics`](game-metrics.ja.md)（PostStep）はこのステップの集計値の行を `game.aggregate.<name>` として記録します．
 - **決定の粒度：** `assemble` は `PlayOptions::decision_scope` を `game_play` にも渡します．`StepRecord::action` を記録するかどうかはこれで決まります．
 
 ## 7. パラメータ
@@ -73,10 +79,13 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 | `outcome: O`（`O: OutcomeRule<G, X>`） | — | structural | `assemble` に渡す．組込み：`NormalFormOutcome`（`G: NormalFormGame` を要求）． |
 | `opts.payoff_aggregation` | `PayoffAggregation::Sum` | structural | `Sum` か `Mean`．`Mean` では対戦しなかったエージェントは `0` のまま． |
 | `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep`：`StepRecord::action` はエージェントの行動．`PerAgentRole` / `PerEncounter`：`None`． |
+| `aggregate_history_len` | — | structural | `assemble_with_aggregates` のときだけ．`aggregate_history()` のために保持する行数．`> 0` でなければならない（`GameError::InvalidAggregateHistoryLength`）．名前と集約の方法は `AggregateGame::aggregate_spec()` から． |
 
 ## 8. 適用方法
 
 ライブラリ専用です．`assemble` が `outcome` と `opts` から `game_play` を構築します．
+`assemble_with_aggregates(.., seed, aggregate_history_len)` は集計値を集める `game_play` を構築します
+（[`docs/games.ja.md` の「公開集計値」](../games.ja.md#公開集計値aggregategame) を参照）．
 
 ### ライブラリモード
 

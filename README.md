@@ -97,7 +97,7 @@ The climate of silence C(t) rises until the salience shock at t=24, then partly 
 | [CLI reference](docs/cli.md) | Every subcommand, flags, JSONL output format |
 | [Use-cases & recipes](docs/usecases.md) | Runbook for common research workflows |
 | [Library API](docs/library.md) | Implement custom mechanisms and use socsim as a library |
-| [Mechanism catalog](docs/mechanisms.md) | All thirty-two mechanisms: theory, sources, diagrams, phase positioning, and how to apply each |
+| [Mechanism catalog](docs/mechanisms.md) | All thirty-three mechanisms: theory, sources, diagrams, phase positioning, and how to apply each |
 | [Normal-form games](docs/games.md) | `socsim-games`: stage games, decision rules, outcome rules, experiment state, information structure, and snapshot-safe game simulations |
 | [Module packs](docs/packs.md) | The three bundled packs (`hr-lifecycle`, `opinion-dynamics`, `organizational-silence`): world data model, mechanism composition, starter scenarios, and recorded metrics |
 | [Architecture](docs/architecture.md) | Crate dependency graph, 6-phase tick loop, calibration philosophy |

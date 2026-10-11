@@ -9,7 +9,8 @@
 
 この crate はライブラリ専用です（`ModulePack` を持たず，`socsim` バイナリには組み込まれていません）．
 このページでは，部品，その状態の置き場所，規則が見てよい情報，実行可能なシミュレーションの組み立て方，
-組込みの学習則と決定の粒度（[学習則と決定の粒度](#学習則と決定の粒度) を参照）を説明します．
+組込みの学習則と決定の粒度（[学習則と決定の粒度](#学習則と決定の粒度) を参照），
+ステップごとの指標を記録する Mechanism `game_metrics`（[指標](#指標) を参照）を説明します．
 シミュレーションとは別に，古典的なゲームと有限ゲームのソルバー（Nash 均衡，支配，ミニマックス，ロジット QRE）も提供します（[有限ゲームを解く](#有限ゲームを解く) を参照）．
 
 ---
@@ -18,13 +19,14 @@
 
 | feature | 追加されるもの | socsim への依存 |
 |---|---|---|
-| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`），`MatrixGame`，組込みのゲーム（`catalog`），混合戦略（`mixed`），ソルバー（`solve`），学習則の計算（`learn`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
-| `core` | World（`GameWorld`），規則（学習則を含む），利得規則，Matching，ビュー，`build_world` | `socsim-core` |
-| `engine` | `assemble`（`SimulationBuilder` を返す）．`core` を含意 | `socsim-core`，`socsim-engine` |
+| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`，`AggregateGame`），`MatrixGame`，組込みのゲーム（`catalog`），混合戦略（`mixed`），ソルバー（`solve`），学習則の計算（`learn`），`AggregateSpec` と指標用の行動 ID（`metric_action_ids`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
+| `core` | World（`GameWorld`），規則（学習則を含む），利得規則，Matching，ビュー，`build_world`，指標の Mechanism `GameMetrics` | `socsim-core` |
+| `engine` | `assemble` と `assemble_with_aggregates`（どちらも `SimulationBuilder` を返す）．`core` を含意 | `socsim-core`，`socsim-engine` |
+| `metrics` | `GameMetrics` の列 `game.action_entropy`（[指標](#指標) を参照）．`core` を含意 | `socsim-core`，`socsim-metrics`（既定の feature を切ったもの．依存の無い `stats` モジュールだけ） |
 | `llm` | LLM の決定規則，応答ストア，再生の manifest（[LLM による決定](#llm-による決定) を参照）．`core` を含意．Mechanism `game_llm_decide` と `assemble_with_llm` には `engine` も要る | `socsim-core`，`socsim-llm`（既定の feature だけ．ネットワークなし） |
 | `live` | `live_backend_factory()`（キャッシュなしの Ollama → OpenAI のバックエンド）．`llm` を含意 | `llm` と同じ＋`socsim-llm/live` |
 
-`llm` を有効にしなければ，この crate は `socsim-llm` に依存しません．`socsim-config` と `socsim-runner` には常に依存しません．
+`llm` を有効にしなければ，この crate は `socsim-llm` に依存せず，`metrics` を有効にしなければ `socsim-metrics` に依存しません．`socsim-config` と `socsim-runner` には常に依存しません．
 シミュレーションを走らせるには `core` と `engine` が要ります．
 
 ```toml
@@ -219,11 +221,14 @@ pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
     ) -> Result<(), RuleError> { Ok(()) }
     fn needs_encounter_learning(&self) -> bool { false }
     fn needs_pair_history(&self) -> bool { false }
+    fn mixed(&self, state: &X::PolicyState, role: usize, game: &G) -> Option<Vec<f64>> { None }
 }
 ```
 
 `learn_encounter`，`needs_encounter_learning`，`needs_pair_history` は省略できます．
 エージェントが 1 ステップに複数の対戦をするときに意味を持ちます（[対戦ごとの学習](#対戦ごとの学習) と [対の履歴](#対の履歴) を参照）．
+`mixed` も省略できます．規則が `role` で次に打つ混合戦略を，状態を変えず乱数も引かずに状態から読んで返すもので，
+シミュレーションが混合戦略を報告するときだけ呼ばれます（[混合戦略の報告](#混合戦略の報告) を参照）．
 
 `decide` と学習のメソッドの受け手が `&self` であることに注意してください．規則のオブジェクトは共有されるコードであり，
 エージェントについて覚えておくことはすべて，渡される `state: &mut X::PolicyState` に置きます
@@ -477,8 +482,8 @@ pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
 | Mechanism | フェーズ | 行うこと |
 |---|---|---|
 | [`game_match`](mechanisms/game-match.ja.md) | PreStep，Decision | PreStep：対戦の表，`payoff`，`n_played` を空にする．Decision：そのステップの対戦を `Matching` に組ませる． |
-| [`game_decide`](mechanisms/game-decide.ja.md) | Decision，Reward | Decision：席に着いた各エージェントの規則が決定の単位ごとに `decide` する（Held なら保持行動を使う）．行動は `check_action` で検査する．Reward：規則で動く全エージェントの `learn_encounter`（規則が求めるとき，対戦ごとに）と，その後の `learn_step`． |
-| [`game_play`](mechanisms/game-play.ja.md) | Interaction | 全席が埋まっていることを検査し，`OutcomeRule` で利得を計算し，（有効なら）対戦を対の履歴に追記し，`PayoffAggregation` でエージェントごとに集計し，全エージェントの `StepRecord` をステップ履歴に追記する． |
+| [`game_decide`](mechanisms/game-decide.ja.md) | Decision，Reward | Decision：席に着いた各エージェントの規則が決定の単位ごとに `decide` する（Held なら保持行動を使う）．行動は `check_action` で検査する．Reward：規則で動く全エージェントの `learn_encounter`（規則が求めるとき，対戦ごとに）と，その後の `learn_step`．`PlayOptions::report_mixed(true)` なら，最後に各規則の学習後の混合戦略を記録する（[混合戦略の報告](#混合戦略の報告) を参照）． |
+| [`game_play`](mechanisms/game-play.ja.md) | Interaction | 全席が埋まっていることを検査し，`OutcomeRule` で利得を計算し，（有効なら）対戦を対の履歴に追記し，`PayoffAggregation` でエージェントごとに集計し，全エージェントの `StepRecord` をステップ履歴に追記する．`assemble_with_aggregates` で組み立てたときは，最後にゲームの公開集計値を 1 行にまとめる（[公開集計値](#公開集計値aggregategame) を参照）． |
 
 同じフェーズの Mechanism は登録順に動くので，`game_match` が席を決めてから `game_decide` が行動を尋ねます．1 ステップは次のとおりです．
 
@@ -487,7 +492,10 @@ PreStep      game_match   reset arena / payoff / n_played
 Decision     game_match   Matching → encounters
              game_decide  decide + check_action → actions, held
 Interaction  game_play    OutcomeRule → payoffs → pair history → aggregation → history
+                          (→ aggregate row, under assemble_with_aggregates)
 Reward       game_decide  learn_encounter (per encounter) + learn_step (rule state)
+                          (→ post-learning mixed reports, with report_mixed)
+PostStep     game_metrics (optional, added by you) → one "game" row of metrics
 ```
 
 feature `llm` では，`assemble_with_llm` が 4 つ目の Mechanism [`game_llm_decide`](mechanisms/game-llm-decide.ja.md)（Decision，Reward）を
@@ -495,6 +503,8 @@ feature `llm` では，`assemble_with_llm` が 4 つ目の Mechanism [`game_llm_
 
 `assemble` の後に足した Mechanism（返されたビルダーの `.add_mechanism(...)`）は，各フェーズでゲームの Mechanism の後に動きます．
 したがって Reward フェーズの Mechanism はそのステップの利得を見られます．
+指標の Mechanism [`game_metrics`](mechanisms/game-metrics.ja.md) もこの方法で足します．
+これは PostStep で上のすべての後に動き，終わったステップを読みます（[指標](#指標) を参照）．
 
 ---
 
@@ -521,13 +531,26 @@ pub fn assemble<G, X, M: Matching<G, X>, O: OutcomeRule<G, X>>(
     opts: PlayOptions<G::Action>,
     seed: u64,
 ) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>;
+
+pub fn assemble_with_aggregates<G: AggregateGame, X, M: Matching<G, X>, O: OutcomeRule<G, X>>(
+    world: GameWorld<G, X>,
+    matching: M,
+    rules: RuleBook<G, X>,
+    outcome: O,
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+    aggregate_history_len: usize,
+) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>;
 ```
 
 `build_world` の検査：`history_len > 0`（`InvalidHistoryLength`），割り当ての `count` の和と `PerAgent` の長さが `n_agents` に一致（`AgentCount`），
 初期行動がすべての役割で `check_action` を通る，割り当てた種類がすべて `RuleBook` にある（`RuleError::UnknownKind`），各 `init_state` が成功する．
 
 `assemble` の検査：ゲームが 2 役割である（`UnsupportedRoles`），World にある規則の種類がすべて `RuleBook` にある，
-`OnInvalidAction::Fallback` のとき使われている種類すべてに全役割で妥当な代替行動がある，`Matching::check`．
+`OnInvalidAction::Fallback` のとき使われている種類すべてに全役割で妥当な代替行動がある，
+`report_mixed(true)` と `DecisionScope::PerEncounter` を組み合わせていない（`GameError::Metrics`），`Matching::check`．
+`assemble_with_aggregates` は同じ検査に加えて `aggregate_history_len > 0` を求めます（`InvalidAggregateHistoryLength`）．
+これは `assemble` に [公開集計値](#公開集計値aggregategame) の表を足したものです．
 エンジンのシードを `derive_seed(seed, &[1])` に設定してビルダーを返すので，`build()` の前にスケジューラー，Recorder，追加の Mechanism を足せます．
 2 つの関数には**同じ** `seed` を渡してください．返されたビルダーで `.seed(...)` を呼ぶと，エンジンのストリームが上書きされます．
 
@@ -538,6 +561,7 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
     .payoff_aggregation(PayoffAggregation::Mean)        // Sum (default) | Mean
     .on_invalid_action(OnInvalidAction::Stop)           // Stop (default) | Fallback(map)
     .decision_scope(DecisionScope::PerEncounter)        // PerStep (default) | PerAgentRole | PerEncounter
+    .report_mixed(true)                                 // false (default) | true
 ```
 
 - **`PayoffAggregation`** — 1 ステップに複数の対戦があるとき，エージェントの利得を `payoffs()[agent]` にどうまとめるか．
@@ -547,6 +571,8 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
   - `Fallback(BTreeMap<kind, action>)`：行動を種類ごとの代替行動に差し替え，イベント `game.invalid_action` を
     payload `{ "agent", "kind", "role", "action" }`（拒否された行動を `Debug` 形式で）とともに記録します．
 - **`DecisionScope`** — 1 ステップに複数の対戦の席に着いたエージェントが何回決定するか．[決定の粒度](#決定の粒度) を参照．
+- **`report_mixed`** — `true` なら，`game_decide` が各 Reward フェーズの終わりに，規則で動く全エージェントの学習後の混合戦略を記録します．
+  `GameWorld::reported_mixed` で読めます．[混合戦略の報告](#混合戦略の報告) を参照．`DecisionScope::PerEncounter` との組み合わせは拒否されます．
 
 ---
 
@@ -1437,6 +1463,533 @@ LLM の決定が無いステップでは何も記録しません．
 
 ---
 
+## 指標
+
+`GameMetrics` は読むだけの Mechanism（名前は `game_metrics`）で，ゲームのステップごとの統計 — 行動の割合，利得の平均とばらつき，
+協力率，後悔，均衡までの距離，公開集計値 — を Recorder の表 `"game"` に 1 行ずつ記録します．
+`assemble` は登録しないので，ゲームから作って，返されたビルダーに足します．
+**PostStep** でゲームの全 Mechanism の後に動くので，終わったステップを見ます．
+乱数を引かず，モデルの状態を変えません．World に書くのは，収束による停止と累積の情報源のための自分の記録だけです
+（[Mechanism のページ](mechanisms/game-metrics.ja.md) を参照）．
+
+### `game_metrics` を足す
+
+`GameMetrics::new(&game, MetricsOptions)` はゲームを参照で受け取り（ゲームが `build_world` に移る前に作ります），
+`Result<GameMetrics<G>, GameError>` を返します（`G: FiniteGame`）．オプションはビルダーです．
+
+| `MetricsOptions` のメソッド | 既定 | 効果 |
+|---|---|---|
+| `new()` / `default()` | — | 以下の既定値 |
+| `cooperate_label(label)` | なし | `game.coop_rate` を足す．`label` は**全役割**でちょうど **1 つ**の行動のラベルに一致しなければならず，そうでなければ `GameError::Metrics` |
+| `regret(on)` | 2 役割のゲームでは有効，それ以外では無効 | `game.regret` を足す／除く |
+| `mixed_source(MixedSource)` | `Played` | `game.regret` と `game.eq_distance` が評価する混合戦略の組をどこから作るか |
+| `equilibrium(EquilibriumTarget)` | `None` | `Solve` で `game.eq_distance` を足す |
+| `stop(tol, window)` | なし | 行動の割合が動かなくなったら実行の終了を求める．`tol` は有限で `> 0`，`window ≥ 1`．そうでなければ `GameError::Metrics` |
+| `action_entropy(on)` | 有効 | feature `metrics` のときだけ．`game.action_entropy` を足す／除く |
+
+2 エージェントの囚人のジレンマで，Tit-for-Tat と常に裏切る相手を対戦させます．
+
+```rust
+use std::sync::Arc;
+
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, EquilibriumTarget, Fixed,
+    FixedPlayers, GameMetrics, InitialActions, MatrixGame, MetricsOptions, NormalFormOutcome,
+    PlayOptions, RuleBook, TitForTat,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap()
+    .with_labels(vec![vec!["C".into(), "D".into()]; 2])
+    .unwrap();
+
+    // Built from the game before the game moves into the world.
+    let metrics = GameMetrics::new(
+        &game,
+        MetricsOptions::new()
+            .cooperate_label("C")                    // adds game.coop_rate
+            .equilibrium(EquilibriumTarget::Solve)   // adds game.eq_distance
+            .stop(1e-9, 3),                          // stop after 3 unchanged steps
+    )
+    .unwrap();
+
+    let mut rules = RuleBook::new();
+    rules.register("tit_for_tat", Arc::new(TitForTat::new(0))).unwrap();
+    rules.register("fixed_defect", Arc::new(Fixed::new(1))).unwrap();
+
+    let seed = 1;
+    let world = build_world(
+        game, 2, (), InitialActions::Same(0), &rules,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("tit_for_tat".into()), count: 1 },
+            AssignGroup { kind: AssignKind::Rule("fixed_defect".into()), count: 1 },
+        ]),
+        100, 100, seed,
+    )
+    .unwrap();
+
+    let mut sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules,
+                           NormalFormOutcome, PlayOptions::new(), seed)
+        .unwrap()
+        .add_mechanism(Box::new(metrics))           // runs in PostStep
+        .recorder(Box::new(InMemoryRecorder::new()))
+        .build();
+    sim.run().unwrap();                             // ends early: the stop rule fired
+
+    let recorder = sim.recorder().as_any().unwrap()
+        .downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| row.t <= 2) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+    println!("stopped at t = {}", recorder.metrics().last().unwrap().t);
+}
+```
+
+（`InMemoryRecorder` は `socsim-log` にあります．どの `Recorder` でも構いません．）出力：
+
+```text
+t=1 game.played_share.a0 = 0.5
+t=1 game.played_share.a1 = 0.5
+t=1 game.coop_rate = 0.5
+t=1 game.mean_payoff = 2.5
+t=1 game.payoff_sd = 2.5
+t=1 game.regret = 1
+t=1 game.eq_distance = 2
+t=2 game.played_share.a0 = 0
+t=2 game.played_share.a1 = 1
+t=2 game.coop_rate = 0
+t=2 game.mean_payoff = 1
+t=2 game.payoff_sd = 0
+t=2 game.regret = 0
+t=2 game.eq_distance = 0
+stopped at t = 5
+```
+
+`t = 1` では Tit-for-Tat が協力し，相手が裏切ります．席の半分が `C` を打ち，利得は 0 と 5，協力した側は裏切れば 1 多く得られ（後悔 1），
+組 `(C, D)` は唯一の均衡 `(D, D)` から L1 距離 2 にあります．`t = 2` からは両者が裏切ります．
+feature `metrics` を有効にすると，同じプログラムは `game.coop_rate` の後に `game.action_entropy` も出力します
+（`t = 1` で `0.6931471805599453` = ln 2，`t = 2` で `0`）．
+
+### 列
+
+どの列も `record_row(t, "game", …)` で書くので，行を展開する Recorder（既定の振る舞い）にはキー `game.<列>` として届きます．
+
+| 列 | 現れる条件 | 値 |
+|---|---|---|
+| `game.played_share.<id>` | そのステップに席が 1 つ以上ある | 共通 ID：その行動を選んだ席 ÷ 全席．役割別 ID：その役割の席のうちその行動を選んだ席 ÷ その役割の席 |
+| `game.coop_rate` | `cooperate_label` を設定し，ステップに席がある | 席の役割の協力行動を選んだ席 ÷ 全席 |
+| `game.action_entropy` | feature `metrics`，`action_entropy(true)`（既定），共通 ID，かつステップに席がある | 共通の `played_share` の値の Shannon エントロピー $-\sum_k p_k \ln p_k$（単位は nat） |
+| `game.mean_payoff` | 1 人以上が対戦した（`n_played() > 0`） | 対戦したエージェントの `payoffs()`（`PayoffAggregation` の後）の平均 |
+| `game.payoff_sd` | `mean_payoff` と同じ | 同じ利得の母標準偏差（$n$ で割る） |
+| `game.aggregate.<name>` | `assemble_with_aggregates` で組み立て，かつ集約が定義される | そのステップの集約済みの集計値（[公開集計値](#公開集計値aggregategame) を参照） |
+| `game.regret` | 後悔が有効で，混合戦略の組が定義される | $\max_r \big[\max_a F_r(a, \sigma_{-r}) - F_r(\sigma)\big]$（`mixed::regret`） |
+| `game.eq_distance` | `EquilibriumTarget::Solve` で，組が定義される | 解いた均衡に対する $\min_{\sigma^*} \sum_r \sum_a \lvert \sigma_r(a) - \sigma^*_r(a)\rvert$ |
+
+1 行の中の列の順は，行動の割合，`coop_rate`，`action_entropy`，`mean_payoff`，`payoff_sd`，集計値，`regret`，`eq_distance` です．
+
+**定義されない列は行から省き，NaN として書くことはありません．** 対戦の無いステップでは割合，協力率，エントロピーの列を記録せず，
+誰も対戦しなかったステップでは利得の列を記録しません．有限でない値（計算した値，または読んだ利得）が出たときは，行を記録する前にステップを Mechanism のエラーで止めるので，
+`game_metrics` が記録や World の自分の状態に NaN や無限大を書くことはありません．
+ただし行をそのまま保持する Recorder は行を埋めることがあります．`socsim_log::CsvRecorder` は表の列を最初の行で決め，
+後の行に無い列には NaN を書き，後から初めて現れた列は捨てます（`llm` では `game_llm_decide` も同じ表 `"game"` に行を書きます）．
+列が出たり消えたりする場合は，行をキーごとに展開する Recorder を使ってください．Mechanism は毎ステップ，World のゲームが作ったときと同じ役割数と行動数を持つことも検査します．
+
+`played_share` が数えるのは**対戦の表の席**であって，エージェントではありません．3 つの対戦の席に着いたエージェントは 3 回数えます．
+そのため，`held` を書かない粒度も含めて，どの[決定の粒度](#決定の粒度)でも定義されます．
+集団の割合 — 各戦略を持つエージェントの割合 — は別の量で，`game_metrics` には含まれません．
+
+### 行動 ID：`metric_action_ids`
+
+`game.played_share.<id>` の `<id>` は行動の**番号**から作り，ラベルからは作りません．そのためラベルに何が入っていても，列名は妥当な指標名になります．
+`metric_action_ids(&game)`（既定のビルド）が ID を列の順に返します．
+
+- **共通**（`MetricScheme::Pooled`）— 全役割の行動数が等しく，各番号のラベルが役割 0 と一致するとき．番号ごとに 1 つの ID
+  `a0`，`a1`，… を全役割で共有します．
+- **役割別**（`MetricScheme::PerRole`）— それ以外．役割ごとに `r<役割>-a<番号>` です．
+
+```rust
+use socsim_games::{metric_action_ids, GameMetrics, MatrixGame, MetricsOptions};
+
+fn main() {
+    let pd = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap()
+    .with_labels(vec![vec!["C".into(), "D".into()]; 2])
+    .unwrap();
+    // Two roles with different action sets.
+    let asymmetric = MatrixGame::new(vec![2, 3], vec![vec![0.0; 6], vec![0.0; 6]])
+        .unwrap()
+        .with_labels(vec![
+            vec!["Up".into(), "Down".into()],
+            vec!["L".into(), "M".into(), "R".into()],
+        ])
+        .unwrap();
+
+    for game in [&pd, &asymmetric] {
+        let ids = metric_action_ids(game);
+        let listed: Vec<_> = ids.actions().iter().map(|a| a.id.as_str()).collect();
+        println!("{:?}: {}", ids.scheme(), listed.join(", "));
+    }
+    println!("{:?}", metric_action_ids(&asymmetric).id(1, 2));
+    println!();
+
+    let metrics = GameMetrics::new(&pd, MetricsOptions::new().cooperate_label("C")).unwrap();
+    for (pattern, meaning) in metrics.describe() {
+        if pattern.contains('{') {
+            println!("[[metric_patterns]]\npattern = {pattern:?}\nmeaning = {meaning:?}\n");
+        } else {
+            println!("[metrics.{pattern:?}]\nmeaning = {meaning:?}\n");
+        }
+    }
+}
+```
+
+出力の最初の 3 行：
+
+```text
+Pooled: a0, a1
+PerRole: r0-a0, r0-a1, r1-a0, r1-a1, r1-a2
+Some("r1-a2")
+```
+
+各 `MetricAction` は `id`，`role`（共通なら `None`），`action` を持ちます．表示にはゲームの `action_label(role, action)` を使ってください．
+出力の残りは [列の説明](#列の説明describe) で使います．
+
+### 後悔，均衡までの距離と `MixedSource`
+
+`game.regret` と `game.eq_distance` は，役割ごとに 1 つの混合戦略からなる組 $\sigma$ を評価します．
+`MetricsOptions::mixed_source` がその出どころを選びます．
+
+| `MixedSource` | $\sigma_r$ | 定義される条件 |
+|---|---|---|
+| `Played`（既定） | このステップの役割 $r$ の席のうち各行動を選んだ割合 | このステップに全役割の席がある |
+| `PlayedCumulative` | 同じ割合を，`game_metrics` が最初に見たステップ以降の**全**席で数えたもの | 全役割が 1 回以上打たれている（したがって，後の対戦の無いステップでも定義される） |
+| `Reported` | このステップの役割 $r$ の席について，席に着いたエージェントが報告した混合（[混合戦略の報告](#混合戦略の報告) を参照）を平均したもの．`Held` のエージェントの席は打った行動の純粋戦略として数える | このステップに全役割の席がある |
+
+`PlayedCumulative` の数は World に保持されるので，snapshot が持ち運び，再開した実行は同じ列を続けます．
+`Reported` には `PlayOptions::report_mixed(true)` が要ります．無ければ最初のステップが Mechanism のエラーで失敗します．
+席に着いた規則で動くエージェントに報告が無い（規則の `mixed` が `None` を返した）ときや，報告の長さが違うときも同じです．
+
+`EquilibriumTarget::Solve` は [`support_enumeration`](#support_enumeration) を **`GameMetrics::new` の中で 1 回だけ**走らせ，均衡を保持します．
+2 役割のゲームが必要で，ソルバーが失敗したとき，均衡の集合が完全でない（`is_complete()` が偽．退化したゲーム）とき，空のときに，
+`new` は `GameError::Metrics` を返します．`game.eq_distance` はそれらの均衡のうち最も近いものまでの L1 距離の和で，0 から $2 \times$ 役割数の間の値です．
+
+### 混合戦略の報告
+
+`PlayOptions::report_mixed(true)` にすると，`game_decide` は**各 Reward フェーズの終わり**，全エージェントの学習が済んだ後に，
+規則で動く全エージェント（`AgentId` の昇順）の全役割について `DecisionRule::mixed(state, role, game)` を呼び，結果を World に保存します．
+`GameWorld::reported_mixed(agent, role) -> Option<&[f64]>` で読めます．
+
+したがって報告される混合は**学習後**の混合 — 次のステップの決定が使うもの — であって，このステップの行動を生んだ混合ではありません．
+`Held` のエージェント，別の Driver が持つ種類（LLM の種類），規則が `None` を返したとき，返した値が有限でないときは，報告は `None` です．
+報告の表は毎回の報告の初めに空にするので，前のステップの値が残ることはありません．
+
+| 組込みの規則 | `mixed` が報告するもの |
+|---|---|
+| `Fixed` | `None` |
+| `UniformRandom` | 役割の $n$ 個の行動それぞれに $1/n$ |
+| `Mixed` | 自分の確率（その長さが役割の行動数と違えば `None`） |
+| `TitForTat` | 相手の直前の行動の純粋戦略（まだ無ければ `coop`） |
+| `MyopicBestResponse` | `None` |
+| `FictitiousPlay` | 信念の数に対する最適応答．`tie_break_lowest()` なら最も小さい番号の純粋戦略，`tie_break_random()` なら厳密に同点のものすべてに等しい重み |
+| `LogitChoice` | ロジット選択の確率 |
+| `RothErev` | 選択の確率 |
+| `Automaton` | 次の行動の確率．純粋戦略．ただし GTFT で相手が裏切った後は `coop` に `generosity`，残りをもう一方の行動に |
+| 自作の規則 | `mixed` を実装しなければ `None` |
+
+学習則は，エージェントごとに 1 つの状態（`global`）から報告します．
+`DecisionScope::PerEncounter` は相手ごとに状態を持つので，`assemble` はこの粒度での `report_mixed(true)` を拒否します（`GameError::Metrics`）．
+`assemble_with_llm` は `report_mixed` を受け付けますが，LLM の種類は `None` を報告します．
+
+```rust
+use std::sync::Arc;
+
+use socsim_core::AgentId;
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, FictitiousPlay, FixedPlayers,
+    GameMetrics, InitialActions, MatrixGame, MetricsOptions, MixedSource, NormalFormOutcome,
+    PlayOptions, RuleBook,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    // Matching pennies: role 0 wins on a match, role 1 on a mismatch.
+    let game = MatrixGame::zero_sum(&[vec![1.0, -1.0], vec![-1.0, 1.0]]).unwrap();
+    let metrics = GameMetrics::new(
+        &game,
+        MetricsOptions::new().mixed_source(MixedSource::Reported),
+    )
+    .unwrap();
+
+    let mut rules = RuleBook::new();
+    rules
+        .register("fictitious", Arc::new(FictitiousPlay::new().tie_break_random()))
+        .unwrap();
+
+    let seed = 1;
+    let world = build_world(
+        game, 2, (), InitialActions::Same(1), &rules,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("fictitious".into()), count: 1 },
+            AssignGroup { kind: AssignKind::Held, count: 1 },   // always plays action 1
+        ]),
+        10, 10, seed,
+    )
+    .unwrap();
+
+    let mut sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules,
+                           NormalFormOutcome, PlayOptions::new().report_mixed(true), seed)
+        .unwrap()
+        .add_mechanism(Box::new(metrics))
+        .recorder(Box::new(InMemoryRecorder::new()))
+        .build();
+
+    // Before any Reward phase there is no report.
+    println!("before t=1: {:?}", sim.world().reported_mixed(AgentId(0), 0));
+    sim.step().unwrap();
+    println!("played at t=1: {}", sim.world().held()[0]);
+    println!("reported after t=1: {:?}", sim.world().reported_mixed(AgentId(0), 0));
+    println!("held agent: {:?}", sim.world().reported_mixed(AgentId(1), 1));
+
+    let recorder = sim.recorder().as_any().unwrap()
+        .downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| row.key == "game.regret") {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+}
+```
+
+```text
+before t=1: None
+played at t=1: 0
+reported after t=1: Some([0.0, 1.0])
+held agent: None
+t=1 game.regret = 2
+```
+
+まだ何も観察していないので，仮想プレイは同点を乱数で崩して `0` を打ちました．相手が `1` を打つのを見た後は，最適応答の純粋戦略 `1` を報告します．
+後悔は役割 0 にこの報告を，役割 1 に保持行動のエージェントが打った行動を使います．役割 1 は一致すると負けるので，切り替えれば 2 多く得られます．
+
+### 公開集計値：`AggregateGame`
+
+ゲームは，各対戦の行動の組から計算した値 — 「この対戦は相互協力だったか」「何人が拠出したか」 — を，
+どの規則も読める公開情報として出せます．ゲームに `AggregateGame`（既定のビルド）を実装します．
+
+```rust
+pub trait AggregateGame: NormalFormGame {
+    fn aggregate_spec(&self) -> &[AggregateSpec];
+    /// `out.len() == self.aggregate_spec().len()`; every written value must be finite.
+    fn aggregate_into(&self, profile: &[Self::Action], out: &mut [f64]);
+}
+```
+
+`AggregateSpec::new(name, AggregateReduce::{Sum, Mean})` は名前を検査します．1〜49 バイトで，先頭は ASCII の小文字か数字，
+残りは小文字，数字，`_`，`-` です（`AggregateSpecError::{EmptyName, InvalidStart, InvalidCharacter { index }, TooLong { length }}`．
+デシリアライズでも同じ検査が走ります）．したがって名前は指標名 `game.aggregate.<name>` の 1 区切りになります．
+
+`assemble` の代わりに `assemble_with_aggregates(.., seed, aggregate_history_len)` で組み立てます．
+Interaction の終わりに `game_play` が対戦ごとに 1 回（`EncounterId` の順）`aggregate_into` を呼び，値をそのステップの対戦にわたって集約し，
+`t` をキーとする 1 行にします．`Sum` は和（対戦の無いステップでは `0`），`Mean` は平均（対戦の無いステップでは定義されない）です．
+最後の `aggregate_history_len` 行が World に保持されるので，snapshot が持ち運びます．有限でない値はステップを止めます．
+
+規則は `DecisionContext::aggregate_history()` で行を読みます．集計値つきで組み立てていなければ `None` です．
+行は Interaction で書かれ，決定は Decision で行われるので，決定に見えるのは**終わった前のステップだけ**です（`t = 1` では何も無い）．
+`AggregateView` は `names()`，`len()`，`is_empty()`，`iter()`（`(t, &[Option<f64>])`，古い順），`last()`，`column(name)` を持ち，
+定義されない値は `None` です．`game_metrics` はそのステップの行を `game.aggregate.<name>` として記録します．
+`assemble_with_llm` には集計値つきの版が無く，LLM の組み立てではどの規則でも `aggregate_history()` は `None` です．
+
+```rust
+use std::borrow::Cow;
+use std::sync::Arc;
+
+use socsim_core::SimRng;
+use socsim_games::{
+    assemble_with_aggregates, build_world, ActionError, AggregateGame, AggregateReduce,
+    AggregateSpec, AssignGroup, AssignKind, Assignment, BuiltinPolicyState, DecisionContext,
+    DecisionRule, FiniteGame, Fixed, FixedPlayers, GameMetrics, InitialActions, MatrixGame,
+    MetricsOptions, NormalFormGame, NormalFormOutcome, PlayOptions, RuleBook, RuleError,
+    RuleInitContext, StageGame, Stateless,
+};
+use socsim_log::InMemoryRecorder;
+
+/// The prisoner's dilemma plus two public, profile-level values.
+#[derive(Clone, Debug)]
+struct PdWithAggregates {
+    pd: MatrixGame,
+    specs: Vec<AggregateSpec>,
+}
+
+impl StageGame for PdWithAggregates {
+    type Action = usize;
+    fn n_roles(&self) -> usize { self.pd.n_roles() }
+    fn check_action(&self, role: usize, action: &usize) -> Result<(), ActionError> {
+        self.pd.check_action(role, action)
+    }
+}
+impl NormalFormGame for PdWithAggregates {
+    fn payoff(&self, role: usize, profile: &[usize]) -> f64 { self.pd.payoff(role, profile) }
+}
+impl FiniteGame for PdWithAggregates {
+    fn n_actions(&self, role: usize) -> usize { self.pd.n_actions(role) }
+    fn action_label(&self, role: usize, action: usize) -> Cow<'_, str> {
+        self.pd.action_label(role, action)
+    }
+}
+impl AggregateGame for PdWithAggregates {
+    fn aggregate_spec(&self) -> &[AggregateSpec] { &self.specs }
+    fn aggregate_into(&self, profile: &[usize], out: &mut [f64]) {
+        out[0] = f64::from(u8::from(profile.iter().all(|&a| a == 0)));   // mutual_coop
+        out[1] = profile.iter().filter(|&&a| a == 1).count() as f64;    // defections
+    }
+}
+
+/// Cooperates while more than half of last step's encounters were mutual cooperation.
+struct FollowTheCrowd;
+
+impl DecisionRule<PdWithAggregates, ()> for FollowTheCrowd {
+    fn name(&self) -> &str { "follow_the_crowd" }
+    fn init_state(&self, _: &RuleInitContext, _: &PdWithAggregates)
+        -> Result<BuiltinPolicyState, RuleError> {
+        Ok(BuiltinPolicyState::Stateless(Stateless))
+    }
+    fn decide(&self, _: &mut BuiltinPolicyState,
+              ctx: &DecisionContext<'_, PdWithAggregates, ()>,
+              _: &mut SimRng) -> Result<usize, RuleError> {
+        let last = ctx.aggregate_history()                 // None without aggregates
+            .and_then(|history| history.last())            // previous step only
+            .and_then(|(_, values)| values[0]);            // mutual_coop
+        Ok(match last {
+            Some(share) if share <= 0.5 => 1,
+            _ => 0,                                        // first step: cooperate
+        })
+    }
+}
+
+fn main() {
+    let pd = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap()
+    .with_labels(vec![vec!["C".into(), "D".into()]; 2])
+    .unwrap();
+    let game = PdWithAggregates {
+        pd,
+        specs: vec![
+            AggregateSpec::new("mutual_coop", AggregateReduce::Mean).unwrap(),
+            AggregateSpec::new("defections", AggregateReduce::Sum).unwrap(),
+        ],
+    };
+    let metrics = GameMetrics::new(&game, MetricsOptions::new()).unwrap();
+
+    let mut rules: RuleBook<PdWithAggregates, ()> = RuleBook::new();
+    rules.register("follow_the_crowd", Arc::new(FollowTheCrowd)).unwrap();
+    rules.register("fixed_defect", Arc::new(Fixed::new(1))).unwrap();
+
+    let seed = 5;
+    let world = build_world(
+        game, 4, (), InitialActions::Same(0), &rules,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("follow_the_crowd".into()), count: 3 },
+            AssignGroup { kind: AssignKind::Rule("fixed_defect".into()), count: 1 },
+        ]),
+        10, 3, seed,
+    )
+    .unwrap();
+
+    let mut sim = assemble_with_aggregates(
+        world, FixedPlayers::pairs(&[(0, 1), (2, 3)]), rules, NormalFormOutcome,
+        PlayOptions::new(), seed,
+        8,                                                 // aggregate_history_len
+    )
+    .unwrap()
+    .add_mechanism(Box::new(metrics))
+    .recorder(Box::new(InMemoryRecorder::new()))
+    .build();
+    sim.run().unwrap();
+
+    let recorder = sim.recorder().as_any().unwrap()
+        .downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| row.key.starts_with("game.aggregate.")) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+}
+```
+
+```text
+t=1 game.aggregate.mutual_coop = 0.5
+t=1 game.aggregate.defections = 1
+t=2 game.aggregate.mutual_coop = 0
+t=2 game.aggregate.defections = 4
+t=3 game.aggregate.mutual_coop = 0
+t=3 game.aggregate.defections = 4
+```
+
+`t = 1` では対 `(0, 1)` が相互協力し，対 `(2, 3)` はしないので `mutual_coop` は `0.5` です．
+`t = 2` では 3 人の追従者がこの行を読み，半分を超えていないので裏切ります．
+
+### 収束による停止
+
+`MetricsOptions::stop(tol, window)` は，打たれた行動の割合が動かなくなったら実行を終えます．
+席が 1 つ以上あるステップの後に，`game_metrics` はそのステップの `played_share` の値を，**席があった直前のステップ**の値と比べます．
+
+- そのような最初のステップには比べる相手が無く，カウンターは `0` です．
+- それ以外では，$\max_k \lvert s_k(t) - s_k(\text{prev})\rvert < \texttt{tol}$ ならカウンターを 1 増やし，そうでなければ `0` に戻します．
+- 席の無いステップはカウンターを `0` に戻し，直前の割合はそのまま残します．
+
+カウンターが `window` に達すると，`game_metrics` はそのステップの行を記録してから停止を求め（`StepContext::request_stop`），
+実行はそのステップの後で終わります．したがって最も早い停止はステップ `window + 1` です．最初の例の `stop(1e-9, 3)` は `t = 5` で実行を終えます．
+カウンターと直前の割合は World に保持されるので，再開した実行も同じステップで止まります．
+
+### feature `metrics`：行動のエントロピー
+
+Cargo feature `metrics` を有効にすると，`game_metrics` は `game.action_entropy` も書きます．
+共通の `played_share` の値の Shannon エントロピー（単位は nat）で，`socsim_metrics::stats::shannon_entropy` で計算します．
+feature のもとでは既定で有効で（`MetricsOptions::action_entropy(false)` で切る），共通 ID のゲームでだけ現れます．
+役割別の割合のエントロピーは 2 つの分布を混ぜてしまうからです．この feature はほかに何も足しません．
+
+### 列の説明：`describe`
+
+`GameMetrics::describe()` は，この設定が書きうる列について `(pattern, meaning)` の組を返します．
+`game.played_share.{action}`，`game.mean_payoff`，`game.payoff_sd`，有効なら `game.coop_rate`，`game.regret`，`game.eq_distance`，
+`game.action_entropy`，そして `game.aggregate.{name}`（組み立て方に依存するので常に並ぶ）です．
+[runvault](https://github.com/akitenkrad/rs-runvault) で実行を記録するリポジトリは，これを `runvault.toml` に写せます．
+`{…}` の区切りを含むパターンは `[[metric_patterns]]` に，そのままの名前は `[metrics."<name>"]` に書きます．
+[行動 ID](#行動-idmetric_action_ids) の例のプログラムがちょうどそれを出力します．
+
+```toml
+[[metric_patterns]]
+pattern = "game.played_share.{action}"
+meaning = "Share of all played seats choosing `{action}`. `{action}` is a metric_id; display labels come from the game's metric actions. Actions are pooled across roles."
+
+[metrics."game.mean_payoff"]
+meaning = "Mean aggregated payoff among agents who played at least once in the step."
+
+[metrics."game.payoff_sd"]
+meaning = "Population standard deviation of aggregated payoff among agents who played at least once in the step."
+
+[metrics."game.coop_rate"]
+meaning = "Share of all played seats choosing the configured cooperation label for that seat's role."
+
+[metrics."game.regret"]
+meaning = "Maximum unilateral-deviation regret of the configured mixed-strategy profile."
+
+[[metric_patterns]]
+pattern = "game.aggregate.{name}"
+meaning = "Public game aggregate for the completed step; present only when the simulation was assembled with aggregates."
+```
+
+`unit`，`direction`，パターンの `axes` が欲しければ手で足してください．この crate 自体は runvault に依存しません．
+
+---
+
 ## 決定論性と乱数ストリーム
 
 すべてのストリームは，`build_world` と `assemble` に渡す 1 つの `seed` から派生します．
@@ -1453,6 +2006,8 @@ LLM の決定が無いステップでは何も記録しません．
 学習は `AgentId` の昇順で，決定はスケジューラーの活性化の順（1 人のエージェントの中では決定の単位の順）で行われます．
 組込みの学習則が引くのは `decide` に渡されるエンジンのストリームだけです（[乱数](#乱数) を参照）．
 同じ seed と同じコードなら，実行はステップごとに再現されます．
+`game_metrics` と混合戦略の報告は乱数を引かず，規則の状態，保持行動，対戦の表に触れないので，足しても実行の軌跡は変わりません．
+集計値の表も乱数を引きません．
 
 ---
 
@@ -1485,6 +2040,7 @@ LLM の決定が無いステップでは何も記録しません．
 
 混合戦略はソルバー側だけの概念です．シミュレーションでは決定規則は常に 1 つの `G::Action`（`FiniteGame` なら行動の番号）を返し，
 `MixedStrategy` が行動になることはありません．混合を打つ規則は，自分の RNG でそこから行動を 1 つ引きます．
+ただし規則は，次に打つ混合を*報告*できます（[混合戦略の報告](#混合戦略の報告) を参照）．
 
 ### 許容誤差と検証
 

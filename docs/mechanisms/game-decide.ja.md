@@ -19,6 +19,8 @@
   席ごとに 1 回（`PerEncounter`）のいずれかです．
 - **Reward** では，規則で動く全エージェントについて，そのステップの記録と対戦の結果を渡し，
   （規則が求めるなら）そのエージェントの対戦ごとに `learn_encounter` を呼び，その後で `learn_step` を呼びます．
+- `PlayOptions::report_mixed(true)` なら，**Reward の終わり**（全エージェントの学習の後）に，規則で動く各エージェントの規則に
+  全役割の混合戦略を尋ね（`DecisionRule::mixed`），報告を World に保存します．`GameWorld::reported_mixed(agent, role)` で読めます．
 
 規則のオブジェクトそのものは共有されるコードです．各エージェントの規則の状態は World の `PolicyTable` にあるので，
 この Mechanism は再開後の実行に影響する状態を持ちません．
@@ -65,6 +67,7 @@ $\text{learn}^{\text{enc}}$ は `learn_encounter`，$\text{learn}^{\text{step}}$
 Decision は，`game_match` が書いた席，各エージェントの規則の種類と状態，保持行動，履歴，（有効なら）対の履歴，`X` を読み，
 選んだ行動を席に，保持行動（`PerStep` のときだけ）と規則の状態を World に書きます（`decide` は状態を変更してよい）．
 Reward は，`game_play` が書いたそのステップの記録と対戦の結果を読み，規則の状態を更新します．
+`report_mixed` なら，その後で混合戦略の報告を書きます．
 
 ## 4. 6フェーズループにおける位置
 
@@ -80,6 +83,8 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
   規則が `needs_encounter_learning() == true` を返すエージェントについては，そのエージェントの対戦ごとに `EncounterId` の順で `learn_encounter` を呼び，
   その後で `learn_step` を呼びます．組込みの学習則は，`PerEncounter` では `learn_encounter` で相手ごとの状態を，
   ほかの粒度では `learn_step` で全体で 1 つの状態を更新します．
+  `report_mixed` では，全エージェントの学習の後に，やはり `AgentId` の昇順で報告を書きます．
+  ステップ $t$ の報告は，ステップ $t+1$ の決定が使う**学習後**の混合であって，ステップ $t$ の行動を生んだ混合ではありません．
 
 ## 5. 状態の読み書きコントラクト
 
@@ -93,11 +98,16 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
 | 対の履歴 | ✓ | | Decision：`DecisionContext::pair_history`（現在の相手）と `omniscient()` を通して．規則が `needs_pair_history() == true` を返すときだけ存在する．書くのは `game_play`． |
 | `PlayArena.payoffs` / `credit` | ✓ | | Reward：`LearnContext::outcomes()` を通して． |
 | Recorder のイベント `game.invalid_action` | | ✓ | `OnInvalidAction::Fallback` のときだけ． |
+| 混合戦略の報告 | | ✓ | Reward．`report_mixed(true)` のときだけ．表を空にして `t` を記し，規則で動くエージェントと役割ごとに `DecisionRule::mixed` の `Option<Vec<f64>>` を 1 つ書く．`Held` のエージェント，別の Driver の種類，`None` を返す規則，有限でない値では `None`．World のフィールド `reports`（無効なら World の JSON から省かれる）．snapshot と再開を越えて残る． |
+| 集計値の表 | ✓ | | Decision：`DecisionContext::aggregate_history()` を通して（前のステップだけ）．`assemble_with_aggregates` のときだけある．`game_play` が書く． |
 
 ## 6. 依存関係と順序制約
 
 - **上流：** `game_match`（Decision）が対戦を書いていること．Reward の前に `game_play`（Interaction）が利得とステップ履歴を書いていること．
 - **下流：** `game_play` はすべての席に行動があることを要求します．LLM のエージェントの席は，`game_decide` の後に登録される `game_llm_decide` が埋めます．
+  `MixedSource::Reported` の [`game_metrics`](game-metrics.ja.md) は，PostStep でこのステップの混合戦略の報告を読みます．
+- **混合戦略の報告と決定の粒度：** `report_mixed(true)` と `DecisionScope::PerEncounter` の組み合わせは `assemble` が拒否します（`GameError::Metrics`）．
+  この粒度では学習則が相手ごとに状態を持ちますが，`mixed` は全体で 1 つの状態を読むからです．
 - **決定の粒度と Matching：** `PerStep` では，各エージェントが 1 ステップに持つ役割は 1 つでなければなりません．
   `RoundRobin` は，エージェントを 2 つの役割に着けることになる `PerStep` を `assemble` で拒否します．
   それ以外の場合は `game_decide` が `RuleError::AmbiguousRole` でステップを止めます（`Held` のエージェントも対象）．
@@ -112,6 +122,7 @@ Reward は，`game_play` が書いたそのステップの記録と対戦の結�
 | `rules: RuleBook<G, X>` | — | structural | `assemble` に渡す．種類は名前で登録する． |
 | `opts.on_invalid_action` | `OnInvalidAction::Stop` | policy | `Stop`：不正な行動でステップが失敗する．`Fallback(map)`：種類ごとの代替行動に差し替え，`game.invalid_action` を記録する． |
 | `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep` / `PerAgentRole` / `PerEncounter`．`game_match` と `game_play` にも渡される．LLM による決定は `PerStep` だけに対応する． |
+| `opts.report_mixed` | `false` | observation | Reward の終わりに学習後の混合戦略の報告を書く．`PerEncounter` とは併用できない．組込みの各規則が何を報告するかは [`docs/games.ja.md` の「混合戦略の報告」](../games.ja.md#混合戦略の報告) を参照． |
 
 `Fallback` の表が対象にするのはこの Mechanism の種類だけです．LLM の種類は書きません（そのフォールバックは LLM の規則の `RetryProtocol` が持つ）．
 `Fallback` のとき，`assemble` は使われているすべての規則の種類に代替行動があることを要求し，各代替行動を全役割で `check_action` により検査します．
@@ -155,7 +166,8 @@ let sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules, NormalFormOutco
 ストリームは活性化の順に，1 人のエージェントの中では決定の単位の順に消費されます．
 `Mixed`，`LogitChoice`，`RothErev`，GTFT（相手の裏切りの後で `0 < generosity < 1` のとき）は決定ごとに一様な `f64` を 1 回引き，
 行動の番号順に累積確率をたどります．同点の乱択（`FictitiousPlay`，`MyopicBestResponse`）は同点の行動について `gen_range` を 1 回引きます．
-`learn_encounter` と `learn_step` は RNG を受け取りません．
+`learn_encounter` と `learn_step` は RNG を受け取りません．`mixed` も受け取りません．
+報告は乱数を引かず規則の状態も変えないので，実行を変えません．
 規則の状態の初期化（`build_world` の中）は `derive_seed(seed, &[3, agent, generation])` を使い，
 `derive_seed(seed, &[2])` は World の `decision_root` として保存されます．どちらのラベルも予約済みです．
 学習は `AgentId` の昇順，決定はスケジューラーの順で行うので，同じ seed なら実行は再現されます．

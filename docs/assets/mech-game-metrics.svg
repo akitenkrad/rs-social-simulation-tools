@@ -1,0 +1,82 @@
+<svg width="100%" viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>game_metrics mechanism data flow</title>
+<desc>PostStep mechanism from socsim-games (GameMetrics), added by the user after assemble. It reads this step's PlayArena seats and actions, the per-agent payoff and n_played, the last public aggregate row and, for MixedSource::Reported, the post-learning mixed-strategy reports. It writes one row to the recorder table "game" with played_share, coop_rate, mean_payoff, payoff_sd, aggregate, regret and eq_distance columns (action_entropy under feature metrics), omitting undefined columns instead of writing NaN. With stop or PlayedCumulative it keeps MetricsState (previous shares, convergence counter, cumulative counts) in the world, and it requests a stop once the shares have been stable for window steps. Deterministic; draws no randomness.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F6F4EE"/>
+    <stop offset="1" stop-color="#ECEAE2"/>
+  </linearGradient>
+  <marker id="hr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-weight: 700; }
+    .body  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; }
+    .mono  { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  </style>
+</defs>
+
+<rect x="3" y="3" width="754" height="324" rx="18" fill="url(#bg)" stroke="#D9D6CC" stroke-width="1.5"/>
+
+<!-- phase strip: PostStep active -->
+<g class="body" font-size="11.5">
+  <rect x="40"  y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="94"  y="45" fill="#6B6A64" text-anchor="middle">PreStep</text>
+  <rect x="156" y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="210" y="45" fill="#6B6A64" text-anchor="middle">Environment</text>
+  <rect x="272" y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="326" y="45" fill="#6B6A64" text-anchor="middle">Decision</text>
+  <rect x="388" y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="442" y="45" fill="#6B6A64" text-anchor="middle">Interaction</text>
+  <rect x="504" y="28" width="108" height="26" rx="7" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="558" y="45" fill="#6B6A64" text-anchor="middle">Reward</text>
+  <rect x="620" y="28" width="100" height="26" rx="7" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+  <text x="670" y="45" fill="#534AB7" text-anchor="middle" font-weight="700">PostStep</text>
+</g>
+
+<!-- input state -->
+<g>
+  <rect x="40" y="104" width="170" height="124" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
+  <text class="body" x="125" y="96" font-size="13" fill="#0F6E56" text-anchor="middle" font-weight="600">reads</text>
+  <text class="mono" x="56" y="128" font-size="12" fill="#0B5040">PlayArena</text>
+  <text class="mono" x="56" y="146" font-size="12" fill="#0B5040">  .seats · .actions</text>
+  <text class="mono" x="56" y="166" font-size="12" fill="#0B5040">payoff · n_played</text>
+  <text class="mono" x="56" y="186" font-size="12" fill="#0B5040">aggregate row (t)</text>
+  <text class="mono" x="56" y="206" font-size="12" fill="#0B5040">mixed reports</text>
+  <text class="body" x="56" y="221" font-size="10.5" fill="#3C7E6C">reports: Reported source only</text>
+</g>
+
+<!-- mechanism box -->
+<g>
+  <rect x="262" y="86" width="236" height="160" rx="14" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.6"/>
+  <text class="title" x="380" y="114" font-size="18" fill="#332E6E" text-anchor="middle">game_metrics</text>
+  <text class="body"  x="380" y="134" font-size="12" fill="#6B6A64" text-anchor="middle">shares · payoffs · regret · stop</text>
+  <line x1="282" y1="146" x2="478" y2="146" stroke="#C7C2E8" stroke-width="1"/>
+  <text class="mono" x="380" y="170" font-size="12" fill="#332E6E" text-anchor="middle">share = count ÷ seats</text>
+  <text class="mono" x="380" y="192" font-size="12" fill="#332E6E" text-anchor="middle">σ ← MixedSource</text>
+  <text class="mono" x="380" y="212" font-size="12" fill="#332E6E" text-anchor="middle">regret(σ) · min‖σ − σ*‖₁</text>
+  <text class="mono" x="380" y="234" font-size="12" fill="#332E6E" text-anchor="middle">max|Δshare| &lt; tol × window</text>
+</g>
+
+<!-- output state -->
+<g>
+  <rect x="550" y="104" width="170" height="124" rx="12" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.3"/>
+  <text class="body" x="635" y="96" font-size="13" fill="#0F6E56" text-anchor="middle" font-weight="600">writes</text>
+  <text class="mono" x="566" y="126" font-size="12" fill="#0B5040">row "game"</text>
+  <text class="body" x="566" y="141" font-size="10.5" fill="#3C7E6C">played_share.&lt;id&gt;</text>
+  <text class="body" x="566" y="154" font-size="10.5" fill="#3C7E6C">coop_rate · mean_payoff</text>
+  <text class="body" x="566" y="167" font-size="10.5" fill="#3C7E6C">payoff_sd · aggregate.*</text>
+  <text class="body" x="566" y="180" font-size="10.5" fill="#3C7E6C">regret · eq_distance</text>
+  <text class="mono" x="566" y="201" font-size="12" fill="#0B5040">MetricsState</text>
+  <text class="mono" x="566" y="219" font-size="12" fill="#0B5040">request_stop()</text>
+</g>
+
+<!-- arrows -->
+<path d="M210 166 H259" stroke="#534AB7" stroke-width="1.6" marker-end="url(#hr)"/>
+<path d="M498 166 H547" stroke="#534AB7" stroke-width="1.6" marker-end="url(#hr)"/>
+
+<!-- footnote -->
+<text class="body" x="380" y="284" font-size="12" fill="#6B6A64" text-anchor="middle">Runs once per step after every game mechanism · no RNG · undefined columns omitted, never NaN</text>
+<text class="body" x="380" y="304" font-size="11.5" fill="#9A988F" text-anchor="middle">Added with add_mechanism; MetricsState exists only with stop or PlayedCumulative and survives snapshots.</text>
+
+</svg>

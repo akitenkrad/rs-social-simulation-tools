@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 1040 770" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>socsim mechanisms across the 6-phase tick loop</title>
-<desc>The documented mechanisms placed in the phase(s) they fire in: PreStep, Environment, Decision, Interaction, Reward, PostStep. The Interaction column also holds the eight general mechanisms hegselmann_krause, deffuant, social_judgement, lorenz, si_contagion, threshold_contagion, axelrod, and group_conformity from the general socsim-mechanisms crate. The four socsim-games mechanisms are drawn as amber dashed chips: game_match (PreStep and Decision), game_decide (Decision and Reward), game_llm_decide (feature llm; drawn in Decision, it also runs in Reward), and game_play (Interaction). Arrows show the fixed per-step phase order; the curved arrow closes the loop for the next step.</desc>
+<desc>The documented mechanisms placed in the phase(s) they fire in: PreStep, Environment, Decision, Interaction, Reward, PostStep. The Interaction column also holds the eight general mechanisms hegselmann_krause, deffuant, social_judgement, lorenz, si_contagion, threshold_contagion, axelrod, and group_conformity from the general socsim-mechanisms crate. The five socsim-games mechanisms are drawn as amber dashed chips: game_match (PreStep and Decision), game_decide (Decision and Reward), game_llm_decide (feature llm; drawn in Decision, it also runs in Reward), game_play (Interaction), and game_metrics (PostStep). Arrows show the fixed per-step phase order; the curved arrow closes the loop for the next step.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -123,6 +123,8 @@
   <text x="595" y="614" fill="#7A3E0C" text-anchor="middle">game_play</text>
   <rect x="680" y="208" width="150" height="28" rx="8" fill="#FAEEDA" stroke="#B5651D" stroke-width="1.2" stroke-dasharray="5 3"/>
   <text x="755" y="226" fill="#7A3E0C" text-anchor="middle">game_decide</text>
+  <rect x="840" y="320" width="150" height="28" rx="8" fill="#FAEEDA" stroke="#B5651D" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="915" y="338" fill="#7A3E0C" text-anchor="middle">game_metrics</text>
   <text x="595" y="638" fill="#B5651D" text-anchor="middle" font-size="10" font-weight="400">socsim-games crate (library-only)</text>
 </g>
 
@@ -142,7 +144,7 @@
 </g>
 
 <!-- loop-back arrow PostStep -> PreStep (next step) -->
-<path d="M915 246 C 985 830, 75 830, 115 242" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#hr)"/>
+<path d="M915 348 C 985 830, 75 830, 115 242" fill="none" stroke="#534AB7" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#hr)"/>
 <text class="body" x="300" y="746" font-size="13" fill="#6B6A64" text-anchor="middle">next step  ·  clock.tick()  ·  recompute_team_means feeds next Interaction</text>
 
 </svg>

@@ -12,7 +12,8 @@ The crate is library-only (no `ModulePack`, not wired into the `socsim` binary).
 This page covers the building blocks, where their state lives, what a rule is
 allowed to see, how to assemble a runnable simulation, and the built-in learning
 rules and decision scopes (see
-[Learning rules and decision scope](#learning-rules-and-decision-scope)). Separately from the
+[Learning rules and decision scope](#learning-rules-and-decision-scope)), and the
+per-step metrics mechanism `game_metrics` (see [Metrics](#metrics)). Separately from the
 simulation, the crate ships classic games and solvers for finite games — Nash
 equilibria, dominance, minimax and logit QRE (see
 [Solving finite games](#solving-finite-games)).
@@ -23,13 +24,15 @@ equilibria, dominance, minimax and logit QRE (see
 
 | Feature | Adds | socsim dependencies |
 |---|---|---|
-| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`), `MatrixGame`, the built-in games (`catalog`), mixed strategies (`mixed`), the solvers (`solve`) and the learning-rule cores (`learn`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
-| `core` | the world (`GameWorld`), rules (including the learning rules), outcome rules, matching, views, `build_world` | `socsim-core` |
-| `engine` | `assemble` (returns a `SimulationBuilder`); implies `core` | `socsim-core`, `socsim-engine` |
+| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`, `AggregateGame`), `MatrixGame`, the built-in games (`catalog`), mixed strategies (`mixed`), the solvers (`solve`), the learning-rule cores (`learn`), `AggregateSpec` and the metric action ids (`metric_action_ids`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
+| `core` | the world (`GameWorld`), rules (including the learning rules), outcome rules, matching, views, `build_world`, the metrics mechanism `GameMetrics` | `socsim-core` |
+| `engine` | `assemble` and `assemble_with_aggregates` (both return a `SimulationBuilder`); implies `core` | `socsim-core`, `socsim-engine` |
+| `metrics` | the `game.action_entropy` column of `GameMetrics` (see [Metrics](#metrics)); implies `core` | `socsim-core`, `socsim-metrics` (default features off — only its dependency-free `stats` module) |
 | `llm` | LLM-backed decision rules, the response store and the replay manifest (see [LLM decisions](#llm-decisions-feature-llm)); implies `core`. The `game_llm_decide` mechanism and `assemble_with_llm` also need `engine` | `socsim-core`, `socsim-llm` (default features only — no networking) |
 | `live` | `live_backend_factory()` (the cache-free Ollama → OpenAI backend); implies `llm` | as `llm`, plus `socsim-llm/live` |
 
-Without `llm`, the crate does not depend on `socsim-llm`; it never depends on
+Without `llm`, the crate does not depend on `socsim-llm`, and without `metrics`
+it does not depend on `socsim-metrics`; it never depends on
 `socsim-config` or `socsim-runner`. A simulation needs `core` and `engine`:
 
 ```toml
@@ -233,13 +236,18 @@ pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
     ) -> Result<(), RuleError> { Ok(()) }
     fn needs_encounter_learning(&self) -> bool { false }
     fn needs_pair_history(&self) -> bool { false }
+    fn mixed(&self, state: &X::PolicyState, role: usize, game: &G) -> Option<Vec<f64>> { None }
 }
 ```
 
 `learn_encounter`, `needs_encounter_learning` and `needs_pair_history` are
 optional; they matter when an agent plays several encounters per step (see
 [Per-encounter learning](#per-encounter-learning) and
-[Pair history](#pair-history)).
+[Pair history](#pair-history)). `mixed` is optional too: it returns the mixed
+strategy the rule would play next in `role`, read from its state without
+changing it or drawing randomness, and is called only when the simulation
+reports mixed strategies (see
+[Reporting mixed strategies](#reporting-mixed-strategies)).
 
 Note the receivers: `decide` and the learning methods take `&self`. A rule object is
 shared code; everything it remembers about an agent lives in the
@@ -522,8 +530,8 @@ struct is not part of a snapshot.
 | Mechanism | Phases | Does |
 |---|---|---|
 | [`game_match`](mechanisms/game-match.md) | PreStep, Decision | PreStep: clears the play arena, `payoff`, `n_played`. Decision: asks the `Matching` for this step's encounters. |
-| [`game_decide`](mechanisms/game-decide.md) | Decision, Reward | Decision: each seated agent's rule `decide`s once per decision unit (or its held action is used); the action is checked with `check_action`. Reward: every rule-driven agent's `learn_encounter` (per encounter, when the rule asks for it) and then `learn_step`. |
-| [`game_play`](mechanisms/game-play.md) | Interaction | checks every seat is filled, computes payoffs with the `OutcomeRule`, appends the encounters to the pair history (when enabled), aggregates payoffs per agent with `PayoffAggregation`, and appends a `StepRecord` for every agent to the step history. |
+| [`game_decide`](mechanisms/game-decide.md) | Decision, Reward | Decision: each seated agent's rule `decide`s once per decision unit (or its held action is used); the action is checked with `check_action`. Reward: every rule-driven agent's `learn_encounter` (per encounter, when the rule asks for it) and then `learn_step`; with `PlayOptions::report_mixed(true)`, finally each rule's post-learning mixed strategy (see [Reporting mixed strategies](#reporting-mixed-strategies)). |
+| [`game_play`](mechanisms/game-play.md) | Interaction | checks every seat is filled, computes payoffs with the `OutcomeRule`, appends the encounters to the pair history (when enabled), aggregates payoffs per agent with `PayoffAggregation`, and appends a `StepRecord` for every agent to the step history; under `assemble_with_aggregates`, finally reduces the game's public aggregates into one row (see [Public aggregates](#public-aggregates-aggregategame)). |
 
 Because mechanisms in the same phase run in registration order, `game_match`
 always seats agents before `game_decide` asks them for actions. Per step:
@@ -533,7 +541,10 @@ PreStep      game_match   reset arena / payoff / n_played
 Decision     game_match   Matching → encounters
              game_decide  decide + check_action → actions, held
 Interaction  game_play    OutcomeRule → payoffs → pair history → aggregation → history
+                          (→ aggregate row, under assemble_with_aggregates)
 Reward       game_decide  learn_encounter (per encounter) + learn_step (rule state)
+                          (→ post-learning mixed reports, with report_mixed)
+PostStep     game_metrics (optional, added by you) → one "game" row of metrics
 ```
 
 With the `llm` feature, `assemble_with_llm` registers a fourth mechanism,
@@ -543,7 +554,10 @@ rule (see [LLM decisions](#llm-decisions-feature-llm)).
 
 Mechanisms you add after `assemble` (`.add_mechanism(...)` on the returned
 builder) run after the game mechanisms within each phase — a `Reward`-phase
-mechanism therefore sees this step's payoffs.
+mechanism therefore sees this step's payoffs. The metrics mechanism
+[`game_metrics`](mechanisms/game-metrics.md) is added this way; it runs in
+PostStep, after everything above, and reads the completed step (see
+[Metrics](#metrics)).
 
 ---
 
@@ -570,6 +584,16 @@ pub fn assemble<G, X, M: Matching<G, X>, O: OutcomeRule<G, X>>(
     opts: PlayOptions<G::Action>,
     seed: u64,
 ) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>;
+
+pub fn assemble_with_aggregates<G: AggregateGame, X, M: Matching<G, X>, O: OutcomeRule<G, X>>(
+    world: GameWorld<G, X>,
+    matching: M,
+    rules: RuleBook<G, X>,
+    outcome: O,
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+    aggregate_history_len: usize,
+) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>;
 ```
 
 `build_world` checks: `history_len > 0` (`InvalidHistoryLength`); the
@@ -579,7 +603,12 @@ the `RuleBook` (`RuleError::UnknownKind`); every `init_state` succeeds.
 
 `assemble` checks: the game has two roles (`UnsupportedRoles`); every rule kind
 in the world is in the `RuleBook`; with `OnInvalidAction::Fallback`, every active
-kind has a fallback action that is valid for every role; and `Matching::check`.
+kind has a fallback action that is valid for every role; `report_mixed(true)`
+is not combined with `DecisionScope::PerEncounter` (`GameError::Metrics`); and
+`Matching::check`. `assemble_with_aggregates` does the same and additionally
+requires `aggregate_history_len > 0` (`InvalidAggregateHistoryLength`); it is
+`assemble` plus the public aggregate table of
+[Public aggregates](#public-aggregates-aggregategame).
 It sets the engine seed to `derive_seed(seed, &[1])` and returns the builder, so
 you can still add a scheduler, a recorder or extra mechanisms before `build()`.
 Pass the **same** `seed` to both functions. Calling `.seed(...)` on the returned
@@ -592,6 +621,7 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
     .payoff_aggregation(PayoffAggregation::Mean)        // Sum (default) | Mean
     .on_invalid_action(OnInvalidAction::Stop)           // Stop (default) | Fallback(map)
     .decision_scope(DecisionScope::PerEncounter)        // PerStep (default) | PerAgentRole | PerEncounter
+    .report_mixed(true)                                 // false (default) | true
 ```
 
 - **`PayoffAggregation`** — how an agent's payoffs from several encounters in
@@ -605,6 +635,11 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
     `{ "agent", "kind", "role", "action" }` (the rejected action, `Debug`-formatted).
 - **`DecisionScope`** — how many decisions an agent makes when it sits in several
   encounters in one step; see [Decision scope](#decision-scope).
+- **`report_mixed`** — when `true`, `game_decide` stores every rule-driven
+  agent's post-learning mixed strategy at the end of each Reward phase, readable
+  through `GameWorld::reported_mixed`; see
+  [Reporting mixed strategies](#reporting-mixed-strategies). Rejected together
+  with `DecisionScope::PerEncounter`.
 
 ---
 
@@ -1635,6 +1670,594 @@ Steps without any LLM decision record nothing.
 
 ---
 
+## Metrics
+
+`GameMetrics` is a read-only mechanism, named `game_metrics`, that records one
+row of per-step game statistics — action shares, payoff mean and spread,
+cooperation rate, regret, distance to equilibrium and public aggregates — to the
+recorder's table `"game"`. It is not registered by `assemble`: build it from the
+game and add it to the returned builder. It runs in **PostStep**, after every
+game mechanism, so it sees the completed step. It draws no randomness and changes
+no model state; the only thing it writes into the world is its own
+bookkeeping for the convergence stop and the cumulative source (see
+[the mechanism page](mechanisms/game-metrics.md)).
+
+### Adding `game_metrics`
+
+`GameMetrics::new(&game, MetricsOptions)` takes the game by reference — build it
+before the game moves into `build_world` — and returns
+`Result<GameMetrics<G>, GameError>` (`G: FiniteGame`). The options are a builder:
+
+| `MetricsOptions` method | Default | Effect |
+|---|---|---|
+| `new()` / `default()` | — | the defaults below |
+| `cooperate_label(label)` | off | adds `game.coop_rate`; `label` must match **exactly one** action label in **every** role, else `GameError::Metrics` |
+| `regret(on)` | on for two-role games, off otherwise | adds or removes `game.regret` |
+| `mixed_source(MixedSource)` | `Played` | which mixed-strategy profile `game.regret` and `game.eq_distance` evaluate |
+| `equilibrium(EquilibriumTarget)` | `None` | `Solve` adds `game.eq_distance` |
+| `stop(tol, window)` | off | requests the end of the run once the action shares stop changing; `tol` finite and `> 0`, `window ≥ 1`, else `GameError::Metrics` |
+| `action_entropy(on)` | on | feature `metrics` only: adds or removes `game.action_entropy` |
+
+A two-agent prisoner's dilemma, Tit-for-Tat against an unconditional defector:
+
+```rust
+use std::sync::Arc;
+
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, EquilibriumTarget, Fixed,
+    FixedPlayers, GameMetrics, InitialActions, MatrixGame, MetricsOptions, NormalFormOutcome,
+    PlayOptions, RuleBook, TitForTat,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    let game = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap()
+    .with_labels(vec![vec!["C".into(), "D".into()]; 2])
+    .unwrap();
+
+    // Built from the game before the game moves into the world.
+    let metrics = GameMetrics::new(
+        &game,
+        MetricsOptions::new()
+            .cooperate_label("C")                    // adds game.coop_rate
+            .equilibrium(EquilibriumTarget::Solve)   // adds game.eq_distance
+            .stop(1e-9, 3),                          // stop after 3 unchanged steps
+    )
+    .unwrap();
+
+    let mut rules = RuleBook::new();
+    rules.register("tit_for_tat", Arc::new(TitForTat::new(0))).unwrap();
+    rules.register("fixed_defect", Arc::new(Fixed::new(1))).unwrap();
+
+    let seed = 1;
+    let world = build_world(
+        game, 2, (), InitialActions::Same(0), &rules,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("tit_for_tat".into()), count: 1 },
+            AssignGroup { kind: AssignKind::Rule("fixed_defect".into()), count: 1 },
+        ]),
+        100, 100, seed,
+    )
+    .unwrap();
+
+    let mut sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules,
+                           NormalFormOutcome, PlayOptions::new(), seed)
+        .unwrap()
+        .add_mechanism(Box::new(metrics))           // runs in PostStep
+        .recorder(Box::new(InMemoryRecorder::new()))
+        .build();
+    sim.run().unwrap();                             // ends early: the stop rule fired
+
+    let recorder = sim.recorder().as_any().unwrap()
+        .downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| row.t <= 2) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+    println!("stopped at t = {}", recorder.metrics().last().unwrap().t);
+}
+```
+
+(`socsim-log` provides `InMemoryRecorder`; any `Recorder` works.) Output:
+
+```text
+t=1 game.played_share.a0 = 0.5
+t=1 game.played_share.a1 = 0.5
+t=1 game.coop_rate = 0.5
+t=1 game.mean_payoff = 2.5
+t=1 game.payoff_sd = 2.5
+t=1 game.regret = 1
+t=1 game.eq_distance = 2
+t=2 game.played_share.a0 = 0
+t=2 game.played_share.a1 = 1
+t=2 game.coop_rate = 0
+t=2 game.mean_payoff = 1
+t=2 game.payoff_sd = 0
+t=2 game.regret = 0
+t=2 game.eq_distance = 0
+stopped at t = 5
+```
+
+At `t = 1` Tit-for-Tat cooperates and the defector defects: half the seats play
+`C`, the payoffs are 0 and 5, the cooperator could have gained 1 by defecting
+(regret 1), and the profile `(C, D)` is at L1 distance 2 from the unique
+equilibrium `(D, D)`. From `t = 2` both defect. With feature `metrics` the same
+program also prints `game.action_entropy` (`0.6931471805599453` = ln 2 at
+`t = 1`, `0` at `t = 2`) after `game.coop_rate`.
+
+### Columns
+
+Every column is written with `record_row(t, "game", …)`, so a recorder that fans
+rows out (the default) sees the keys `game.<column>`:
+
+| Column | Appears when | Value |
+|---|---|---|
+| `game.played_share.<id>` | the step has at least one seat | pooled ids: seats choosing that action ÷ all seats; per-role ids: seats of that role choosing that action ÷ seats of that role |
+| `game.coop_rate` | `cooperate_label` is set and the step has a seat | seats whose action is the cooperation action of the seat's role ÷ all seats |
+| `game.action_entropy` | feature `metrics`, `action_entropy(true)` (the default), pooled ids, and the step has a seat | Shannon entropy $-\sum_k p_k \ln p_k$ of the pooled `played_share` values, in nats |
+| `game.mean_payoff` | at least one agent played (`n_played() > 0`) | mean of `payoffs()` (after `PayoffAggregation`) over the agents that played |
+| `game.payoff_sd` | as `mean_payoff` | population standard deviation (divided by $n$) of the same payoffs |
+| `game.aggregate.<name>` | the simulation was assembled with `assemble_with_aggregates` and the reduction is defined | the step's reduced aggregate (see [Public aggregates](#public-aggregates-aggregategame)) |
+| `game.regret` | regret is on and the mixed-strategy profile is defined | $\max_r \big[\max_a F_r(a, \sigma_{-r}) - F_r(\sigma)\big]$ (`mixed::regret`) |
+| `game.eq_distance` | `EquilibriumTarget::Solve` and the profile is defined | $\min_{\sigma^*} \sum_r \sum_a \lvert \sigma_r(a) - \sigma^*_r(a)\rvert$ over the solved equilibria |
+
+Within a row the columns come in the order played shares, `coop_rate`,
+`action_entropy`, `mean_payoff`, `payoff_sd`, aggregates, `regret`,
+`eq_distance`.
+
+**An undefined column is left out of the row, never written as NaN.** A step
+without encounters records no share, cooperation or entropy column; a step in
+which no agent played records no payoff columns. Any value that is not finite
+— computed, or a played payoff it reads — stops the step with a mechanism error
+before the row is recorded, so `game_metrics` never writes NaN or infinity to
+the records or to its state in the world. A recorder that keeps rows natively
+may still pad them: `socsim_log::CsvRecorder` fixes a table's columns from its
+first row, writes NaN for a column missing from a later row and drops a column
+that first appears later (with `llm`, `game_llm_decide` writes its rows to the
+same table `"game"`). Prefer a recorder that fans rows out per key when columns
+can come and go. The mechanism also checks
+every step that the world's game still has the role and action counts it was
+built for.
+
+`played_share` counts **seats in the play arena**, not agents: an agent seated in
+three encounters counts three times. That is why it is defined under every
+[decision scope](#decision-scope), including the scopes that do not write `held`.
+A population share — the fraction of agents holding each strategy — is a
+different quantity and is not part of `game_metrics`.
+
+### Action ids: `metric_action_ids`
+
+The `<id>` in `game.played_share.<id>` comes from action **indices**, never from
+labels, so a column name is a valid metric name whatever the labels contain.
+`metric_action_ids(&game)` (default build) returns the ids in column order:
+
+- **pooled** (`MetricScheme::Pooled`) — every role has the same number of
+  actions and the same label at each index as role 0: one id per index,
+  `a0`, `a1`, …, shared by all roles;
+- **per role** (`MetricScheme::PerRole`) — otherwise: `r<role>-a<index>`, role
+  by role.
+
+```rust
+use socsim_games::{metric_action_ids, GameMetrics, MatrixGame, MetricsOptions};
+
+fn main() {
+    let pd = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap()
+    .with_labels(vec![vec!["C".into(), "D".into()]; 2])
+    .unwrap();
+    // Two roles with different action sets.
+    let asymmetric = MatrixGame::new(vec![2, 3], vec![vec![0.0; 6], vec![0.0; 6]])
+        .unwrap()
+        .with_labels(vec![
+            vec!["Up".into(), "Down".into()],
+            vec!["L".into(), "M".into(), "R".into()],
+        ])
+        .unwrap();
+
+    for game in [&pd, &asymmetric] {
+        let ids = metric_action_ids(game);
+        let listed: Vec<_> = ids.actions().iter().map(|a| a.id.as_str()).collect();
+        println!("{:?}: {}", ids.scheme(), listed.join(", "));
+    }
+    println!("{:?}", metric_action_ids(&asymmetric).id(1, 2));
+    println!();
+
+    let metrics = GameMetrics::new(&pd, MetricsOptions::new().cooperate_label("C")).unwrap();
+    for (pattern, meaning) in metrics.describe() {
+        if pattern.contains('{') {
+            println!("[[metric_patterns]]\npattern = {pattern:?}\nmeaning = {meaning:?}\n");
+        } else {
+            println!("[metrics.{pattern:?}]\nmeaning = {meaning:?}\n");
+        }
+    }
+}
+```
+
+The first three lines of the output:
+
+```text
+Pooled: a0, a1
+PerRole: r0-a0, r0-a1, r1-a0, r1-a1, r1-a2
+Some("r1-a2")
+```
+
+Each `MetricAction` carries `id`, `role` (`None` when pooled) and `action`; use
+the game's `action_label(role, action)` for display. The rest of the output is
+used in [Describing the columns](#describing-the-columns-describe).
+
+### Regret, equilibrium distance and `MixedSource`
+
+`game.regret` and `game.eq_distance` evaluate one mixed strategy per role, the
+profile $\sigma$. `MetricsOptions::mixed_source` chooses where it comes from:
+
+| `MixedSource` | $\sigma_r$ | Defined when |
+|---|---|---|
+| `Played` (default) | the share of this step's role-$r$ seats choosing each action | every role has a seat this step |
+| `PlayedCumulative` | the same shares over **all** seats since the first step `game_metrics` observed | every role has been played at least once (so also on a later step without encounters) |
+| `Reported` | the average, over this step's role-$r$ seats, of the seated agent's reported mix (see [Reporting mixed strategies](#reporting-mixed-strategies)); a `Held` agent's seat counts as the pure strategy it played | every role has a seat this step |
+
+The `PlayedCumulative` counts are kept in the world, so a snapshot carries them
+and a resumed run continues the same column. `Reported` needs
+`PlayOptions::report_mixed(true)`: without it the first step fails with a
+mechanism error, as it does when a seated rule-driven agent has no report (its
+rule's `mixed` returned `None`) or a report of the wrong length.
+
+`EquilibriumTarget::Solve` runs [`support_enumeration`](#support_enumeration)
+**once, in `GameMetrics::new`**, and keeps the equilibria. It requires a
+two-role game, and `new` returns `GameError::Metrics` when the solver fails,
+when the equilibrium set is not complete (`is_complete()` is false — a
+degenerate game) or when it is empty. `game.eq_distance` is the summed L1
+distance to the nearest of those equilibria, between 0 and $2 \times$ the number
+of roles.
+
+### Reporting mixed strategies
+
+`PlayOptions::report_mixed(true)` makes `game_decide` call
+`DecisionRule::mixed(state, role, game)` at the **end of each Reward phase**,
+after every agent has learned, for every rule-driven agent (ascending
+`AgentId`) and every role, and store the result in the world.
+`GameWorld::reported_mixed(agent, role) -> Option<&[f64]>` reads it.
+
+The reported mix is therefore the **post-learning** mix — the one the next
+step's decision will use — not the mix that produced this step's action. A
+report is `None` for a `Held` agent, for a kind owned by another driver (an LLM
+kind), when the rule returns `None`, and when a returned value is not finite;
+the table is cleared at the start of each report, so a value never carries
+over from an earlier step.
+
+| Built-in rule | `mixed` reports |
+|---|---|
+| `Fixed` | `None` |
+| `UniformRandom` | $1/n$ on each of the role's $n$ actions |
+| `Mixed` | its probabilities (`None` if their length differs from the role's action count) |
+| `TitForTat` | the pure strategy on the opponent's last action (`coop` before any) |
+| `MyopicBestResponse` | `None` |
+| `FictitiousPlay` | the best responses to its belief counts: with `tie_break_lowest()` the pure strategy on the lowest one, with `tie_break_random()` equal weight on every exactly tied one |
+| `LogitChoice` | its logit selection probabilities |
+| `RothErev` | its selection probabilities |
+| `Automaton` | the next action's probabilities — pure, except GTFT after an opponent defection: `generosity` on `coop`, the rest on the other action |
+| your own rule | `None` unless you implement `mixed` |
+
+The learning rules report from their single per-agent (`global`) state.
+Because `DecisionScope::PerEncounter` keeps one state per opponent, `assemble`
+rejects `report_mixed(true)` under that scope (`GameError::Metrics`).
+`assemble_with_llm` accepts `report_mixed`; its LLM kinds report `None`.
+
+```rust
+use std::sync::Arc;
+
+use socsim_core::AgentId;
+use socsim_games::{
+    assemble, build_world, AssignGroup, AssignKind, Assignment, FictitiousPlay, FixedPlayers,
+    GameMetrics, InitialActions, MatrixGame, MetricsOptions, MixedSource, NormalFormOutcome,
+    PlayOptions, RuleBook,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    // Matching pennies: role 0 wins on a match, role 1 on a mismatch.
+    let game = MatrixGame::zero_sum(&[vec![1.0, -1.0], vec![-1.0, 1.0]]).unwrap();
+    let metrics = GameMetrics::new(
+        &game,
+        MetricsOptions::new().mixed_source(MixedSource::Reported),
+    )
+    .unwrap();
+
+    let mut rules = RuleBook::new();
+    rules
+        .register("fictitious", Arc::new(FictitiousPlay::new().tie_break_random()))
+        .unwrap();
+
+    let seed = 1;
+    let world = build_world(
+        game, 2, (), InitialActions::Same(1), &rules,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("fictitious".into()), count: 1 },
+            AssignGroup { kind: AssignKind::Held, count: 1 },   // always plays action 1
+        ]),
+        10, 10, seed,
+    )
+    .unwrap();
+
+    let mut sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules,
+                           NormalFormOutcome, PlayOptions::new().report_mixed(true), seed)
+        .unwrap()
+        .add_mechanism(Box::new(metrics))
+        .recorder(Box::new(InMemoryRecorder::new()))
+        .build();
+
+    // Before any Reward phase there is no report.
+    println!("before t=1: {:?}", sim.world().reported_mixed(AgentId(0), 0));
+    sim.step().unwrap();
+    println!("played at t=1: {}", sim.world().held()[0]);
+    println!("reported after t=1: {:?}", sim.world().reported_mixed(AgentId(0), 0));
+    println!("held agent: {:?}", sim.world().reported_mixed(AgentId(1), 1));
+
+    let recorder = sim.recorder().as_any().unwrap()
+        .downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| row.key == "game.regret") {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+}
+```
+
+```text
+before t=1: None
+played at t=1: 0
+reported after t=1: Some([0.0, 1.0])
+held agent: None
+t=1 game.regret = 2
+```
+
+With no observation yet, fictitious play broke the tie at random and played
+`0`; having seen the opponent play `1`, it now reports the pure best response
+`1`. The regret uses that report for role 0 and the held agent's played action
+for role 1: role 1 loses on a match and would gain 2 by switching.
+
+### Public aggregates: `AggregateGame`
+
+A game can publish values computed from each encounter's action profile —
+"was this encounter mutual cooperation", "how many contributed" — that every
+rule may read as public information. Implement `AggregateGame`
+(default build) on the game:
+
+```rust
+pub trait AggregateGame: NormalFormGame {
+    fn aggregate_spec(&self) -> &[AggregateSpec];
+    /// `out.len() == self.aggregate_spec().len()`; every written value must be finite.
+    fn aggregate_into(&self, profile: &[Self::Action], out: &mut [f64]);
+}
+```
+
+`AggregateSpec::new(name, AggregateReduce::{Sum, Mean})` validates the name: 1–49
+bytes, the first an ASCII lowercase letter or digit, the rest lowercase
+letters, digits, `_` or `-` (`AggregateSpecError::{EmptyName, InvalidStart,
+InvalidCharacter { index }, TooLong { length }}`; deserialisation re-runs the
+check). A name is therefore one segment of the metric name
+`game.aggregate.<name>`.
+
+Assemble with `assemble_with_aggregates(.., seed, aggregate_history_len)`
+instead of `assemble`. At the end of Interaction, `game_play` calls
+`aggregate_into` once per encounter (`EncounterId` order) and reduces the
+values over the step's encounters — `Sum` adds them (`0` for a step without
+encounters), `Mean` averages them (undefined for a step without encounters) —
+into one row keyed by `t`. The last `aggregate_history_len` rows are kept in the
+world, so snapshots carry them. A non-finite value stops the step.
+
+Rules read the rows through `DecisionContext::aggregate_history()`, which
+returns `None` unless the simulation was assembled with aggregates. The rows
+are written in Interaction and decisions are made in Decision, so a decision
+sees **only completed previous steps** (none at `t = 1`). `AggregateView`
+offers `names()`, `len()`, `is_empty()`, `iter()` (`(t, &[Option<f64>])`,
+oldest first), `last()` and `column(name)`; an undefined value is `None`.
+`game_metrics` records the current step's row as `game.aggregate.<name>`.
+`assemble_with_llm` has no aggregate variant: under LLM assembly
+`aggregate_history()` is `None` for every rule.
+
+```rust
+use std::borrow::Cow;
+use std::sync::Arc;
+
+use socsim_core::SimRng;
+use socsim_games::{
+    assemble_with_aggregates, build_world, ActionError, AggregateGame, AggregateReduce,
+    AggregateSpec, AssignGroup, AssignKind, Assignment, BuiltinPolicyState, DecisionContext,
+    DecisionRule, FiniteGame, Fixed, FixedPlayers, GameMetrics, InitialActions, MatrixGame,
+    MetricsOptions, NormalFormGame, NormalFormOutcome, PlayOptions, RuleBook, RuleError,
+    RuleInitContext, StageGame, Stateless,
+};
+use socsim_log::InMemoryRecorder;
+
+/// The prisoner's dilemma plus two public, profile-level values.
+#[derive(Clone, Debug)]
+struct PdWithAggregates {
+    pd: MatrixGame,
+    specs: Vec<AggregateSpec>,
+}
+
+impl StageGame for PdWithAggregates {
+    type Action = usize;
+    fn n_roles(&self) -> usize { self.pd.n_roles() }
+    fn check_action(&self, role: usize, action: &usize) -> Result<(), ActionError> {
+        self.pd.check_action(role, action)
+    }
+}
+impl NormalFormGame for PdWithAggregates {
+    fn payoff(&self, role: usize, profile: &[usize]) -> f64 { self.pd.payoff(role, profile) }
+}
+impl FiniteGame for PdWithAggregates {
+    fn n_actions(&self, role: usize) -> usize { self.pd.n_actions(role) }
+    fn action_label(&self, role: usize, action: usize) -> Cow<'_, str> {
+        self.pd.action_label(role, action)
+    }
+}
+impl AggregateGame for PdWithAggregates {
+    fn aggregate_spec(&self) -> &[AggregateSpec] { &self.specs }
+    fn aggregate_into(&self, profile: &[usize], out: &mut [f64]) {
+        out[0] = f64::from(u8::from(profile.iter().all(|&a| a == 0)));   // mutual_coop
+        out[1] = profile.iter().filter(|&&a| a == 1).count() as f64;    // defections
+    }
+}
+
+/// Cooperates while more than half of last step's encounters were mutual cooperation.
+struct FollowTheCrowd;
+
+impl DecisionRule<PdWithAggregates, ()> for FollowTheCrowd {
+    fn name(&self) -> &str { "follow_the_crowd" }
+    fn init_state(&self, _: &RuleInitContext, _: &PdWithAggregates)
+        -> Result<BuiltinPolicyState, RuleError> {
+        Ok(BuiltinPolicyState::Stateless(Stateless))
+    }
+    fn decide(&self, _: &mut BuiltinPolicyState,
+              ctx: &DecisionContext<'_, PdWithAggregates, ()>,
+              _: &mut SimRng) -> Result<usize, RuleError> {
+        let last = ctx.aggregate_history()                 // None without aggregates
+            .and_then(|history| history.last())            // previous step only
+            .and_then(|(_, values)| values[0]);            // mutual_coop
+        Ok(match last {
+            Some(share) if share <= 0.5 => 1,
+            _ => 0,                                        // first step: cooperate
+        })
+    }
+}
+
+fn main() {
+    let pd = MatrixGame::bimatrix(
+        &[vec![3.0, 0.0], vec![5.0, 1.0]],
+        &[vec![3.0, 5.0], vec![0.0, 1.0]],
+    )
+    .unwrap()
+    .with_labels(vec![vec!["C".into(), "D".into()]; 2])
+    .unwrap();
+    let game = PdWithAggregates {
+        pd,
+        specs: vec![
+            AggregateSpec::new("mutual_coop", AggregateReduce::Mean).unwrap(),
+            AggregateSpec::new("defections", AggregateReduce::Sum).unwrap(),
+        ],
+    };
+    let metrics = GameMetrics::new(&game, MetricsOptions::new()).unwrap();
+
+    let mut rules: RuleBook<PdWithAggregates, ()> = RuleBook::new();
+    rules.register("follow_the_crowd", Arc::new(FollowTheCrowd)).unwrap();
+    rules.register("fixed_defect", Arc::new(Fixed::new(1))).unwrap();
+
+    let seed = 5;
+    let world = build_world(
+        game, 4, (), InitialActions::Same(0), &rules,
+        &Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("follow_the_crowd".into()), count: 3 },
+            AssignGroup { kind: AssignKind::Rule("fixed_defect".into()), count: 1 },
+        ]),
+        10, 3, seed,
+    )
+    .unwrap();
+
+    let mut sim = assemble_with_aggregates(
+        world, FixedPlayers::pairs(&[(0, 1), (2, 3)]), rules, NormalFormOutcome,
+        PlayOptions::new(), seed,
+        8,                                                 // aggregate_history_len
+    )
+    .unwrap()
+    .add_mechanism(Box::new(metrics))
+    .recorder(Box::new(InMemoryRecorder::new()))
+    .build();
+    sim.run().unwrap();
+
+    let recorder = sim.recorder().as_any().unwrap()
+        .downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| row.key.starts_with("game.aggregate.")) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+}
+```
+
+```text
+t=1 game.aggregate.mutual_coop = 0.5
+t=1 game.aggregate.defections = 1
+t=2 game.aggregate.mutual_coop = 0
+t=2 game.aggregate.defections = 4
+t=3 game.aggregate.mutual_coop = 0
+t=3 game.aggregate.defections = 4
+```
+
+At `t = 1` the pair `(0, 1)` cooperates mutually and the pair `(2, 3)` does not,
+so `mutual_coop` is `0.5`; at `t = 2` the three followers read that row, find it
+not above one half, and defect.
+
+### Convergence stop
+
+`MetricsOptions::stop(tol, window)` ends the run once the played shares have
+stopped moving. After each step that has at least one seat, `game_metrics`
+compares the step's `played_share` values with those of the **previous step that
+had seats**:
+
+- on the first such step there is nothing to compare with, and the counter is `0`;
+- otherwise, if $\max_k \lvert s_k(t) - s_k(\text{prev})\rvert < \texttt{tol}$
+  the counter grows by one, else it is reset to `0`;
+- a step without seats resets the counter to `0` and keeps the previous shares.
+
+When the counter reaches `window`, `game_metrics` records the step's row and
+then requests a stop (`StepContext::request_stop`), and the run ends after that
+step. The earliest possible stop is therefore at step `window + 1` — in the
+first example `stop(1e-9, 3)` ends the run at `t = 5`. The counter and the
+previous shares are kept in the world, so a resumed run stops at the same step.
+
+### Feature `metrics`: action entropy
+
+With the Cargo feature `metrics`, `game_metrics` also writes
+`game.action_entropy`: the Shannon entropy in nats of the pooled `played_share`
+values, computed with `socsim_metrics::stats::shannon_entropy`. It is on by
+default under the feature (`MetricsOptions::action_entropy(false)` turns it off)
+and appears only for games with pooled ids — the entropy of per-role shares
+would mix two distributions. The feature adds nothing else.
+
+### Describing the columns: `describe`
+
+`GameMetrics::describe()` returns `(pattern, meaning)` pairs for the columns
+this configuration can write: `game.played_share.{action}`, `game.mean_payoff`,
+`game.payoff_sd`, then `game.coop_rate`, `game.regret`, `game.eq_distance` and
+`game.action_entropy` when enabled, and `game.aggregate.{name}` (always listed,
+since it depends on how the simulation is assembled). A repository that records
+runs with [runvault](https://github.com/akitenkrad/rs-runvault) can copy them
+into its `runvault.toml`: a pattern with a `{…}` segment is a
+`[[metric_patterns]]` entry, a plain name a `[metrics."<name>"]` entry. The
+example program in [Action ids](#action-ids-metric_action_ids) prints exactly
+that:
+
+```toml
+[[metric_patterns]]
+pattern = "game.played_share.{action}"
+meaning = "Share of all played seats choosing `{action}`. `{action}` is a metric_id; display labels come from the game's metric actions. Actions are pooled across roles."
+
+[metrics."game.mean_payoff"]
+meaning = "Mean aggregated payoff among agents who played at least once in the step."
+
+[metrics."game.payoff_sd"]
+meaning = "Population standard deviation of aggregated payoff among agents who played at least once in the step."
+
+[metrics."game.coop_rate"]
+meaning = "Share of all played seats choosing the configured cooperation label for that seat's role."
+
+[metrics."game.regret"]
+meaning = "Maximum unilateral-deviation regret of the configured mixed-strategy profile."
+
+[[metric_patterns]]
+pattern = "game.aggregate.{name}"
+meaning = "Public game aggregate for the completed step; present only when the simulation was assembled with aggregates."
+```
+
+Add `unit`, `direction` and the pattern's `axes` by hand if you want them. The
+crate itself does not depend on runvault.
+
+---
+
 ## Determinism & RNG streams
 
 Every stream derives from the one `seed` passed to `build_world` and `assemble`:
@@ -1653,7 +2276,10 @@ learn in sorted `AgentId` order and decide in the scheduler's activation order
 (and, within one agent, in decision-unit order); the built-in learning rules
 draw only from the engine stream passed to `decide` (see
 [Random numbers](#random-numbers)). With the same seed and the same code a run
-is reproducible step for step.
+is reproducible step for step. `game_metrics` and the mixed-strategy reports draw
+no randomness and leave the policy states, held actions and plays untouched, so
+adding them does not change a run's trajectory; the aggregate table draws no
+randomness either.
 
 ---
 
@@ -1693,7 +2319,8 @@ A profile with the wrong number of roles or a vector of the wrong length is a
 Mixed strategies are a solver-side concept only. In a simulation a decision
 rule always returns one `G::Action` — an action index for a `FiniteGame` — and
 a `MixedStrategy` is never an action. A rule that is meant to play a mix draws
-an action from it with its own RNG.
+an action from it with its own RNG. A rule can, however, *report* the mix it would
+play next (see [Reporting mixed strategies](#reporting-mixed-strategies)).
 
 ### Tolerance and verification
 

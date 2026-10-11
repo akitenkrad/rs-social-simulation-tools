@@ -23,7 +23,13 @@ mechanisms. For every encounter written by `game_match` and filled by
 5. applies the `PayoffAggregation` (`Sum` or `Mean`);
 6. appends one `StepRecord { action, payoff, n_played }` per agent to the step
    history. Under `DecisionScope::PerAgentRole` and `PerEncounter` an agent can
-   play different actions in one step, so `action` is `None` there.
+   play different actions in one step, so `action` is `None` there;
+7. when the simulation was assembled with `assemble_with_aggregates`
+   (`G: AggregateGame`), calls `aggregate_into` once per encounter in
+   `EncounterId` order, reduces each value over the step's encounters (`Sum`,
+   or `Mean` — undefined for a step without encounters) and appends one row,
+   keyed by `t`, to the world's aggregate table (a ring of
+   `aggregate_history_len` rows).
 
 ## 2. Theory & source
 
@@ -47,7 +53,8 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 Reads the encounters (`seats`, `credit`, `actions`) and, through
 `OutcomeContext`, the game, `X`, held actions and topology. Writes the per-seat
 payoffs, the per-agent `payoff` and `n_played`, the pair history (when
-enabled) and the step history.
+enabled), the step history and, under `assemble_with_aggregates`, the
+aggregate row.
 
 ## 4. Position in the 6-phase loop
 
@@ -65,6 +72,7 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
 | `GameWorld.n_played` | ✓ | ✓ | Incremented once per encounter the agent is seated in. |
 | pair history | | ✓ | Only when created by `build_world` (a rule asked for it). One record `(t, both actions)` per two-seat encounter, in `EncounterId` order, after payoffs are computed; ring of `history_len` per pair. |
 | step history (`StepRecord`) | | ✓ | One record per agent; `action` is `None` for an unseated agent, and for every agent under `PerAgentRole` / `PerEncounter`. Ring of length `history_len`. |
+| aggregate table | | ✓ | Only under `assemble_with_aggregates`. After the step history: one row `(t, values)`, one `Option<f64>` per `AggregateSpec`; a non-finite value fails the step. Field `aggregate` of the world (omitted from the world JSON otherwise); ring of `aggregate_history_len` rows. |
 | `game`, `x`, `held`, `topology`, `clock.t` | ✓ | | Through `OutcomeContext`. |
 
 ## 6. Dependencies & ordering constraints
@@ -76,7 +84,10 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
   encounter outcomes for `learn_encounter` / `learn_step`;
   `DecisionContext::my_history`, `opponent_history` and `pair_history` in the
   next step read the histories written here. Because the pair history is
-  written in Interaction, a decision never sees its own step.
+  written in Interaction, a decision never sees its own step. The same holds for
+  the aggregate table: `DecisionContext::aggregate_history()` shows only
+  completed previous steps. [`game_metrics`](game-metrics.md) (PostStep) records
+  this step's aggregate row as `game.aggregate.<name>`.
 - **Decision scope:** `assemble` passes `PlayOptions::decision_scope` to
   `game_play`; it decides whether `StepRecord::action` is recorded.
 
@@ -87,10 +98,14 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
 | `outcome: O` (`O: OutcomeRule<G, X>`) | — | structural | Passed to `assemble`. Built-in: `NormalFormOutcome` (requires `G: NormalFormGame`). |
 | `opts.payoff_aggregation` | `PayoffAggregation::Sum` | structural | `Sum` or `Mean`; agents that played nothing keep `0` under `Mean`. |
 | `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep`: `StepRecord::action` is the agent's action. `PerAgentRole` / `PerEncounter`: `None`. |
+| `aggregate_history_len` | — | structural | `assemble_with_aggregates` only; rows kept for `aggregate_history()`; must be `> 0` (`GameError::InvalidAggregateHistoryLength`). The names and reductions come from `AggregateGame::aggregate_spec()`. |
 
 ## 8. How to apply
 
-Library-only; `assemble` constructs `game_play` from `outcome` and `opts`.
+Library-only; `assemble` constructs `game_play` from `outcome` and `opts`;
+`assemble_with_aggregates(.., seed, aggregate_history_len)` constructs it with
+aggregate collection (see
+[`docs/games.md` § Public aggregates](../games.md#public-aggregates-aggregategame)).
 
 ### Library mode
 

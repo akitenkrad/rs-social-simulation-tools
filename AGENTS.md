@@ -72,8 +72,9 @@ Foundation: `socsim-core` (traits, `WorldState`, `Mechanism`, `Phase`, `AgentId`
 networks), `socsim-grid` (spatial), `socsim-packs` (bundled CLI packs),
 `socsim-mechanisms` (opinion/contagion/cultural/group catalog), `socsim-marl`
 (learnable policies), `socsim-llm` (LLM agents), `socsim-games` (normal-form
-games: stage games, decision rules, matching, payoffs; features `core` /
-`engine`, `socsim-llm` only with feature `llm`; built-in classic games and
+games: stage games, decision rules, matching, payoffs, per-step metrics
+`game_metrics`; features `core` / `engine`, `socsim-llm` only with feature
+`llm`, `socsim-metrics` only with feature `metrics`; built-in classic games and
 finite-game solvers — Nash, dominance, minimax, logit QRE — in the default
 build). Library-only data/IO:
 `socsim-results` (run dirs, CSV/JSON), `socsim-metrics` (stats/distribution/

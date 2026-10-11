@@ -1232,8 +1232,41 @@ rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
   updated and `StepRecord::action` is `None`. Worked example:
   `crates/socsim-games/examples/ipd_tournament.rs`; details in
   [`docs/games.md` § Learning rules and decision scope](../games.md#learning-rules-and-decision-scope).
-- See also [`docs/games.md`](../games.md) and the `game_match` /
-  `game_decide` / `game_play` pages under `docs/mechanisms/`.
+- **Metrics are opt-in and added by you.** `assemble` does not register
+  `game_metrics`: build `GameMetrics::new(&game, MetricsOptions::new()...)`
+  **before** `game` moves into `build_world`, then `.add_mechanism(Box::new(m))`
+  on the builder (it runs in PostStep). Columns land in table `"game"` as
+  `game.played_share.<id>`, `game.mean_payoff`, `game.payoff_sd`, … — an
+  undefined column is **missing** from the row, never NaN, so readers must
+  handle absent keys (`socsim_log::CsvRecorder` fixes a table's columns from
+  its first row, pads later gaps with NaN and drops late columns — use a
+  fan-out recorder). `<id>` is `a<k>` (pooled) or `r<role>-a<k>` (per role),
+  built from action indices — never parse labels out of column names; use
+  `metric_action_ids(&game)` + `action_label`.
+- `played_share` counts **seats**, not agents (an agent in three encounters
+  counts three times); there is no population-share column.
+- `game.regret` is on by default for two-role games; `game.eq_distance` needs
+  `EquilibriumTarget::Solve`, which solves once in `new` and fails there for
+  non-two-player or degenerate games (`GameError::Metrics`).
+- `MixedSource::Reported` needs `PlayOptions::report_mixed(true)` and a report
+  for every seated rule-driven agent — `Fixed`, `MyopicBestResponse`, LLM kinds
+  and custom rules without `mixed` report `None` and make the step fail.
+  `report_mixed(true)` with `DecisionScope::PerEncounter` is rejected by
+  `assemble`. A report written at step `t` is the **post-learning** mix for
+  step `t + 1`.
+- Public per-encounter values (`AggregateGame`) are collected only by
+  `assemble_with_aggregates(.., seed, aggregate_history_len)`; rules read
+  previous steps through `ctx.aggregate_history()` (`None` under plain
+  `assemble` or `assemble_with_llm`).
+- `MetricsOptions::stop(tol, window)` ends `sim.run()` early (earliest at
+  `t = window + 1`); check `sim.stop_requested()` / the last recorded `t`
+  rather than assuming `t_max` steps ran. `game.action_entropy` exists only with
+  the `metrics` feature (and pooled ids).
+- `GameMetrics::describe()` gives `(pattern, meaning)` pairs to paste into a
+  runvault `runvault.toml` (`[[metric_patterns]]` / `[metrics."…"]`); do not add
+  a runvault dependency to the crate.
+- See also [`docs/games.md`](../games.md) (§ Metrics) and the `game_match` /
+  `game_decide` / `game_play` / `game_metrics` pages under `docs/mechanisms/`.
 - LLM-driven players: see [Recipe 8b — LLM agents in a normal-form game](#recipe-8b--llm-agents-in-a-normal-form-game-socsim-games-feature-llm).
 
 ---

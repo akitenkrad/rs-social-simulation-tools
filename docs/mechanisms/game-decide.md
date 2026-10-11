@@ -22,7 +22,11 @@
   (`PerAgentRole`), or one per seat (`PerEncounter`);
 - in **Reward** it calls, for every rule-driven agent, `learn_encounter` once
   per encounter of that agent (when the rule asks for it) and then `learn_step`,
-  with this step's record and encounter outcomes.
+  with this step's record and encounter outcomes;
+- with `PlayOptions::report_mixed(true)`, at the **end of Reward** — after every
+  agent has learned — it asks each rule-driven agent's rule for its mixed
+  strategy in every role (`DecisionRule::mixed`) and stores the reports in the
+  world, where `GameWorld::reported_mixed(agent, role)` reads them.
 
 The rule objects themselves are shared code. Every agent's rule state lives in
 the world's `PolicyTable`, so the mechanism holds no state that matters for a
@@ -85,7 +89,7 @@ state, held actions, history, the pair history (when enabled) and `X`, and
 writes the chosen actions into the seats, the held actions (under `PerStep`
 only) and the rule states (`decide` may mutate its state). Reward reads the
 step's records and encounter outcomes written by `game_play` and updates the
-rule states.
+rule states; with `report_mixed`, it then writes the mixed-strategy reports.
 
 ## 4. Position in the 6-phase loop
 
@@ -108,6 +112,10 @@ Registers **Decision** and **Reward**.
   The built-in learning rules update one state per opponent in
   `learn_encounter` under `PerEncounter`, and a single global state in
   `learn_step` under the other scopes.
+  With `report_mixed`, the reports are written after all agents have learned,
+  again in sorted `AgentId` order: the report of step $t$ is the
+  **post-learning** mix that the decision of step $t+1$ will use, not the mix
+  that produced the action of step $t$.
 
 ## 5. State read/write contract
 
@@ -121,6 +129,8 @@ Registers **Decision** and **Reward**.
 | pair history | ✓ | | Decision: through `DecisionContext::pair_history` (current opponents) and `omniscient()`; exists only when a rule returns `needs_pair_history() == true`. Written by `game_play`. |
 | `PlayArena.payoffs` / `credit` | ✓ | | Reward: through `LearnContext::outcomes()`. |
 | Recorder event `game.invalid_action` | | ✓ | Only with `OnInvalidAction::Fallback`. |
+| mixed-strategy reports | | ✓ | Reward, only with `report_mixed(true)`: cleared and stamped with `t`, then one `Option<Vec<f64>>` per rule-driven agent and role from `DecisionRule::mixed`. `None` for `Held` agents, kinds of another driver, rules that return `None` and non-finite values. Field `reports` of the world (omitted from the world JSON when off); survives snapshot/resume. |
+| aggregate table | ✓ | | Decision: through `DecisionContext::aggregate_history()` (previous steps only); present only under `assemble_with_aggregates`. Written by `game_play`. |
 
 ## 6. Dependencies & ordering constraints
 
@@ -129,6 +139,12 @@ Registers **Decision** and **Reward**.
   before Reward.
 - **Downstream:** `game_play` requires every seat to hold an action; seats of
   LLM agents are filled by `game_llm_decide`, registered after `game_decide`.
+  [`game_metrics`](game-metrics.md) with `MixedSource::Reported` reads this
+  step's mixed-strategy reports in PostStep.
+- **Mixed reports vs decision scope:** `report_mixed(true)` together with
+  `DecisionScope::PerEncounter` is rejected by `assemble`
+  (`GameError::Metrics`) — the learning rules keep one state per opponent there,
+  and `mixed` reads the single global state.
 - **Decision scope vs matching:** under `PerStep` an agent must hold one role
   per step. `RoundRobin` rejects `PerStep` at `assemble` when it would seat an
   agent in two roles; otherwise `game_decide` stops the step with
@@ -147,6 +163,7 @@ Registers **Decision** and **Reward**.
 | `rules: RuleBook<G, X>` | — | structural | Passed to `assemble`; kinds registered by name. |
 | `opts.on_invalid_action` | `OnInvalidAction::Stop` | policy | `Stop`: an invalid action fails the step. `Fallback(map)`: replace by the kind's fallback action and record `game.invalid_action`. |
 | `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep` / `PerAgentRole` / `PerEncounter`; also passed to `game_match` and `game_play`. LLM decisions support `PerStep` only. |
+| `opts.report_mixed` | `false` | observation | Write post-learning mixed-strategy reports at the end of Reward. Not with `PerEncounter`. What each built-in rule reports is listed in [`docs/games.md` § Reporting mixed strategies](../games.md#reporting-mixed-strategies). |
 
 The `Fallback` map covers this mechanism's kinds only; LLM kinds are not
 listed there (their fallback is the `RetryProtocol` of the LLM rule).
@@ -197,7 +214,9 @@ consumed in activation order and, within one agent, in decision-unit order.
 with `0 < generosity < 1`) draw one uniform `f64` per decision and walk the
 cumulative probabilities in action-index order; random tie-breaking
 (`FictitiousPlay`, `MyopicBestResponse`) draws one `gen_range` over the tied
-actions. `learn_encounter` and `learn_step` receive no RNG. Rule-state
+actions. `learn_encounter` and `learn_step` receive no RNG, and neither does `mixed`:
+reporting draws nothing and changes no rule state, so it does not change a
+run. Rule-state
 initialisation (in `build_world`) uses `derive_seed(seed, &[3, agent, generation])`,
 and `derive_seed(seed, &[2])` is stored as the world's `decision_root`; both
 labels are reserved. Learning visits agents in sorted `AgentId` order, and
