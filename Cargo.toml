@@ -64,3 +64,24 @@ clap = { version = "4", features = ["derive"] }
 # Neural-network policies (MARL, Phase 6).
 # Pure-Rust NdArray backend + autodiff; no system BLAS/CUDA dependency.
 burn = { version = "0.21", default-features = false, features = ["ndarray", "autodiff", "std"] }
+
+# The population-dynamics statistical tests in socsim-games draw ~10^9 seeded
+# random numbers. In an unoptimised build that takes over ten minutes, most of
+# it in the ChaCha20 stream and in socsim-games' own loops, where the generic
+# RNG code is instantiated. Optimising just these crates brings `cargo test`
+# back to release speed. Debug assertions and overflow checks stay on, and no
+# result changes.
+[profile.dev.package.socsim-games]
+opt-level = 3
+
+[profile.dev.package.socsim-rng]
+opt-level = 3
+
+[profile.dev.package.rand_chacha]
+opt-level = 3
+
+[profile.dev.package.ppv-lite86]
+opt-level = 3
+
+[profile.dev.package.rand_core]
+opt-level = 3

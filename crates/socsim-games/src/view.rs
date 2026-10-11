@@ -87,6 +87,14 @@ impl<'a, G: StageGame, X: ExperimentState> DecisionContext<'a, G, X> {
             .map(PeerHistory::new)
     }
 
+    /// Returns the held action of a peer in this decision unit.
+    pub fn peer_held(&self, peer: AgentId) -> Option<&'a G::Action> {
+        self.opponents
+            .contains(&peer)
+            .then(|| self.held.get(peer.0 as usize))
+            .flatten()
+    }
+
     /// Returns pair-specific history for an opponent in this decision unit.
     ///
     /// `None` means that pair history was not enabled for this world, or that

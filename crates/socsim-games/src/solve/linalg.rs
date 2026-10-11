@@ -154,9 +154,79 @@ fn residual_norm(matrix: &[Vec<f64>], rhs: &[f64], solution: &[f64]) -> f64 {
     })
 }
 
+pub(crate) fn symmetric_eigenvalues(matrix: &[Vec<f64>], tolerance: f64) -> Vec<f64> {
+    let dimension = matrix.len();
+    assert!(
+        matrix.iter().all(|row| row.len() == dimension),
+        "matrix is not square"
+    );
+    assert!(
+        tolerance.is_finite() && tolerance > 0.0,
+        "tolerance must be finite and positive"
+    );
+    if dimension < 2 {
+        return matrix.first().map_or_else(Vec::new, |row| vec![row[0]]);
+    }
+
+    let mut diagonalized = matrix.to_vec();
+    let max_iterations = 100 * dimension * dimension;
+    for _ in 0..max_iterations {
+        let mut pivot_row = 0;
+        let mut pivot_column = 1;
+        let mut largest = diagonalized[pivot_row][pivot_column].abs();
+        for (row, values) in diagonalized.iter().enumerate() {
+            for (column, value) in values.iter().enumerate().skip(row + 1) {
+                if value.abs() > largest {
+                    largest = value.abs();
+                    pivot_row = row;
+                    pivot_column = column;
+                }
+            }
+        }
+        if largest <= tolerance {
+            break;
+        }
+
+        let app = diagonalized[pivot_row][pivot_row];
+        let aqq = diagonalized[pivot_column][pivot_column];
+        let apq = diagonalized[pivot_row][pivot_column];
+        let tau = (aqq - app) / (2.0 * apq);
+        let tangent = if tau >= 0.0 {
+            1.0 / (tau + tau.hypot(1.0))
+        } else {
+            -1.0 / (-tau + tau.hypot(1.0))
+        };
+        let cosine = 1.0 / (1.0 + tangent * tangent).sqrt();
+        let sine = tangent * cosine;
+
+        #[allow(clippy::needless_range_loop)]
+        for index in 0..dimension {
+            if index == pivot_row || index == pivot_column {
+                continue;
+            }
+            let aip = diagonalized[index][pivot_row];
+            let aiq = diagonalized[index][pivot_column];
+            let rotated_p = cosine * aip - sine * aiq;
+            let rotated_q = sine * aip + cosine * aiq;
+            diagonalized[index][pivot_row] = rotated_p;
+            diagonalized[pivot_row][index] = rotated_p;
+            diagonalized[index][pivot_column] = rotated_q;
+            diagonalized[pivot_column][index] = rotated_q;
+        }
+        diagonalized[pivot_row][pivot_row] = app - tangent * apq;
+        diagonalized[pivot_column][pivot_column] = aqq + tangent * apq;
+        diagonalized[pivot_row][pivot_column] = 0.0;
+        diagonalized[pivot_column][pivot_row] = 0.0;
+    }
+
+    (0..dimension)
+        .map(|index| diagonalized[index][index])
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::solve_least_squares;
+    use super::{solve_least_squares, symmetric_eigenvalues};
 
     const EPSILON: f64 = 1e-10;
 
@@ -236,5 +306,30 @@ mod tests {
         for value in multiply(&matrix, &solved.nullspace[0]) {
             assert_close(value, 0.0);
         }
+    }
+
+    #[test]
+    fn symmetric_eigenvalues_match_diagonal_and_coupled_matrices() {
+        let mut diagonal = symmetric_eigenvalues(
+            &[
+                vec![3.0, 0.0, 0.0],
+                vec![0.0, -2.0, 0.0],
+                vec![0.0, 0.0, 1.0],
+            ],
+            1e-14,
+        );
+        diagonal.sort_by(f64::total_cmp);
+        assert_eq!(diagonal, vec![-2.0, 1.0, 3.0]);
+
+        let mut coupled = symmetric_eigenvalues(&[vec![2.0, 1.0], vec![1.0, 2.0]], 1e-14);
+        coupled.sort_by(f64::total_cmp);
+        assert_close(coupled[0], 1.0);
+        assert_close(coupled[1], 3.0);
+    }
+
+    #[test]
+    fn symmetric_eigenvalues_handle_empty_and_one_dimensional_inputs() {
+        assert!(symmetric_eigenvalues(&[], 1e-14).is_empty());
+        assert_eq!(symmetric_eigenvalues(&[vec![4.25]], 1e-14), vec![4.25]);
     }
 }

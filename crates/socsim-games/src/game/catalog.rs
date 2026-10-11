@@ -1,9 +1,13 @@
 use std::borrow::Cow;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{ActionError, FiniteGame, MatrixGame, NormalFormGame, StageGame};
+use super::{
+    ActionError, AggregateGame, AggregateReduce, AggregateSpec, AnonymousGame, CommonActionSpace,
+    FiniteGame, MatrixGame, NormalFormGame, StageGame,
+};
 
 macro_rules! impl_two_action_game {
     ($game:ty, $labels:expr, $payoff:expr) => {
@@ -443,6 +447,395 @@ impl FiniteGame for RockPaperScissors {
     }
 }
 
+impl CommonActionSpace for PrisonersDilemma {}
+impl CommonActionSpace for BattleOfSexes {}
+impl CommonActionSpace for MatchingPennies {}
+impl CommonActionSpace for StagHunt {}
+impl CommonActionSpace for RockPaperScissors {}
+
+#[derive(Deserialize)]
+struct HawkDoveRepr {
+    v: f64,
+    c: f64,
+}
+
+/// The two-player hawk-dove game with actions `H` and `D`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "HawkDoveRepr")]
+pub struct HawkDove {
+    v: f64,
+    c: f64,
+}
+
+impl TryFrom<HawkDoveRepr> for HawkDove {
+    type Error = CatalogError;
+
+    fn try_from(value: HawkDoveRepr) -> Result<Self, Self::Error> {
+        Self::new(value.v, value.c)
+    }
+}
+
+impl HawkDove {
+    /// Constructs a hawk-dove game with positive value and conflict cost.
+    pub fn new(v: f64, c: f64) -> Result<Self, CatalogError> {
+        ensure_finite(&[v, c])?;
+        if !(v > 0.0 && c > 0.0) {
+            return Err(CatalogError::Condition("V > 0 and C > 0".into()));
+        }
+        Ok(Self { v, c })
+    }
+
+    /// Returns the ESS share of hawks.
+    pub fn hawk_share_ess(&self) -> f64 {
+        if self.v < self.c {
+            self.v / self.c
+        } else {
+            1.0
+        }
+    }
+
+    /// Converts this game to its matrix representation.
+    pub fn to_matrix(&self) -> MatrixGame {
+        let a = [[(self.v - self.c) / 2.0, self.v], [0.0, self.v / 2.0]];
+        matrix_2x2(
+            a,
+            [[a[0][0], a[1][0]], [a[0][1], a[1][1]]],
+            [["H", "D"], ["H", "D"]],
+        )
+    }
+
+    fn payoff_for(&self, own: usize, other: usize) -> f64 {
+        [[(self.v - self.c) / 2.0, self.v], [0.0, self.v / 2.0]][own][other]
+    }
+}
+
+impl StageGame for HawkDove {
+    type Action = usize;
+
+    fn n_roles(&self) -> usize {
+        2
+    }
+
+    fn check_action(&self, role: usize, action: &usize) -> Result<(), ActionError> {
+        check_catalog_action(role, *action, 2)
+    }
+}
+
+impl NormalFormGame for HawkDove {
+    fn payoff(&self, role: usize, profile: &[usize]) -> f64 {
+        self.payoff_for(profile[role], profile[1 - role])
+    }
+}
+
+impl FiniteGame for HawkDove {
+    fn n_actions(&self, _role: usize) -> usize {
+        2
+    }
+
+    fn action_label(&self, _role: usize, action: usize) -> Cow<'_, str> {
+        Cow::Borrowed(["H", "D"][action])
+    }
+
+    fn is_symmetric(&self) -> bool {
+        true
+    }
+}
+
+impl AnonymousGame for HawkDove {
+    fn payoff_by_counts(&self, a: usize, counts_others: &[usize]) -> f64 {
+        counts_others
+            .iter()
+            .enumerate()
+            .map(|(other, &count)| count as f64 * self.payoff_for(a, other))
+            .sum()
+    }
+}
+
+impl CommonActionSpace for HawkDove {}
+
+#[derive(Deserialize)]
+struct ElFarolRepr {
+    n: usize,
+    capacity: usize,
+}
+
+/// The El Farol attendance game with actions `attend` and `stay`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ElFarolRepr")]
+pub struct ElFarol {
+    n: usize,
+    capacity: usize,
+}
+
+impl TryFrom<ElFarolRepr> for ElFarol {
+    type Error = CatalogError;
+
+    fn try_from(value: ElFarolRepr) -> Result<Self, Self::Error> {
+        Self::new(value.n, value.capacity)
+    }
+}
+
+impl ElFarol {
+    /// Constructs an attendance game with a non-empty, non-universal capacity.
+    pub fn new(n: usize, capacity: usize) -> Result<Self, CatalogError> {
+        if n < 2 || capacity == 0 || capacity >= n {
+            return Err(CatalogError::Condition(
+                "n >= 2 and 0 < capacity < n".into(),
+            ));
+        }
+        Ok(Self { n, capacity })
+    }
+}
+
+impl StageGame for ElFarol {
+    type Action = usize;
+
+    fn n_roles(&self) -> usize {
+        self.n
+    }
+
+    fn check_action(&self, role: usize, action: &usize) -> Result<(), ActionError> {
+        check_population_action(role, *action, self.n)
+    }
+}
+
+impl NormalFormGame for ElFarol {
+    fn payoff(&self, role: usize, profile: &[usize]) -> f64 {
+        let own = profile[role];
+        if own == 1 {
+            return 0.0;
+        }
+        if profile.iter().filter(|&&action| action == 0).count() <= self.capacity {
+            1.0
+        } else {
+            -1.0
+        }
+    }
+}
+
+impl FiniteGame for ElFarol {
+    fn n_actions(&self, _role: usize) -> usize {
+        2
+    }
+
+    fn action_label(&self, _role: usize, action: usize) -> Cow<'_, str> {
+        Cow::Borrowed(["attend", "stay"][action])
+    }
+
+    fn is_symmetric(&self) -> bool {
+        true
+    }
+}
+
+impl AnonymousGame for ElFarol {
+    fn payoff_by_counts(&self, a: usize, counts_others: &[usize]) -> f64 {
+        if a == 1 {
+            0.0
+        } else if counts_others[0] < self.capacity {
+            1.0
+        } else {
+            -1.0
+        }
+    }
+}
+
+impl AggregateGame for ElFarol {
+    fn aggregate_spec(&self) -> &[AggregateSpec] {
+        attendance_spec()
+    }
+
+    fn aggregate_into(&self, profile: &[usize], out: &mut [f64]) {
+        out[0] = profile.iter().filter(|&&action| action == 0).count() as f64;
+    }
+}
+
+impl CommonActionSpace for ElFarol {}
+
+#[derive(Deserialize)]
+struct MinorityGameRepr {
+    n: usize,
+}
+
+/// An odd-player minority game with two unlabeled sides.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "MinorityGameRepr")]
+pub struct MinorityGame {
+    n: usize,
+}
+
+impl TryFrom<MinorityGameRepr> for MinorityGame {
+    type Error = CatalogError;
+
+    fn try_from(value: MinorityGameRepr) -> Result<Self, Self::Error> {
+        Self::new(value.n)
+    }
+}
+
+impl MinorityGame {
+    /// Constructs a two-action minority game for an odd population.
+    pub fn new(n: usize) -> Result<Self, CatalogError> {
+        if n < 3 || n.is_multiple_of(2) {
+            return Err(CatalogError::Condition("n >= 3 and n is odd".into()));
+        }
+        Ok(Self { n })
+    }
+}
+
+impl StageGame for MinorityGame {
+    type Action = usize;
+
+    fn n_roles(&self) -> usize {
+        self.n
+    }
+
+    fn check_action(&self, role: usize, action: &usize) -> Result<(), ActionError> {
+        check_population_action(role, *action, self.n)
+    }
+}
+
+impl NormalFormGame for MinorityGame {
+    fn payoff(&self, role: usize, profile: &[usize]) -> f64 {
+        let own = profile[role];
+        let own_count = profile.iter().filter(|&&action| action == own).count();
+        if own_count < self.n - own_count {
+            1.0
+        } else {
+            0.0
+        }
+    }
+}
+
+impl FiniteGame for MinorityGame {
+    fn n_actions(&self, _role: usize) -> usize {
+        2
+    }
+
+    fn is_symmetric(&self) -> bool {
+        true
+    }
+}
+
+impl AnonymousGame for MinorityGame {
+    fn payoff_by_counts(&self, a: usize, counts_others: &[usize]) -> f64 {
+        if counts_others[a] + 1 < counts_others[1 - a] {
+            1.0
+        } else {
+            0.0
+        }
+    }
+}
+
+impl AggregateGame for MinorityGame {
+    fn aggregate_spec(&self) -> &[AggregateSpec] {
+        attendance_spec()
+    }
+
+    fn aggregate_into(&self, profile: &[usize], out: &mut [f64]) {
+        out[0] = profile.iter().filter(|&&action| action == 0).count() as f64;
+    }
+}
+
+impl CommonActionSpace for MinorityGame {}
+
+#[derive(Deserialize)]
+struct PublicGoodsFiniteRepr {
+    k: usize,
+    r: f64,
+    cost: f64,
+}
+
+/// A finite public-goods game with actions `C` and `D`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "PublicGoodsFiniteRepr")]
+pub struct PublicGoodsFinite {
+    k: usize,
+    r: f64,
+    cost: f64,
+}
+
+impl TryFrom<PublicGoodsFiniteRepr> for PublicGoodsFinite {
+    type Error = CatalogError;
+
+    fn try_from(value: PublicGoodsFiniteRepr) -> Result<Self, Self::Error> {
+        Self::new(value.k, value.r, value.cost)
+    }
+}
+
+impl PublicGoodsFinite {
+    /// Constructs a finite public-goods game.
+    pub fn new(k: usize, r: f64, cost: f64) -> Result<Self, CatalogError> {
+        ensure_finite(&[r, cost])?;
+        if k < 2 || !(r > 0.0 && cost > 0.0) {
+            return Err(CatalogError::Condition(
+                "k >= 2, r > 0, and cost > 0".into(),
+            ));
+        }
+        Ok(Self { k, r, cost })
+    }
+
+    fn payoff_with_contributors(&self, action: usize, contributors: usize) -> f64 {
+        let share = self.r * self.cost * contributors as f64 / self.k as f64;
+        if action == 0 {
+            share - self.cost
+        } else {
+            share
+        }
+    }
+}
+
+impl StageGame for PublicGoodsFinite {
+    type Action = usize;
+
+    fn n_roles(&self) -> usize {
+        self.k
+    }
+
+    fn check_action(&self, role: usize, action: &usize) -> Result<(), ActionError> {
+        check_population_action(role, *action, self.k)
+    }
+}
+
+impl NormalFormGame for PublicGoodsFinite {
+    fn payoff(&self, role: usize, profile: &[usize]) -> f64 {
+        self.payoff_with_contributors(
+            profile[role],
+            profile.iter().filter(|&&action| action == 0).count(),
+        )
+    }
+}
+
+impl FiniteGame for PublicGoodsFinite {
+    fn n_actions(&self, _role: usize) -> usize {
+        2
+    }
+
+    fn action_label(&self, _role: usize, action: usize) -> Cow<'_, str> {
+        Cow::Borrowed(["C", "D"][action])
+    }
+
+    fn is_symmetric(&self) -> bool {
+        true
+    }
+}
+
+impl AnonymousGame for PublicGoodsFinite {
+    fn payoff_by_counts(&self, a: usize, counts_others: &[usize]) -> f64 {
+        self.payoff_with_contributors(a, counts_others[0] + usize::from(a == 0))
+    }
+}
+
+impl CommonActionSpace for PublicGoodsFinite {}
+
+fn attendance_spec() -> &'static [AggregateSpec] {
+    static SPEC: OnceLock<[AggregateSpec; 1]> = OnceLock::new();
+    SPEC.get_or_init(|| {
+        let Ok(spec) = AggregateSpec::new("attendance", AggregateReduce::Sum) else {
+            unreachable!("the built-in attendance aggregate name is valid")
+        };
+        [spec]
+    })
+}
+
 fn ensure_finite(values: &[f64]) -> Result<(), CatalogError> {
     if values.iter().all(|value| value.is_finite()) {
         Ok(())
@@ -468,6 +861,16 @@ fn check_catalog_action(role: usize, action: usize, n_actions: usize) -> Result<
         return Err(ActionError::InvalidRole { role });
     }
     if action >= n_actions {
+        return Err(ActionError::InvalidAction { role, action });
+    }
+    Ok(())
+}
+
+fn check_population_action(role: usize, action: usize, n_roles: usize) -> Result<(), ActionError> {
+    if role >= n_roles {
+        return Err(ActionError::InvalidRole { role });
+    }
+    if action >= 2 {
         return Err(ActionError::InvalidAction { role, action });
     }
     Ok(())

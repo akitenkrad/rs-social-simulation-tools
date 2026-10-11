@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use socsim_core::{AgentId, Mechanism, Phase, Recorder, SocsimError, StepContext};
 
@@ -12,6 +12,9 @@ pub struct RuleDriver<G: StageGame, X: ExperimentState> {
     on_invalid_action: OnInvalidAction<G::Action>,
     decision_scope: DecisionScope,
     report_mixed: bool,
+    allows_multi_role_per_step: bool,
+    held_role_marks: Vec<u64>,
+    held_role_generation: u32,
 }
 
 impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
@@ -20,12 +23,16 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
         on_invalid_action: OnInvalidAction<G::Action>,
         decision_scope: DecisionScope,
         report_mixed: bool,
+        allows_multi_role_per_step: bool,
     ) -> Self {
         Self {
             rules,
             on_invalid_action,
             decision_scope,
             report_mixed,
+            allows_multi_role_per_step,
+            held_role_marks: Vec::new(),
+            held_role_generation: 0,
         }
     }
 
@@ -80,7 +87,7 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
         Ok(action)
     }
 
-    fn decide(&self, step: &mut StepContext<'_, GameWorld<G, X>>) -> socsim_core::Result<()> {
+    fn decide(&mut self, step: &mut StepContext<'_, GameWorld<G, X>>) -> socsim_core::Result<()> {
         let GameWorld {
             clock,
             ids,
@@ -95,48 +102,77 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
             ..
         } = step.world;
 
-        let mut seats_by_agent = vec![Vec::new(); ids.len()];
+        let check_held_roles =
+            self.decision_scope == DecisionScope::PerStep && !self.allows_multi_role_per_step;
+        let mut current_held_role_generation = None;
+        let mut active_seats = None::<HashMap<AgentId, Vec<usize>>>;
         for (seat_index, &agent) in plays.seats.iter().enumerate() {
             let agent_index = usize::try_from(agent.0)
                 .map_err(|_| SocsimError::Mechanism("agent index exceeds usize".to_owned()))?;
-            let seats = seats_by_agent
-                .get_mut(agent_index)
-                .ok_or_else(|| SocsimError::Mechanism(format!("unknown agent {}", agent.0)))?;
-            seats.push(seat_index);
-        }
-
-        for &agent in step.agent_order {
-            let agent_index = usize::try_from(agent.0)
-                .map_err(|_| SocsimError::Mechanism("agent index exceeds usize".to_owned()))?;
-            let seat_indices = seats_by_agent
-                .get(agent_index)
-                .ok_or_else(|| SocsimError::Mechanism(format!("unknown agent {}", agent.0)))?;
-            if seat_indices.is_empty() {
-                continue;
-            }
             let state_slot = *policies
                 .slot
                 .get(agent_index)
                 .ok_or_else(|| SocsimError::Mechanism(format!("unknown agent {}", agent.0)))?;
-
             if state_slot == PolicyTable::<X::PolicyState>::HELD {
-                if self.decision_scope == DecisionScope::PerStep
-                    && seat_indices
-                        .iter()
-                        .map(|seat_index| seat_index % plays.n_roles)
-                        .collect::<BTreeSet<_>>()
-                        .len()
-                        > 1
+                let role = seat_index % plays.n_roles;
+                if check_held_roles {
+                    let generation = *current_held_role_generation.get_or_insert_with(|| {
+                        if self.held_role_marks.len() < ids.len() {
+                            self.held_role_marks.resize(ids.len(), 0);
+                        }
+                        self.held_role_generation = self.held_role_generation.wrapping_add(1);
+                        if self.held_role_generation == 0 {
+                            self.held_role_marks.fill(0);
+                            self.held_role_generation = 1;
+                        }
+                        self.held_role_generation
+                    });
+                    let role = u32::try_from(role).map_err(|_| {
+                        SocsimError::Mechanism("role index exceeds u32::MAX".to_owned())
+                    })?;
+                    let mark = &mut self.held_role_marks[agent_index];
+                    let marked_generation = (*mark >> 32) as u32;
+                    if marked_generation == generation {
+                        if *mark as u32 != role {
+                            return Err(Self::mechanism_error(RuleError::AmbiguousRole {
+                                agent: agent.0,
+                            }));
+                        }
+                    } else {
+                        *mark = (u64::from(generation) << 32) | u64::from(role);
+                    }
+                }
+                if self.decision_scope == DecisionScope::PerStep && self.allows_multi_role_per_step
                 {
-                    return Err(Self::mechanism_error(RuleError::AmbiguousRole {
-                        agent: agent.0,
-                    }));
+                    game.check_action(role, &held[agent_index])
+                        .map_err(|error| {
+                            Self::mechanism_error(RuleError::InvalidAction(error.to_string()))
+                        })?;
                 }
-                for &seat_index in seat_indices {
-                    plays.actions[seat_index] = Some(held[agent_index].clone());
-                }
-                continue;
+                plays.actions[seat_index] = Some(held[agent_index].clone());
+            } else {
+                active_seats
+                    .get_or_insert_with(HashMap::new)
+                    .entry(agent)
+                    .or_default()
+                    .push(seat_index);
             }
+        }
+
+        let Some(active_seats) = active_seats else {
+            return Ok(());
+        };
+        for &agent in step.agent_order {
+            let agent_index = usize::try_from(agent.0)
+                .map_err(|_| SocsimError::Mechanism("agent index exceeds usize".to_owned()))?;
+            let Some(seat_indices) = active_seats.get(&agent) else {
+                continue;
+            };
+            let state_slot = *policies
+                .slot
+                .get(agent_index)
+                .ok_or_else(|| SocsimError::Mechanism(format!("unknown agent {}", agent.0)))?;
+            debug_assert_ne!(state_slot, PolicyTable::<X::PolicyState>::HELD);
 
             let state_index = state_slot as usize;
             let kind_id = policies.kind_of[state_index];
@@ -145,6 +181,7 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
                 continue;
             };
             if self.decision_scope == DecisionScope::PerStep
+                && !self.allows_multi_role_per_step
                 && seat_indices
                     .iter()
                     .map(|seat_index| seat_index % plays.n_roles)
@@ -167,11 +204,27 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
                     let start = encounter_index * plays.n_roles;
                     let end = start + plays.n_roles;
                     let role = seat_index % plays.n_roles;
-                    let opponents = plays.seats[start..end]
-                        .iter()
-                        .copied()
-                        .filter(|seat| *seat != agent)
-                        .collect();
+                    let opponents = if self.allows_multi_role_per_step {
+                        let mut opponents = BTreeSet::new();
+                        for &own_seat_index in seat_indices {
+                            let own_encounter_index = own_seat_index / plays.n_roles;
+                            let own_start = own_encounter_index * plays.n_roles;
+                            let own_end = own_start + plays.n_roles;
+                            opponents.extend(
+                                plays.seats[own_start..own_end]
+                                    .iter()
+                                    .copied()
+                                    .filter(|seat| *seat != agent),
+                            );
+                        }
+                        opponents.into_iter().collect()
+                    } else {
+                        plays.seats[start..end]
+                            .iter()
+                            .copied()
+                            .filter(|seat| *seat != agent)
+                            .collect()
+                    };
                     let context = DecisionContext {
                         t: clock.t(),
                         me: agent,
@@ -190,15 +243,31 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
                     let action = rule
                         .decide(state, &context, step.rng)
                         .map_err(Self::mechanism_error)?;
-                    let action = self.validate_action(
-                        clock.t(),
-                        agent,
-                        role,
-                        kind,
-                        action,
-                        game,
-                        step.recorder,
-                    )?;
+                    let action = if self.allows_multi_role_per_step {
+                        let mut action = action;
+                        for &own_seat_index in seat_indices {
+                            action = self.validate_action(
+                                clock.t(),
+                                agent,
+                                own_seat_index % plays.n_roles,
+                                kind,
+                                action,
+                                game,
+                                step.recorder,
+                            )?;
+                        }
+                        action
+                    } else {
+                        self.validate_action(
+                            clock.t(),
+                            agent,
+                            role,
+                            kind,
+                            action,
+                            game,
+                            step.recorder,
+                        )?
+                    };
                     held[agent_index] = action.clone();
                     for &seat_index in seat_indices {
                         plays.actions[seat_index] = Some(action.clone());

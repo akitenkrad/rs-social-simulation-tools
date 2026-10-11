@@ -14,6 +14,7 @@ where
 {
     matching: M,
     decision_scope: DecisionScope,
+    implicit: bool,
     marker: PhantomData<fn() -> (G, X)>,
 }
 
@@ -23,10 +24,11 @@ where
     X: ExperimentState,
     M: Matching<G, X>,
 {
-    pub(crate) fn new(matching: M, decision_scope: DecisionScope) -> Self {
+    pub(crate) fn new(matching: M, decision_scope: DecisionScope, implicit: bool) -> Self {
         Self {
             matching,
             decision_scope,
+            implicit,
             marker: PhantomData,
         }
     }
@@ -56,8 +58,12 @@ where
                 step.world.plays.clear();
                 step.world.payoff.fill(0.0);
                 step.world.n_played.fill(0);
+                step.world.played_counts = None;
             }
             Phase::Decision => {
+                if self.implicit {
+                    return Ok(());
+                }
                 let GameWorld {
                     clock,
                     ids,

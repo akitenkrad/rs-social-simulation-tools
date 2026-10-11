@@ -1,5 +1,7 @@
 use socsim_core::AgentId;
 
+pub(crate) mod kernel;
+
 use crate::{EncounterRef, ExperimentState, NormalFormGame, StageGame, Topology};
 
 pub trait OutcomeRule<G: StageGame, X: ExperimentState>: Send + Sync {

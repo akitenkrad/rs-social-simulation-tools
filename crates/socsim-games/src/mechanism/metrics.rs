@@ -43,6 +43,7 @@ pub struct MetricsOptions {
     equilibrium: EquilibriumTarget,
     stop_tol: Option<f64>,
     stop_window: u32,
+    population_share: bool,
     #[cfg(feature = "metrics")]
     action_entropy: bool,
 }
@@ -57,6 +58,7 @@ impl MetricsOptions {
             equilibrium: EquilibriumTarget::None,
             stop_tol: None,
             stop_window: 0,
+            population_share: false,
             #[cfg(feature = "metrics")]
             action_entropy: true,
         }
@@ -100,6 +102,18 @@ impl MetricsOptions {
         self
     }
 
+    /// Enables or disables `game.population_share.a<k>`, the share of all
+    /// agents holding action `k` at `PostStep`.
+    ///
+    /// The default is `false`. When population dynamics are assembled, the
+    /// held actions at `PostStep` are the updated actions used in the next
+    /// step, while `played_share` describes the actions played before the
+    /// update. Every role must have the same number of actions.
+    pub fn population_share(mut self, on: bool) -> Self {
+        self.population_share = on;
+        self
+    }
+
     /// Enables or disables Shannon entropy of the pooled played-action shares.
     #[cfg(feature = "metrics")]
     pub fn action_entropy(mut self, on: bool) -> Self {
@@ -137,6 +151,7 @@ pub struct GameMetrics<G: FiniteGame> {
     equilibria: Option<Vec<Vec<Vec<f64>>>>,
     stop_tol: Option<f64>,
     stop_window: u32,
+    population_columns: Option<Vec<String>>,
     #[cfg(feature = "metrics")]
     action_entropy: bool,
     marker: PhantomData<fn() -> G>,
@@ -226,6 +241,22 @@ impl<G: FiniteGame> GameMetrics<G> {
             }
         };
 
+        let population_columns = if options.population_share {
+            crate::game::check_common_action_space(game).map_err(|_| {
+                GameError::Metrics(
+                    "population_share requires every role to have the same number of actions"
+                        .to_owned(),
+                )
+            })?;
+            Some(
+                (0..game.n_actions(0))
+                    .map(|action| format!("population_share.a{action}"))
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
         Ok(Self {
             expected_actions,
             action_columns,
@@ -237,6 +268,7 @@ impl<G: FiniteGame> GameMetrics<G> {
             equilibria,
             stop_tol: options.stop_tol,
             stop_window: options.stop_window,
+            population_columns,
             #[cfg(feature = "metrics")]
             action_entropy: options.action_entropy,
             marker: PhantomData,
@@ -319,6 +351,13 @@ impl<G: FiniteGame> GameMetrics<G> {
                 "Shannon entropy in nats of the pooled played-action shares.".to_owned(),
             ));
         }
+        if self.population_columns.is_some() {
+            descriptions.push((
+                "game.population_share.a{k}".to_owned(),
+                "Share of all agents holding action index k at the end of the step, after any population dynamics; the denominator includes every agent."
+                    .to_owned(),
+            ));
+        }
         descriptions.push((
             "game.aggregate.{name}".to_owned(),
             "Public game aggregate for the completed step; present only when the simulation was assembled with aggregates."
@@ -353,6 +392,32 @@ impl<G: FiniteGame> GameMetrics<G> {
         Ok(())
     }
 
+    /// Returns the per-role played-action counts recorded by the implicit
+    /// play path, when the step was evaluated without a play arena.
+    fn implicit_counts<'w, X: ExperimentState>(
+        &self,
+        world: &'w GameWorld<G, X>,
+    ) -> socsim_core::Result<Option<&'w [Vec<usize>]>> {
+        if !world.plays.actions.is_empty() {
+            return Ok(None);
+        }
+        let Some(played) = world.played_counts.as_ref() else {
+            return Ok(None);
+        };
+        if played.by_role().len() != self.expected_actions.len()
+            || played
+                .by_role()
+                .iter()
+                .zip(&self.expected_actions)
+                .any(|(counts, &expected)| counts.len() > expected)
+        {
+            return Err(SocsimError::Mechanism(
+                "game_metrics found inconsistent implicit played-action counts".to_owned(),
+            ));
+        }
+        Ok(Some(played.by_role()))
+    }
+
     fn push_action_metrics<'a, X: ExperimentState>(
         &'a self,
         world: &GameWorld<G, X>,
@@ -360,7 +425,63 @@ impl<G: FiniteGame> GameMetrics<G> {
     ) -> socsim_core::Result<Option<Vec<f64>>> {
         let seat_count = world.plays.actions.len();
         if seat_count == 0 {
-            return Ok(None);
+            let Some(played) = world.played_counts.as_ref() else {
+                return Ok(None);
+            };
+            if played.by_role().len() != self.expected_actions.len()
+                || played
+                    .by_role()
+                    .iter()
+                    .zip(&self.expected_actions)
+                    .any(|(counts, &expected)| counts.len() > expected)
+            {
+                return Err(SocsimError::Mechanism(
+                    "game_metrics found inconsistent implicit played-action counts".to_owned(),
+                ));
+            }
+            if played.total() == 0 {
+                return Ok(None);
+            }
+            let role_seats: Vec<_> = played
+                .by_role()
+                .iter()
+                .map(|counts| counts.iter().sum::<usize>())
+                .collect();
+            let mut counts = vec![0_usize; self.action_columns.len()];
+            for (role, role_counts) in played.by_role().iter().enumerate() {
+                for (action, &count) in role_counts.iter().enumerate() {
+                    let index = match self.scheme {
+                        MetricScheme::Pooled => action,
+                        MetricScheme::PerRole => self.role_offsets[role] + action,
+                    };
+                    counts[index] += count;
+                }
+            }
+            let mut shares = Vec::with_capacity(self.action_columns.len());
+            for (column, &count) in self.action_columns.iter().zip(&counts) {
+                let denominator = match column.role {
+                    Some(role) => role_seats[role],
+                    None => played.total(),
+                };
+                if denominator != 0 {
+                    let share = count as f64 / denominator as f64;
+                    row.push((Cow::Borrowed(column.name.as_str()), share));
+                    shares.push(share);
+                }
+            }
+            if let Some(cooperate_actions) = &self.cooperate_actions {
+                let cooperation_count: usize = played
+                    .by_role()
+                    .iter()
+                    .zip(cooperate_actions)
+                    .map(|(counts, &action)| counts.get(action).copied().unwrap_or(0))
+                    .sum();
+                row.push((
+                    Cow::Borrowed("coop_rate"),
+                    cooperation_count as f64 / played.total() as f64,
+                ));
+            }
+            return Ok(Some(shares));
         }
         if world.plays.seats.len() != seat_count
             || self.expected_actions.is_empty()
@@ -469,6 +590,33 @@ impl<G: FiniteGame> GameMetrics<G> {
         let payoff_sd = (squared_deviations / payoffs.len() as f64).sqrt();
         row.push((Cow::Borrowed("mean_payoff"), mean));
         row.push((Cow::Borrowed("payoff_sd"), payoff_sd));
+        Ok(())
+    }
+
+    fn push_population_metrics<'a, X: ExperimentState>(
+        &'a self,
+        world: &GameWorld<G, X>,
+        row: &mut Vec<(Cow<'a, str>, f64)>,
+    ) -> socsim_core::Result<()> {
+        let Some(columns) = &self.population_columns else {
+            return Ok(());
+        };
+        if world.held.is_empty() {
+            return Ok(());
+        }
+        let mut counts = vec![0_usize; columns.len()];
+        for (index, &action) in world.held.iter().enumerate() {
+            let count = counts.get_mut(action).ok_or_else(|| {
+                SocsimError::Mechanism(format!(
+                    "game_metrics found held action {action} out of range for agent {index}"
+                ))
+            })?;
+            *count += 1;
+        }
+        let total = world.held.len() as f64;
+        for (column, count) in columns.iter().zip(counts) {
+            row.push((Cow::Borrowed(column.as_str()), count as f64 / total));
+        }
         Ok(())
     }
 
@@ -585,6 +733,7 @@ impl<G: FiniteGame> GameMetrics<G> {
         if self.mixed_source != MixedSource::PlayedCumulative {
             return Ok(());
         }
+        let implicit = self.implicit_counts(world)?.map(<[Vec<usize>]>::to_vec);
         let cumulative = world
             .metrics_state
             .as_mut()
@@ -594,6 +743,18 @@ impl<G: FiniteGame> GameMetrics<G> {
                     "game_metrics cumulative state was not initialized".to_owned(),
                 )
             })?;
+        if let Some(by_role) = implicit {
+            for (role, (totals, counts)) in cumulative.iter_mut().zip(&by_role).enumerate() {
+                for (action, (total, &count)) in totals.iter_mut().zip(counts).enumerate() {
+                    *total = total.checked_add(count as u64).ok_or_else(|| {
+                        SocsimError::Mechanism(format!(
+                            "game_metrics cumulative count overflowed for role {role} action {action}"
+                        ))
+                    })?;
+                }
+            }
+            return Ok(());
+        }
         for (seat, action) in world.plays.actions.iter().enumerate() {
             let role = seat % self.expected_actions.len();
             let action = action.as_ref().ok_or_else(|| {
@@ -706,7 +867,31 @@ impl<G: FiniteGame> GameMetrics<G> {
             return self.cumulative_profile(world);
         }
         if seat_count == 0 {
-            return Ok(None);
+            // The implicit play path only runs when every agent is held, so a
+            // reported profile equals the played one there as well.
+            let Some(by_role) = self.implicit_counts(world)? else {
+                return Ok(None);
+            };
+            let mut profile = Vec::with_capacity(self.expected_actions.len());
+            for (role, (counts, &n_actions)) in
+                by_role.iter().zip(&self.expected_actions).enumerate()
+            {
+                let seats: usize = counts.iter().sum();
+                if seats == 0 {
+                    return Ok(None);
+                }
+                let mut probabilities = vec![0.0; n_actions];
+                for (probability, &count) in probabilities.iter_mut().zip(counts) {
+                    *probability = count as f64 / seats as f64;
+                }
+                let strategy = MixedStrategy::new(probabilities).map_err(|error| {
+                    SocsimError::Mechanism(format!(
+                        "game_metrics produced an invalid mixed strategy for role {role}: {error}"
+                    ))
+                })?;
+                profile.push(strategy);
+            }
+            return Ok(Some(profile));
         }
 
         let mut sums = self
@@ -877,6 +1062,7 @@ where
         }
         self.push_payoff_metrics(ctx.world, &mut owned_row)?;
         self.push_aggregate_metrics(ctx.world, t, &mut owned_row)?;
+        self.push_population_metrics(ctx.world, &mut owned_row)?;
         self.ensure_metrics_state(ctx.world)?;
         self.update_cumulative(ctx.world)?;
         self.push_strategy_metrics(ctx.world, &mut owned_row)?;

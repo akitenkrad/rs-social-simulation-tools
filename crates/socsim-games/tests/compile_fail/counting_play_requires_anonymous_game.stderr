@@ -1,0 +1,33 @@
+error[E0277]: the trait bound `MatrixGame: AnonymousGame` is not satisfied
+  --> tests/compile_fail/counting_play_requires_anonymous_game.rs:29:9
+   |
+25 |     let _ = assemble_with(
+   |             ------------- required by a bound introduced by this call
+...
+29 |         counting_play(),
+   |         ^^^^^^^^^^^^^^^ the trait `AnonymousGame` is not implemented for `MatrixGame`
+   |
+help: the following other types implement trait `AnonymousGame`
+  --> src/game/catalog.rs
+   |
+   | impl AnonymousGame for HawkDove {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `HawkDove`
+...
+   | impl AnonymousGame for ElFarol {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ElFarol`
+...
+   | impl AnonymousGame for MinorityGame {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `MinorityGame`
+...
+   | impl AnonymousGame for PublicGoodsFinite {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `PublicGoodsFinite`
+   = note: required for `Counting` to implement `assemble::sealed::PlayBuild<MatrixGame, ()>`
+   = note: required for `Counting` to implement `PlayPath<MatrixGame, ()>`
+note: required by a bound in `assemble_with`
+  --> src/assemble.rs
+   |
+   | pub fn assemble_with<G, X, M, P, D>(
+   |        ------------- required by a bound in this function
+...
+   |     P: PlayPath<G, X>,
+   |        ^^^^^^^^^^^^^^ required by this bound in `assemble_with`

@@ -2,90 +2,45 @@ use std::marker::PhantomData;
 
 use socsim_core::{Mechanism, Phase, SocsimError, StepContext};
 
+use crate::outcome::kernel::{
+    fill_actions, for_each_implicit, play_counting, play_implicit_counting, play_implicit_pairwise,
+    play_pairwise, PayoffAccum,
+};
 use crate::{
-    AggregateReduce, Credit, DecisionScope, EncounterId, EncounterRef, ExperimentState, GameWorld,
+    AggregateReduce, AnonymousGame, DecisionScope, ExperimentState, GameWorld, ImplicitPattern,
     OutcomeContext, OutcomeRule, PayoffAggregation, StageGame, StepRecord,
 };
 
-type AggregateFn<G> = fn(&G, &[<G as StageGame>::Action], &mut [f64]);
+pub(crate) type AggregateFn<G> = fn(&G, &[<G as StageGame>::Action], &mut [f64]);
 
-struct AggregateCollector<G: StageGame> {
+pub(crate) struct AggregateCollector<G: StageGame> {
     reductions: Vec<AggregateReduce>,
     aggregate_into: AggregateFn<G>,
 }
 
-pub(crate) struct PlayMechanism<G, X, O>
-where
-    G: StageGame,
-    X: ExperimentState,
-    O: OutcomeRule<G, X>,
-{
-    outcome: O,
-    aggregation: PayoffAggregation,
-    decision_scope: DecisionScope,
-    aggregate: Option<AggregateCollector<G>>,
-    marker: PhantomData<fn() -> (G, X)>,
-}
-
-impl<G, X, O> PlayMechanism<G, X, O>
-where
-    G: StageGame,
-    X: ExperimentState,
-    O: OutcomeRule<G, X>,
-{
-    pub(crate) fn new(
-        outcome: O,
-        aggregation: PayoffAggregation,
-        decision_scope: DecisionScope,
-    ) -> Self {
+impl<G: StageGame> AggregateCollector<G> {
+    pub(crate) fn new(reductions: Vec<AggregateReduce>, aggregate_into: AggregateFn<G>) -> Self {
         Self {
-            outcome,
-            aggregation,
-            decision_scope,
-            aggregate: None,
-            marker: PhantomData,
+            reductions,
+            aggregate_into,
         }
     }
 
-    pub(crate) fn with_aggregates(
-        outcome: O,
-        aggregation: PayoffAggregation,
-        decision_scope: DecisionScope,
-        reductions: Vec<AggregateReduce>,
-        aggregate_into: AggregateFn<G>,
-    ) -> Self {
-        Self {
-            outcome,
-            aggregation,
-            decision_scope,
-            aggregate: Some(AggregateCollector {
-                reductions,
-                aggregate_into,
-            }),
-            marker: PhantomData,
-        }
-    }
-
-    fn record_aggregates(&self, world: &mut GameWorld<G, X>) -> socsim_core::Result<()> {
-        let Some(aggregate) = &self.aggregate else {
-            return Ok(());
-        };
-        let mut sums = vec![0.0; aggregate.reductions.len()];
-        let encounter_count = world.plays.n_encounters();
-        for encounter_index in 0..encounter_count {
-            let start = encounter_index * world.plays.n_roles;
-            let end = start + world.plays.n_roles;
-            let actions = world.plays.actions[start..end]
-                .iter()
-                .cloned()
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| SocsimError::Mechanism("unfilled action seat".to_owned()))?;
-            let mut values = vec![f64::NAN; aggregate.reductions.len()];
-            (aggregate.aggregate_into)(&world.game, &actions, &mut values);
-            for (index, value) in values.into_iter().enumerate() {
+    fn record<X: ExperimentState>(
+        &self,
+        world: &mut GameWorld<G, X>,
+        implicit: Option<ImplicitPattern>,
+    ) -> socsim_core::Result<()> {
+        let mut sums = vec![0.0; self.reductions.len()];
+        let mut encounter_count = 0_usize;
+        let mut values = vec![f64::NAN; self.reductions.len()];
+        let mut add_profile = |profile: &[G::Action]| -> socsim_core::Result<()> {
+            values.fill(f64::NAN);
+            (self.aggregate_into)(&world.game, profile, &mut values);
+            for (index, &value) in values.iter().enumerate() {
                 if !value.is_finite() {
                     return Err(SocsimError::Mechanism(format!(
-                        "non-finite aggregate value at index {index} for encounter {encounter_index}"
+                        "non-finite aggregate value at index {index} for encounter {encounter_count}"
                     )));
                 }
                 sums[index] += value;
@@ -95,8 +50,27 @@ where
                     )));
                 }
             }
+            encounter_count += 1;
+            Ok(())
+        };
+        if let Some(pattern) = implicit {
+            for_each_implicit(
+                pattern,
+                &world.topology,
+                &world.ids,
+                &world.held,
+                |_id, _seats, _credit, actions| add_profile(actions),
+            )?;
+        } else {
+            let mut actions = Vec::with_capacity(world.plays.n_roles);
+            for encounter_index in 0..world.plays.n_encounters() {
+                let start = encounter_index * world.plays.n_roles;
+                let end = start + world.plays.n_roles;
+                fill_actions(&mut actions, &world.plays.actions[start..end])?;
+                add_profile(&actions)?;
+            }
         }
-        let values = aggregate
+        let values = self
             .reductions
             .iter()
             .zip(sums)
@@ -116,11 +90,125 @@ where
     }
 }
 
-impl<G, X, O> Mechanism<GameWorld<G, X>> for PlayMechanism<G, X, O>
+pub(crate) trait KernelRunner<G: StageGame, X: ExperimentState>: Send + Sync {
+    fn materialized(
+        &self,
+        context: &OutcomeContext<'_, G, X>,
+        arena: &mut crate::PlayArena<G::Action>,
+        accum: &mut PayoffAccum<'_>,
+    ) -> socsim_core::Result<()>;
+
+    fn implicit(
+        &self,
+        pattern: ImplicitPattern,
+        context: &OutcomeContext<'_, G, X>,
+        ids: &[socsim_core::AgentId],
+        accum: &mut PayoffAccum<'_>,
+    ) -> socsim_core::Result<()>;
+}
+
+pub(crate) struct PairwiseRunner<O>(pub(crate) O);
+
+impl<G, X, O> KernelRunner<G, X> for PairwiseRunner<O>
 where
     G: StageGame,
     X: ExperimentState,
-    O: OutcomeRule<G, X> + 'static,
+    O: OutcomeRule<G, X>,
+{
+    fn materialized(
+        &self,
+        context: &OutcomeContext<'_, G, X>,
+        arena: &mut crate::PlayArena<G::Action>,
+        accum: &mut PayoffAccum<'_>,
+    ) -> socsim_core::Result<()> {
+        play_pairwise(context, &self.0, arena, accum)
+    }
+
+    fn implicit(
+        &self,
+        pattern: ImplicitPattern,
+        context: &OutcomeContext<'_, G, X>,
+        ids: &[socsim_core::AgentId],
+        accum: &mut PayoffAccum<'_>,
+    ) -> socsim_core::Result<()> {
+        play_implicit_pairwise(pattern, context, ids, &self.0, accum)
+    }
+}
+
+pub(crate) struct CountingRunner;
+
+impl<G, X> KernelRunner<G, X> for CountingRunner
+where
+    G: AnonymousGame,
+    X: ExperimentState,
+{
+    fn materialized(
+        &self,
+        context: &OutcomeContext<'_, G, X>,
+        arena: &mut crate::PlayArena<usize>,
+        accum: &mut PayoffAccum<'_>,
+    ) -> socsim_core::Result<()> {
+        play_counting(context.game(), arena, accum)
+    }
+
+    fn implicit(
+        &self,
+        pattern: ImplicitPattern,
+        context: &OutcomeContext<'_, G, X>,
+        ids: &[socsim_core::AgentId],
+        accum: &mut PayoffAccum<'_>,
+    ) -> socsim_core::Result<()> {
+        play_implicit_counting(
+            pattern,
+            context.game(),
+            context.topology(),
+            ids,
+            context.held,
+            accum,
+        )
+    }
+}
+
+pub(crate) struct PlayMechanism<G, X>
+where
+    G: StageGame,
+    X: ExperimentState,
+{
+    runner: Box<dyn KernelRunner<G, X>>,
+    aggregation: PayoffAggregation,
+    decision_scope: DecisionScope,
+    implicit: Option<ImplicitPattern>,
+    aggregate: Option<AggregateCollector<G>>,
+    marker: PhantomData<fn() -> (G, X)>,
+}
+
+impl<G, X> PlayMechanism<G, X>
+where
+    G: StageGame,
+    X: ExperimentState,
+{
+    pub(crate) fn new(
+        runner: Box<dyn KernelRunner<G, X>>,
+        aggregation: PayoffAggregation,
+        decision_scope: DecisionScope,
+        implicit: Option<ImplicitPattern>,
+        aggregate: Option<AggregateCollector<G>>,
+    ) -> Self {
+        Self {
+            runner,
+            aggregation,
+            decision_scope,
+            implicit,
+            aggregate,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<G, X> Mechanism<GameWorld<G, X>> for PlayMechanism<G, X>
+where
+    G: StageGame,
+    X: ExperimentState,
 {
     fn name(&self) -> &str {
         "game_play"
@@ -136,43 +224,28 @@ where
         step: &mut StepContext<'_, GameWorld<G, X>>,
     ) -> socsim_core::Result<()> {
         let world = &mut *step.world;
-        for encounter_index in 0..world.plays.n_encounters() {
-            let start = encounter_index * world.plays.n_roles;
-            let end = start + world.plays.n_roles;
-            let actions = world.plays.actions[start..end]
-                .iter()
-                .cloned()
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| SocsimError::Mechanism("unfilled action seat".to_owned()))?;
-            let credit = world.plays.credit[encounter_index];
-            if credit != Credit::All {
-                return Err(SocsimError::Mechanism(
-                    "Credit::Center is not supported yet".to_owned(),
-                ));
-            }
-            let seats = &world.plays.seats[start..end];
-            let encounter = EncounterRef {
-                id: EncounterId(encounter_index as u32),
-                seats,
-                credit,
-            };
-            let context = OutcomeContext {
-                t: world.clock.t(),
-                game: &world.game,
-                x: &world.x,
-                held: &world.held,
-                topology: &world.topology,
-            };
-            let mut payoffs = vec![0.0; world.plays.n_roles];
-            self.outcome
-                .outcome(&context, encounter, &actions, &mut payoffs)?;
-            world.plays.payoffs[start..end].copy_from_slice(&payoffs);
-            for (role, payoff) in payoffs.into_iter().enumerate() {
-                let agent = seats[role];
-                let index = agent.0 as usize;
-                world.payoff[index] += payoff;
-                world.n_played[index] += 1;
-            }
+        if self.implicit.is_some() {
+            world.played_counts =
+                Some(crate::InternalPlayedActionCounts::new(world.game.n_roles()));
+        }
+        let context = OutcomeContext {
+            t: world.clock.t(),
+            game: &world.game,
+            x: &world.x,
+            held: &world.held,
+            topology: &world.topology,
+        };
+        let mut accum = PayoffAccum::new(
+            &mut world.payoff,
+            &mut world.n_played,
+            world.played_counts.as_mut(),
+        );
+        if let Some(pattern) = self.implicit {
+            self.runner
+                .implicit(pattern, &context, &world.ids, &mut accum)?;
+        } else {
+            self.runner
+                .materialized(&context, &mut world.plays, &mut accum)?;
         }
 
         if let Some(pair_history) = &mut world.pair_history {
@@ -183,17 +256,17 @@ where
                 if seats.len() != 2 {
                     continue;
                 }
-                let actions = world.plays.actions[start..end]
-                    .iter()
-                    .cloned()
-                    .collect::<Option<Vec<_>>>()
-                    .ok_or_else(|| SocsimError::Mechanism("unfilled action seat".to_owned()))?;
+                let (Some(first), Some(second)) =
+                    (&world.plays.actions[start], &world.plays.actions[start + 1])
+                else {
+                    return Err(SocsimError::Mechanism("unfilled action seat".to_owned()));
+                };
                 pair_history.push(
                     world.clock.t(),
                     seats[0],
                     seats[1],
-                    actions[0].clone(),
-                    actions[1].clone(),
+                    first.clone(),
+                    second.clone(),
                 );
             }
         }
@@ -206,30 +279,52 @@ where
             }
         }
 
-        let records: Vec<_> = world
-            .ids
-            .iter()
-            .map(|&agent| {
-                let index = agent.0 as usize;
-                let action = (self.decision_scope == DecisionScope::PerStep)
-                    .then(|| {
-                        world
-                            .plays
-                            .seats
-                            .iter()
-                            .position(|seat| *seat == agent)
-                            .and_then(|seat| world.plays.actions[seat].clone())
-                    })
-                    .flatten();
-                StepRecord {
-                    action,
-                    payoff: world.payoff[index],
-                    n_played: world.n_played[index],
+        // The records of this step are written in place into the next history
+        // slot, without a per-step buffer.
+        let mut records = world.step_history.next_slot_mut();
+        for (row, &agent) in world.ids.iter().enumerate() {
+            let index = agent.0 as usize;
+            *records.get(row) = StepRecord {
+                action: None,
+                payoff: world.payoff[index],
+                n_played: world.n_played[index],
+            };
+        }
+        if self.implicit.is_some() {
+            for (&agent, action) in world.ids.iter().zip(&world.held) {
+                if world.n_played[agent.0 as usize] > 0 {
+                    records.get(agent.0 as usize).action = Some(action.clone());
                 }
-            })
-            .collect();
-        world.step_history.push_step(&records);
-        self.record_aggregates(world)?;
+            }
+        } else if self.decision_scope == DecisionScope::PerStep {
+            for (&agent, action) in world.plays.seats.iter().zip(&world.plays.actions) {
+                let record = records.get(agent.0 as usize);
+                if record.action.is_none() {
+                    record.action.clone_from(action);
+                }
+            }
+        }
+        records.commit();
+        if let Some(aggregate) = &self.aggregate {
+            aggregate.record(world, self.implicit)?;
+        }
         Ok(())
     }
+}
+
+pub(crate) fn pairwise_runner<G, X, O>(outcome: O) -> Box<dyn KernelRunner<G, X>>
+where
+    G: StageGame,
+    X: ExperimentState,
+    O: OutcomeRule<G, X> + 'static,
+{
+    Box::new(PairwiseRunner(outcome))
+}
+
+pub(crate) fn counting_runner<G, X>() -> Box<dyn KernelRunner<G, X>>
+where
+    G: AnonymousGame,
+    X: ExperimentState,
+{
+    Box::new(CountingRunner)
 }

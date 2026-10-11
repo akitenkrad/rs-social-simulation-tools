@@ -55,3 +55,42 @@ pub trait FiniteGame: NormalFormGame<Action = usize> {
         false
     }
 }
+
+/// A finite game whose payoffs depend only on an action and the other players'
+/// action counts.
+pub trait AnonymousGame: FiniteGame {
+    /// Returns the payoff for action `a` given the other players' action counts.
+    ///
+    /// `counts_others` counts players other than the focal player, and its
+    /// entries sum to `n_roles() - 1`.
+    fn payoff_by_counts(&self, a: usize, counts_others: &[usize]) -> f64;
+}
+
+/// Marker for games whose roles share one common action space.
+pub trait CommonActionSpace: StageGame {}
+
+/// Checks that every role of a finite game has the same number of actions.
+#[cfg(feature = "core")]
+pub(crate) fn check_common_action_space<G: FiniteGame>(game: &G) -> Result<(), crate::GameError> {
+    let n_roles = game.n_roles();
+    if n_roles == 0 {
+        return Err(crate::GameError::Population(
+            "a common action space requires at least one role".to_owned(),
+        ));
+    }
+    let first = game.n_actions(0);
+    for role in 1..n_roles {
+        let count = game.n_actions(role);
+        if count != first {
+            return Err(crate::GameError::Population(format!(
+                "every role must share one action space, but role 0 has {first} actions and role {role} has {count}"
+            )));
+        }
+    }
+    if first == 0 {
+        return Err(crate::GameError::Population(
+            "the common action space is empty".to_owned(),
+        ));
+    }
+    Ok(())
+}

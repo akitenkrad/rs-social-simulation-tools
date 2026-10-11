@@ -36,13 +36,11 @@ impl<A: Clone> StepHistory<A> {
         }
     }
 
-    pub(crate) fn push_step(&mut self, records: &[StepRecord<A>]) {
-        debug_assert_eq!(records.len(), self.n_agents);
-        for (agent, record) in records.iter().enumerate() {
-            self.data[agent * self.history_len + self.head] = record.clone();
-        }
-        self.head = (self.head + 1) % self.history_len;
-        self.filled = (self.filled + 1).min(self.history_len);
+    /// Returns a writer for the slot that the next step occupies (the oldest
+    /// slot once the ring is full). Every row must be written before
+    /// `commit`, which makes the slot the latest step.
+    pub(crate) fn next_slot_mut(&mut self) -> NextSlot<'_, A> {
+        NextSlot { history: self }
     }
 
     pub(crate) fn view(&self, agent: AgentId) -> Option<HistoryView<'_, StepRecord<A>>> {
@@ -57,6 +55,26 @@ impl<A: Clone> StepHistory<A> {
             (&row[self.head..], &row[..self.head])
         };
         Some(HistoryView { front, back })
+    }
+}
+
+/// In-place writer of one step of a [`StepHistory`].
+pub(crate) struct NextSlot<'a, A> {
+    history: &'a mut StepHistory<A>,
+}
+
+impl<A> NextSlot<'_, A> {
+    /// The record of row `agent` in the slot being written.
+    pub(crate) fn get(&mut self, agent: usize) -> &mut StepRecord<A> {
+        let history = &mut *self.history;
+        &mut history.data[agent * history.history_len + history.head]
+    }
+
+    /// Makes the written slot the latest step.
+    pub(crate) fn commit(self) {
+        let history = self.history;
+        history.head = (history.head + 1) % history.history_len;
+        history.filled = (history.filled + 1).min(history.history_len);
     }
 }
 

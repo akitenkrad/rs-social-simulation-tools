@@ -11,6 +11,8 @@ default = []
 core = ["dep:socsim-core", "dep:serde_json"]
 engine = ["core", "dep:socsim-engine"]
 metrics = ["core", "dep:socsim-metrics"]
+net = ["core", "dep:socsim-net"]
+grid = ["core", "dep:socsim-grid"]
 llm = ["core", "dep:socsim-llm", "dep:sha2"]
 live = ["llm", "socsim-llm/live"]
 
@@ -23,6 +25,8 @@ socsim-core = { path = "../socsim-core", optional = true }
 socsim-engine = { path = "../socsim-engine", optional = true }
 socsim-llm = { path = "../socsim-llm", optional = true }
 socsim-metrics = { path = "../socsim-metrics", optional = true, default-features = false }
+socsim-net = { path = "../socsim-net", optional = true }
+socsim-grid = { path = "../socsim-grid", optional = true }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 
@@ -171,6 +175,31 @@ name = "snapshot_resume_learning"
 path = "tests/snapshot_resume_learning.rs"
 required-features = ["core", "engine"]
 
+[[test]]
+name = "determinism_population"
+path = "tests/determinism_population.rs"
+required-features = ["core", "engine", "metrics", "net", "grid"]
+
+[[test]]
+name = "snapshot_resume_population"
+path = "tests/snapshot_resume_population.rs"
+required-features = ["core", "engine", "metrics", "net", "grid"]
+
+[[test]]
+name = "sync_symmetry"
+path = "tests/sync_symmetry.rs"
+required-features = ["core", "engine", "metrics", "net", "grid"]
+
+[[test]]
+name = "moran_fixation"
+path = "tests/moran_fixation.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "hawk_dove_abm"
+path = "tests/hawk_dove_abm.rs"
+required-features = ["core", "engine"]
+
 [[example]]
 name = "ipd_pair"
 path = "examples/ipd_pair.rs"
@@ -179,4 +208,14 @@ required-features = ["core", "engine"]
 [[example]]
 name = "ipd_tournament"
 path = "examples/ipd_tournament.rs"
+required-features = ["core", "engine"]
+
+[[example]]
+name = "nowak_may"
+path = "examples/nowak_may.rs"
+required-features = ["core", "engine", "grid"]
+
+[[example]]
+name = "hawk_dove_large"
+path = "examples/hawk_dove_large.rs"
 required-features = ["core", "engine"]

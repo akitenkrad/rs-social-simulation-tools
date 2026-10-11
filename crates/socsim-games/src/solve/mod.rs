@@ -3,19 +3,31 @@ use thiserror::Error;
 use crate::game::MAX_PROFILES;
 use crate::{FiniteGame, MixedStrategy};
 
+/// Equilibria of anonymous games in count form.
+pub mod anonymous;
 pub mod dominance;
+/// Evolutionary stability of symmetric mixed strategies.
+pub mod ess;
 pub mod lemke_howson;
 mod linalg;
 pub mod minimax;
 pub mod pure;
 pub mod qre;
+/// Replicator dynamics of symmetric two-role games: integration and fixed points.
+pub mod replicator;
 pub mod support;
 
+pub use anonymous::{pure_nash_counts, CountProfile};
 pub use dominance::{iterated_strict_dominance, DominanceResult, Elimination};
+pub use ess::{ess_verdict, EssVerdict};
 pub use lemke_howson::{lemke_howson, LemkeHowsonOptions, LemkeHowsonResult};
 pub use minimax::{maximin_security_level, zero_sum_minimax, MinimaxSolution, SecurityLevel};
 pub use pure::{pure_nash, PureNash};
 pub use qre::{logit_qre, QreOptions, QreSolution};
+pub use replicator::{
+    replicator_fixed_points, replicator_integrate, AffineComponent, FixedPoint, FixedPointSet,
+    ReplicatorOptions, ReplicatorRun,
+};
 pub use support::{support_enumeration, EquilibriumSet, SupportFinding};
 
 pub(crate) use linalg::{solve_least_squares, LeastSquaresSolution};

@@ -1,3 +1,5 @@
+#[cfg(feature = "engine")]
+use std::any::TypeId;
 use std::collections::BTreeMap;
 
 #[cfg(feature = "engine")]
@@ -13,7 +15,7 @@ use crate::{
 };
 
 #[cfg(feature = "engine")]
-use crate::{AggregateGame, AggregateReduce, MatchContext, Matching, OutcomeRule};
+use crate::{AggregateGame, MatchContext, Matching, OutcomeRule};
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -71,6 +73,7 @@ pub struct PlayOptions<A> {
     pub(crate) on_invalid_action: OnInvalidAction<A>,
     pub(crate) decision_scope: DecisionScope,
     pub(crate) report_mixed: bool,
+    pub(crate) materialize: bool,
 }
 
 impl<A> Default for PlayOptions<A> {
@@ -86,6 +89,7 @@ impl<A> PlayOptions<A> {
             on_invalid_action: OnInvalidAction::Stop,
             decision_scope: DecisionScope::PerStep,
             report_mixed: false,
+            materialize: false,
         }
     }
 
@@ -109,6 +113,268 @@ impl<A> PlayOptions<A> {
         self.report_mixed = on;
         self
     }
+
+    /// Forces construction of the complete encounter arena.
+    ///
+    /// The default is `false`. With `false`, the play step is evaluated by
+    /// traversing the topology directly, without filling
+    /// [`GameWorld::plays`](crate::GameWorld::plays), when every one of these
+    /// conditions holds; otherwise the materialized path is used:
+    ///
+    /// - every agent is held (no agent is assigned an active rule);
+    /// - the decision scope is [`DecisionScope::PerStep`];
+    /// - the outcome rule is [`NormalFormOutcome`](crate::NormalFormOutcome)
+    ///   (or the play path is [`Counting`]), not a user-defined
+    ///   [`OutcomeRule`];
+    /// - [`Matching::implicit`] returns `Some`.
+    ///
+    /// Both paths produce the same payoffs, play counts, step records, and
+    /// metric columns. Setting this to `true` always uses the materialized
+    /// path. A grid neighborhood with self-play contains about nine
+    /// encounters per agent, so the materialized path can use substantially
+    /// more memory than the implicit path.
+    pub fn materialize(mut self, materialize: bool) -> Self {
+        self.materialize = materialize;
+        self
+    }
+}
+
+/// Play path that evaluates every encounter with an [`OutcomeRule`].
+///
+/// This is the play path used by [`assemble`].
+#[cfg(feature = "engine")]
+#[derive(Clone, Debug)]
+pub struct Pairwise<O> {
+    outcome: O,
+}
+
+#[cfg(feature = "engine")]
+impl<O> Pairwise<O> {
+    /// Wraps an outcome rule as a play path.
+    pub fn new(outcome: O) -> Self {
+        Self { outcome }
+    }
+
+    /// Records public aggregates, keeping `history_len` rows for decisions.
+    pub fn with_aggregates(self, history_len: usize) -> WithAggregates<Self> {
+        WithAggregates {
+            inner: self,
+            history_len,
+        }
+    }
+}
+
+/// Play path for anonymous games that computes payoffs from action counts.
+///
+/// Within each encounter, the payoff of each distinct action is computed once
+/// from the counts of the other seats. It yields the same payoffs as
+/// [`Pairwise`] with [`NormalFormOutcome`](crate::NormalFormOutcome) and
+/// cannot be combined with a user-defined outcome rule. Construct it with
+/// [`counting_play`].
+#[cfg(feature = "engine")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Counting;
+
+#[cfg(feature = "engine")]
+impl Counting {
+    /// Records public aggregates, keeping `history_len` rows for decisions.
+    pub fn with_aggregates(self, history_len: usize) -> WithAggregates<Self> {
+        WithAggregates {
+            inner: self,
+            history_len,
+        }
+    }
+}
+
+/// Returns the [`Counting`] play path.
+#[cfg(feature = "engine")]
+pub fn counting_play() -> Counting {
+    Counting
+}
+
+/// Play path that also records the game's public aggregate values.
+///
+/// Aggregates are reduced into one row per step, on both the materialized
+/// and the implicit path. Construct it with `with_aggregates` on
+/// [`Pairwise`] or [`Counting`].
+#[cfg(feature = "engine")]
+#[derive(Clone, Debug)]
+pub struct WithAggregates<P> {
+    inner: P,
+    history_len: usize,
+}
+
+/// Population dynamics that leave held actions unchanged.
+#[cfg(feature = "engine")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoDynamics;
+
+#[cfg(feature = "engine")]
+#[allow(private_interfaces)]
+pub(crate) mod sealed {
+    use super::*;
+    use crate::mechanism::PayoffRangeSource;
+
+    pub trait PlayBuild<G: StageGame, X: ExperimentState>: Send + Sync + Sized + 'static {
+        fn permits_implicit(&self) -> bool;
+        fn prepare(
+            &self,
+            _world: &mut GameWorld<G, X>,
+        ) -> Result<Option<crate::mechanism::AggregateCollector<G>>, GameError> {
+            Ok(None)
+        }
+        fn into_runner(self) -> Box<dyn crate::mechanism::KernelRunner<G, X>>;
+        fn payoff_source(&self) -> PayoffRangeSource<G>;
+    }
+
+    impl<G, X, O> PlayBuild<G, X> for Pairwise<O>
+    where
+        G: StageGame,
+        X: ExperimentState,
+        O: OutcomeRule<G, X> + 'static,
+    {
+        fn permits_implicit(&self) -> bool {
+            TypeId::of::<O>() == TypeId::of::<crate::NormalFormOutcome>()
+        }
+
+        fn into_runner(self) -> Box<dyn crate::mechanism::KernelRunner<G, X>> {
+            crate::mechanism::pairwise_runner(self.outcome)
+        }
+
+        fn payoff_source(&self) -> PayoffRangeSource<G> {
+            if TypeId::of::<O>() == TypeId::of::<crate::NormalFormOutcome>() {
+                PayoffRangeSource::Game
+            } else {
+                PayoffRangeSource::Unknown
+            }
+        }
+    }
+
+    impl<G, X> PlayBuild<G, X> for Counting
+    where
+        G: crate::AnonymousGame,
+        X: ExperimentState,
+    {
+        fn permits_implicit(&self) -> bool {
+            true
+        }
+
+        fn into_runner(self) -> Box<dyn crate::mechanism::KernelRunner<G, X>> {
+            crate::mechanism::counting_runner()
+        }
+
+        fn payoff_source(&self) -> PayoffRangeSource<G> {
+            PayoffRangeSource::Counts(crate::mechanism::anonymous_payoff_range::<G>)
+        }
+    }
+
+    impl<G, X, P> PlayBuild<G, X> for WithAggregates<P>
+    where
+        G: AggregateGame,
+        X: ExperimentState,
+        P: PlayBuild<G, X>,
+    {
+        fn permits_implicit(&self) -> bool {
+            self.inner.permits_implicit()
+        }
+
+        fn prepare(
+            &self,
+            world: &mut GameWorld<G, X>,
+        ) -> Result<Option<crate::mechanism::AggregateCollector<G>>, GameError> {
+            if self.history_len == 0 {
+                return Err(GameError::InvalidAggregateHistoryLength);
+            }
+            let names = world
+                .game
+                .aggregate_spec()
+                .iter()
+                .map(|spec| spec.name().to_owned())
+                .collect();
+            let reductions = world
+                .game
+                .aggregate_spec()
+                .iter()
+                .map(|spec| spec.reduce())
+                .collect();
+            world.aggregate = Some(InternalAggregateTable::new(names, self.history_len));
+            Ok(Some(crate::mechanism::AggregateCollector::new(
+                reductions,
+                aggregate_into::<G>,
+            )))
+        }
+
+        fn into_runner(self) -> Box<dyn crate::mechanism::KernelRunner<G, X>> {
+            self.inner.into_runner()
+        }
+
+        fn payoff_source(&self) -> PayoffRangeSource<G> {
+            self.inner.payoff_source()
+        }
+    }
+
+    /// Values available to population dynamics while the simulation is
+    /// assembled.
+    pub struct DynamicsCheck<'a, G: StageGame, X: ExperimentState> {
+        pub(crate) world: &'a GameWorld<G, X>,
+        pub(crate) encounter_bounds: Option<crate::EncounterBounds>,
+        pub(crate) aggregation: PayoffAggregation,
+        pub(crate) payoff_source: PayoffRangeSource<G>,
+    }
+
+    pub trait DynamicsBuild<G: StageGame, X: ExperimentState>:
+        Send + Sync + Sized + 'static
+    {
+        fn prepare(&self, _check: &DynamicsCheck<'_, G, X>) -> Result<(), GameError> {
+            Ok(())
+        }
+
+        fn into_mechanism(self) -> Option<Box<dyn socsim_core::Mechanism<GameWorld<G, X>>>>;
+    }
+
+    impl<G: StageGame, X: ExperimentState> DynamicsBuild<G, X> for NoDynamics {
+        fn into_mechanism(self) -> Option<Box<dyn socsim_core::Mechanism<GameWorld<G, X>>>> {
+            None
+        }
+    }
+}
+
+/// How the play step turns encounters into payoffs.
+///
+/// Sealed: implemented only by [`Pairwise`], [`Counting`], and
+/// [`WithAggregates`]. Pass one to [`assemble_with`].
+#[cfg(feature = "engine")]
+pub trait PlayPath<G: StageGame, X: ExperimentState>: sealed::PlayBuild<G, X> {}
+
+#[cfg(feature = "engine")]
+impl<G, X, P> PlayPath<G, X> for P
+where
+    G: StageGame,
+    X: ExperimentState,
+    P: sealed::PlayBuild<G, X>,
+{
+}
+
+/// A population dynamic that rewrites held actions from payoffs.
+///
+/// Sealed: implemented only by [`NoDynamics`],
+/// [`ImitateBest`](crate::ImitateBest), [`FermiUpdate`](crate::FermiUpdate),
+/// [`ProportionalImitation`](crate::ProportionalImitation), and
+/// [`MoranUpdate`](crate::MoranUpdate). Pass one to [`assemble_with`]; its
+/// parameters are checked against the world and the matching at assembly.
+#[cfg(feature = "engine")]
+pub trait PopulationDynamics<G: StageGame, X: ExperimentState>:
+    sealed::DynamicsBuild<G, X>
+{
+}
+
+#[cfg(feature = "engine")]
+impl<G, X, D> PopulationDynamics<G, X> for D
+where
+    G: StageGame,
+    X: ExperimentState,
+    D: sealed::DynamicsBuild<G, X>,
+{
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -251,6 +517,7 @@ where
         plays: PlayArena::new(game.n_roles()),
         payoff: vec![0.0; n_agents],
         n_played: vec![0; n_agents],
+        played_counts: None,
         step_history: InternalStepHistory::new(n_agents, history_len),
         pair_history: needs_pair_history.then(|| InternalPairHistory::new(history_len)),
         aggregate: None,
@@ -277,7 +544,15 @@ where
     M: Matching<G, X> + 'static,
     O: OutcomeRule<G, X> + 'static,
 {
-    assemble_internal(world, matching, rules, outcome, opts, seed, None)
+    assemble_with(
+        world,
+        matching,
+        rules,
+        Pairwise::new(outcome),
+        NoDynamics,
+        opts,
+        seed,
+    )
 }
 
 #[cfg(feature = "engine")]
@@ -288,7 +563,7 @@ where
 /// per completed step. `aggregate_history_len` is the maximum number of rows
 /// exposed through [`crate::DecisionContext::aggregate_history`].
 pub fn assemble_with_aggregates<G, X, M, O>(
-    mut world: GameWorld<G, X>,
+    world: GameWorld<G, X>,
     matching: M,
     rules: RuleBook<G, X>,
     outcome: O,
@@ -302,30 +577,14 @@ where
     M: Matching<G, X> + 'static,
     O: OutcomeRule<G, X> + 'static,
 {
-    if aggregate_history_len == 0 {
-        return Err(GameError::InvalidAggregateHistoryLength);
-    }
-    let names = world
-        .game
-        .aggregate_spec()
-        .iter()
-        .map(|spec| spec.name().to_owned())
-        .collect();
-    let reductions = world
-        .game
-        .aggregate_spec()
-        .iter()
-        .map(|spec| spec.reduce())
-        .collect();
-    world.aggregate = Some(InternalAggregateTable::new(names, aggregate_history_len));
-    assemble_internal(
+    assemble_with(
         world,
         matching,
         rules,
-        outcome,
+        Pairwise::new(outcome).with_aggregates(aggregate_history_len),
+        NoDynamics,
         opts,
         seed,
-        Some((reductions, aggregate_into::<G>)),
     )
 }
 
@@ -334,27 +593,55 @@ fn aggregate_into<G: AggregateGame>(game: &G, profile: &[G::Action], out: &mut [
     game.aggregate_into(profile, out);
 }
 
-#[cfg(feature = "engine")]
-type AggregateFn<G> = fn(&G, &[<G as StageGame>::Action], &mut [f64]);
-
+/// Assembles a game simulation with an explicit play path and population dynamic.
+///
+/// [`assemble`] and [`assemble_with_aggregates`] are shorthands for this with
+/// [`Pairwise`] and [`NoDynamics`]. Assembly validates the matching (role count,
+/// topology), the rule kinds, fallback actions, and the dynamic's parameters,
+/// which may depend on the matching's
+/// [`encounter_bounds`](crate::Matching::encounter_bounds) and on
+/// [`PlayOptions::payoff_aggregation`]. Each step matches, decides, and plays;
+/// the population dynamic then rewrites held actions from that step's payoffs.
 #[cfg(feature = "engine")]
 #[allow(clippy::too_many_arguments)]
-fn assemble_internal<G, X, M, O>(
-    mut world: GameWorld<G, X>,
+pub fn assemble_with<G, X, M, P, D>(
+    world: GameWorld<G, X>,
     matching: M,
     rules: RuleBook<G, X>,
-    outcome: O,
+    play: P,
+    dynamics: D,
     opts: PlayOptions<G::Action>,
     seed: u64,
-    aggregate: Option<(Vec<AggregateReduce>, AggregateFn<G>)>,
 ) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>
 where
     G: StageGame,
     X: ExperimentState,
     M: Matching<G, X> + 'static,
-    O: OutcomeRule<G, X> + 'static,
+    P: PlayPath<G, X>,
+    D: PopulationDynamics<G, X>,
 {
-    if world.game.n_roles() != 2 {
+    assemble_internal(world, matching, rules, play, dynamics, opts, seed)
+}
+
+#[cfg(feature = "engine")]
+#[allow(clippy::too_many_arguments)]
+fn assemble_internal<G, X, M, P, D>(
+    mut world: GameWorld<G, X>,
+    matching: M,
+    rules: RuleBook<G, X>,
+    play: P,
+    dynamics: D,
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>
+where
+    G: StageGame,
+    X: ExperimentState,
+    M: Matching<G, X> + 'static,
+    P: PlayPath<G, X>,
+    D: PopulationDynamics<G, X>,
+{
+    if !matching.supports_roles(world.game.n_roles()) {
         return Err(GameError::UnsupportedRoles {
             n_roles: world.game.n_roles(),
         });
@@ -418,6 +705,7 @@ where
             }
         }
     }
+    let allows_multi_role_per_step = matching.allows_multi_role_per_step();
     let context = MatchContext {
         t: world.clock.t(),
         decision_scope: opts.decision_scope,
@@ -429,36 +717,55 @@ where
         x: &world.x,
     };
     matching.check(&context)?;
+    let encounter_bounds = matching.encounter_bounds(&context);
     world.matching_state = matching.init_state(&context);
-
-    let play: Box<dyn socsim_core::Mechanism<GameWorld<G, X>>> = match aggregate {
-        Some((reductions, aggregate_into)) => {
-            Box::new(crate::mechanism::PlayMechanism::<G, X, O>::with_aggregates(
-                outcome,
-                opts.aggregation,
-                opts.decision_scope,
-                reductions,
-                aggregate_into,
-            ))
-        }
-        None => Box::new(crate::mechanism::PlayMechanism::<G, X, O>::new(
-            outcome,
-            opts.aggregation,
-            opts.decision_scope,
-        )),
-    };
+    sealed::DynamicsBuild::prepare(
+        &dynamics,
+        &sealed::DynamicsCheck {
+            world: &world,
+            encounter_bounds,
+            aggregation: opts.aggregation,
+            payoff_source: sealed::PlayBuild::payoff_source(&play),
+        },
+    )?;
+    let implicit = (!opts.materialize
+        && opts.decision_scope == DecisionScope::PerStep
+        && world
+            .policies
+            .slot
+            .iter()
+            .all(|&slot| slot == PolicyTable::<X::PolicyState>::HELD)
+        && sealed::PlayBuild::permits_implicit(&play))
+    .then(|| matching.implicit())
+    .flatten();
+    let aggregate = sealed::PlayBuild::prepare(&play, &mut world)?;
+    let runner = sealed::PlayBuild::into_runner(play);
+    let play = Box::new(crate::mechanism::PlayMechanism::<G, X>::new(
+        runner,
+        opts.aggregation,
+        opts.decision_scope,
+        implicit,
+        aggregate,
+    ));
     let builder = socsim_engine::SimulationBuilder::new(world)
         .seed(derive_seed(seed, &[1]))
         .add_mechanism(Box::new(crate::mechanism::MatchMechanism::<G, X, M>::new(
             matching,
             opts.decision_scope,
+            implicit.is_some(),
         )))
         .add_mechanism(Box::new(crate::RuleDriver::new(
             rules,
             opts.on_invalid_action,
             opts.decision_scope,
             opts.report_mixed,
-        )))
-        .add_mechanism(play);
-    Ok(builder)
+            allows_multi_role_per_step,
+        )));
+    // Population dynamics run in `Reward` after `game_decide`, so learning
+    // always precedes imitation and selection.
+    let builder = match sealed::DynamicsBuild::into_mechanism(dynamics) {
+        Some(mechanism) => builder.add_mechanism(mechanism),
+        None => builder,
+    };
+    Ok(builder.add_mechanism(play))
 }

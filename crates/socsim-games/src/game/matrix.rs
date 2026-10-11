@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{ActionError, FiniteGame, NormalFormGame, StageGame};
+use super::{ActionError, CommonActionSpace, FiniteGame, NormalFormGame, StageGame};
 
 pub(crate) const MAX_PROFILES: u128 = 1_000_000;
 const MAX_PAYOFF_ELEMENTS: u128 = 10_000_000;
@@ -152,6 +152,8 @@ impl FiniteGame for MatrixGame {
         self.symmetric
     }
 }
+
+impl CommonActionSpace for MatrixGame {}
 
 fn profile_count(n_actions: &[usize]) -> Result<(usize, u128), MatrixError> {
     let mut profiles = 1_usize;

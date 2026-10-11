@@ -608,6 +608,11 @@ where
             n_roles: world.game.n_roles(),
         });
     }
+    if !matching.supports_roles(world.game.n_roles()) {
+        return Err(GameError::UnsupportedRoles {
+            n_roles: world.game.n_roles(),
+        });
+    }
     world.reports = if opts.report_mixed {
         Some(
             InternalPolicyReports::new(world.clock.t(), world.ids.len(), world.game.n_roles())
@@ -664,6 +669,7 @@ where
         }
     }
 
+    let allows_multi_role_per_step = matching.allows_multi_role_per_step();
     let context = MatchContext {
         t: world.clock.t(),
         decision_scope: opts.decision_scope,
@@ -682,17 +688,21 @@ where
         .add_mechanism(Box::new(crate::mechanism::MatchMechanism::<G, X, M>::new(
             matching,
             opts.decision_scope,
+            false,
         )))
         .add_mechanism(Box::new(crate::RuleDriver::new(
             rules,
             opts.on_invalid_action,
             opts.decision_scope,
             opts.report_mixed,
+            allows_multi_role_per_step,
         )))
         .add_mechanism(Box::new(LlmDriver::new(llm)))
-        .add_mechanism(Box::new(crate::mechanism::PlayMechanism::<G, X, O>::new(
-            outcome,
+        .add_mechanism(Box::new(crate::mechanism::PlayMechanism::<G, X>::new(
+            crate::mechanism::pairwise_runner(outcome),
             opts.aggregation,
             opts.decision_scope,
+            None,
+            None,
         ))))
 }
