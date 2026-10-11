@@ -31,6 +31,25 @@ mechanisms. For every encounter written by `game_match` and filled by
    keyed by `t`, to the world's aggregate table (a ring of
    `aggregate_history_len` rows).
 
+The payoffs come from one of two kernels, chosen by the play path passed to
+`assemble_with`: `Pairwise` evaluates the `OutcomeRule` encounter by encounter
+(the path of `assemble`), and `Counting` (`counting_play()`, for
+`AnonymousGame`s) counts each encounter's actions once and computes the payoff
+of each distinct action from the other seats' counts. Both give the same
+payoffs with `NormalFormOutcome`. An encounter with `Credit::Center` credits
+only its seat 0 (step 3), as `GridNeighborhood` uses.
+
+When every agent is held, the scope is `PerStep`, the play path is
+`Pairwise::new(NormalFormOutcome)` or `counting_play()`, and the matching
+returns a pattern from `Matching::implicit()` (`WholePopulation`,
+`NetworkEdges`, `GridNeighborhood`), `game_play` evaluates the step by
+traversing that pattern instead of the play arena, unless
+`PlayOptions::materialize(true)` is set. Payoffs, play counts, step records,
+aggregate rows and metric columns are the same on both paths; on the implicit
+path the arena stays empty and the per-role counts of the played actions are
+kept for `game_metrics` instead (see
+[`docs/games.md` § Evaluating without materialising encounters](../games.md#evaluating-without-materialising-encounters)).
+
 ## 2. Theory & source
 
 In a normal-form game each role $r$ receives $u_r(a_1, \dots, a_n)$ for the
@@ -50,7 +69,8 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 
 ![game_play data flow](../assets/mech-game-play.svg)
 
-Reads the encounters (`seats`, `credit`, `actions`) and, through
+Reads the encounters (`seats`, `credit`, `actions`) — or, on the implicit path,
+the matching's pattern over the topology and the held actions — and, through
 `OutcomeContext`, the game, `X`, held actions and topology. Writes the per-seat
 payoffs, the per-agent `payoff` and `n_played`, the pair history (when
 enabled), the step history and, under `assemble_with_aggregates`, the
@@ -66,10 +86,11 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
 
 | Field | Read | Write | Notes |
 |---|:--:|:--:|---|
-| `PlayArena.seats`, `credit`, `actions` | ✓ | | Every action must be `Some`. Only `Credit::All` is accepted. |
-| `PlayArena.payoffs` | | ✓ | One payoff per seat. |
+| `PlayArena.seats`, `credit`, `actions` | ✓ | | Every action must be `Some`. `Credit::All` credits every seat, `Credit::Center` only seat 0. Not read on the implicit path. |
+| `PlayArena.payoffs` | | ✓ | One payoff per seat, credited or not. Empty on the implicit path. |
+| per-role played-action counts | | ✓ | Implicit path only: the seats of each role choosing each action this step, read by `game_metrics`. Not serialised (rebuilt every step). |
 | `GameWorld.payoff` | ✓ | ✓ | Accumulated per agent, then divided by `n_played` under `Mean`. |
-| `GameWorld.n_played` | ✓ | ✓ | Incremented once per encounter the agent is seated in. |
+| `GameWorld.n_played` | ✓ | ✓ | Incremented once per encounter in which the agent's seat is credited. |
 | pair history | | ✓ | Only when created by `build_world` (a rule asked for it). One record `(t, both actions)` per two-seat encounter, in `EncounterId` order, after payoffs are computed; ring of `history_len` per pair. |
 | step history (`StepRecord`) | | ✓ | One record per agent; `action` is `None` for an unseated agent, and for every agent under `PerAgentRole` / `PerEncounter`. Ring of length `history_len`. |
 | aggregate table | | ✓ | Only under `assemble_with_aggregates`. After the step history: one row `(t, values)`, one `Option<f64>` per `AggregateSpec`; a non-finite value fails the step. Field `aggregate` of the world (omitted from the world JSON otherwise); ring of `aggregate_history_len` rows. |
@@ -95,7 +116,9 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
 
 | Parameter | Default | Kind | Notes |
 |---|---|---|---|
-| `outcome: O` (`O: OutcomeRule<G, X>`) | — | structural | Passed to `assemble`. Built-in: `NormalFormOutcome` (requires `G: NormalFormGame`). |
+| `outcome: O` (`O: OutcomeRule<G, X>`) | — | structural | Passed to `assemble`, or to `assemble_with` as `Pairwise::new(outcome)`. Built-in: `NormalFormOutcome` (requires `G: NormalFormGame`). |
+| `counting_play()` | — | structural | The `Counting` play path of `assemble_with` (requires `G: AnonymousGame`); same payoffs as `Pairwise::new(NormalFormOutcome)`, cannot take a user-defined outcome rule. |
+| `opts.materialize` | `false` | structural | `true` always builds the play arena; `false` lets the implicit path run when its conditions hold. |
 | `opts.payoff_aggregation` | `PayoffAggregation::Sum` | structural | `Sum` or `Mean`; agents that played nothing keep `0` under `Mean`. |
 | `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep`: `StepRecord::action` is the agent's action. `PerAgentRole` / `PerEncounter`: `None`. |
 | `aggregate_history_len` | — | structural | `assemble_with_aggregates` only; rows kept for `aggregate_history()`; must be `> 0` (`GameError::InvalidAggregateHistoryLength`). The names and reductions come from `AggregateGame::aggregate_spec()`. |
@@ -103,6 +126,8 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
 ## 8. How to apply
 
 Library-only; `assemble` constructs `game_play` from `outcome` and `opts`;
+`assemble_with` from its play path (`Pairwise::new(outcome)` or
+`counting_play()`, either optionally `.with_aggregates(n)`);
 `assemble_with_aggregates(.., seed, aggregate_history_len)` constructs it with
 aggregate collection (see
 [`docs/games.md` § Public aggregates](../games.md#public-aggregates-aggregategame)).
@@ -122,7 +147,9 @@ let last = sim.world().history(socsim_core::AgentId(0)).and_then(|h| h.last().cl
 
 ## 9. Determinism & RNG
 
-Draws **no** randomness. Encounters are evaluated in `EncounterId` order and
+Draws **no** randomness. Encounters are evaluated in `EncounterId` order (on
+the implicit path, in the pattern's traversal order, which is the order in
+which the matching would have pushed them) and
 records are written in sorted `AgentId` order (pair-history records in
 `EncounterId` order), so the result is fully
 determined by the actions chosen in Decision.

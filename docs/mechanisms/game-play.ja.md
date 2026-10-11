@@ -23,6 +23,18 @@
    各値をそのステップの対戦にわたって集約し（`Sum`，または `Mean`．対戦の無いステップでは `Mean` は定義されない），
    `t` をキーとする 1 行を World の集計値の表（長さ `aggregate_history_len` の環）に追記します．
 
+利得は，`assemble_with` に渡す評価経路が選ぶ 2 つの計算のどちらかから出ます．
+`Pairwise` は対戦ごとに `OutcomeRule` を評価し（`assemble` の経路），`Counting`（`counting_play()`．`AnonymousGame` 用）は各対戦の行動を 1 回数えて，
+各行動の利得をほかの席の人数から計算します．`NormalFormOutcome` ではどちらも同じ利得になります．
+`Credit::Center` の対戦では席 0 だけが利得を受け取ります（手順 3）．`GridNeighborhood` がこれを使います．
+
+全エージェントが Held で，粒度が `PerStep` で，評価経路が `Pairwise::new(NormalFormOutcome)` か `counting_play()` で，
+Matching が `Matching::implicit()` で型を返す（`WholePopulation`，`NetworkEdges`，`GridNeighborhood`）ときは，
+`PlayOptions::materialize(true)` でない限り，`game_play` は対戦の表の代わりにその型をたどってステップを評価します．
+利得，対戦数，ステップの記録，集計値の行，指標の列はどちらの経路でも同じです．
+実体化しない経路では対戦の表は空のままで，代わりに役割ごとの打った行動の数を `game_metrics` のために保持します
+（[`docs/games.ja.md` の「対戦を実体化しない評価」](../games.ja.md#対戦を実体化しない評価) を参照）．
+
 ## 2. 理論と出典
 
 戦略形ゲームでは，各役割 $r$ が行動の組 $a$ に対して $u_r(a_1, \dots, a_n)$ を受け取ります．
@@ -40,7 +52,7 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 
 ![game_play data flow](../assets/mech-game-play.svg)
 
-対戦（`seats`，`credit`，`actions`）と，`OutcomeContext` を通してゲーム・`X`・保持行動・トポロジーを読みます．
+対戦（`seats`，`credit`，`actions`）— 実体化しない経路ではトポロジーの上の Matching の型と保持行動 — と，`OutcomeContext` を通してゲーム・`X`・保持行動・トポロジーを読みます．
 席ごとの利得，エージェントごとの `payoff` と `n_played`，（有効なら）対の履歴，ステップ履歴，`assemble_with_aggregates` なら集計値の行を書きます．
 
 ## 4. 6フェーズループにおける位置
@@ -52,10 +64,11 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 
 | フィールド | 読み | 書き | 備考 |
 |---|:--:|:--:|---|
-| `PlayArena.seats`，`credit`，`actions` | ✓ | | 行動はすべて `Some` でなければならない．受け付けるのは `Credit::All` だけ． |
-| `PlayArena.payoffs` | | ✓ | 席ごとに 1 つの利得． |
+| `PlayArena.seats`，`credit`，`actions` | ✓ | | 行動はすべて `Some` でなければならない．`Credit::All` は全席に，`Credit::Center` は席 0 にだけ利得を与える．実体化しない経路では読まない． |
+| `PlayArena.payoffs` | | ✓ | 席ごとに 1 つの利得（利得を受け取る席かどうかに依らない）．実体化しない経路では空． |
+| 役割ごとの打った行動の数 | | ✓ | 実体化しない経路だけ．そのステップで各役割の席が各行動を選んだ数．`game_metrics` が読む．直列化しない（毎ステップ作り直す）． |
 | `GameWorld.payoff` | ✓ | ✓ | エージェントごとに足し合わせ，`Mean` のときは `n_played` で割る． |
-| `GameWorld.n_played` | ✓ | ✓ | エージェントが席に着いた対戦ごとに 1 増やす． |
+| `GameWorld.n_played` | ✓ | ✓ | エージェントの席が利得を受け取る対戦ごとに 1 増やす． |
 | 対の履歴 | | ✓ | `build_world` が作ったとき（規則が求めたとき）だけ．2 席の対戦ごとに `(t, 双方の行動)` を 1 件，`EncounterId` の順に，利得の計算の後で書く．組ごとに長さ `history_len` の環． |
 | ステップ履歴（`StepRecord`） | | ✓ | エージェントごとに 1 件．席のないエージェントの `action` は `None`．`PerAgentRole` / `PerEncounter` ではすべてのエージェントで `None`．長さ `history_len` の環． |
 | 集計値の表 | | ✓ | `assemble_with_aggregates` のときだけ．ステップ履歴の後に 1 行 `(t, values)`，`AggregateSpec` ごとに `Option<f64>` を 1 つ．有限でない値はステップを失敗させる．World のフィールド `aggregate`（それ以外では World の JSON から省かれる）．長さ `aggregate_history_len` の環． |
@@ -76,7 +89,9 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 
 | パラメータ | 既定値 | 種別 | 備考 |
 |---|---|---|---|
-| `outcome: O`（`O: OutcomeRule<G, X>`） | — | structural | `assemble` に渡す．組込み：`NormalFormOutcome`（`G: NormalFormGame` を要求）． |
+| `outcome: O`（`O: OutcomeRule<G, X>`） | — | structural | `assemble` に渡すか，`Pairwise::new(outcome)` として `assemble_with` に渡す．組込み：`NormalFormOutcome`（`G: NormalFormGame` を要求）． |
+| `counting_play()` | — | structural | `assemble_with` の評価経路 `Counting`（`G: AnonymousGame` を要求）．利得は `Pairwise::new(NormalFormOutcome)` と同じで，利用者定義の利得規則は受け取れない． |
+| `opts.materialize` | `false` | structural | `true` なら常に対戦の表を作る．`false` なら条件が揃えば実体化しない経路を使う． |
 | `opts.payoff_aggregation` | `PayoffAggregation::Sum` | structural | `Sum` か `Mean`．`Mean` では対戦しなかったエージェントは `0` のまま． |
 | `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep`：`StepRecord::action` はエージェントの行動．`PerAgentRole` / `PerEncounter`：`None`． |
 | `aggregate_history_len` | — | structural | `assemble_with_aggregates` のときだけ．`aggregate_history()` のために保持する行数．`> 0` でなければならない（`GameError::InvalidAggregateHistoryLength`）．名前と集約の方法は `AggregateGame::aggregate_spec()` から． |
@@ -84,6 +99,7 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 ## 8. 適用方法
 
 ライブラリ専用です．`assemble` が `outcome` と `opts` から `game_play` を構築します．
+`assemble_with` は評価経路（`Pairwise::new(outcome)` か `counting_play()`．どちらも `.with_aggregates(n)` を付けられる）から構築します．
 `assemble_with_aggregates(.., seed, aggregate_history_len)` は集計値を集める `game_play` を構築します
 （[`docs/games.ja.md` の「公開集計値」](../games.ja.md#公開集計値aggregategame) を参照）．
 
@@ -102,7 +118,7 @@ let last = sim.world().history(socsim_core::AgentId(0)).and_then(|h| h.last().cl
 
 ## 9. 決定論性と RNG
 
-乱数は**引きません**．対戦は `EncounterId` の順に評価し，記録は `AgentId` の昇順に（対の履歴の記録は `EncounterId` の順に）書くので，
+乱数は**引きません**．対戦は `EncounterId` の順に（実体化しない経路では型をたどる順，つまり Matching が対戦を積んだはずの順に）評価し，記録は `AgentId` の昇順に（対の履歴の記録は `EncounterId` の順に）書くので，
 結果は Decision で選ばれた行動だけで完全に決まります．
 
 ## 10. 期待される動作

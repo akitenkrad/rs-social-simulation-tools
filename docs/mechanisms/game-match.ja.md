@@ -15,7 +15,14 @@
 - **PreStep** では，前のステップの対戦（`PlayArena`）と，エージェントごとの `payoff`・`n_played` を空にします．
 - **Decision** の先頭では，設定された `Matching` に World を渡し，そのステップの対戦（役割ごとに 1 席）を対戦の表に書き込ませます．
 
-組込みの Matching は 2 つあります．`FixedPlayers`（毎ステップ同じ組）と `RoundRobin`（毎ステップすべての 2 人の組）です．
+組込みの Matching は 7 つあります．`FixedPlayers`（毎ステップ同じ組），`RoundRobin`（毎ステップすべての 2 人の組），
+および集団用の `RandomPairs`，`RandomGroups`，`WholePopulation`，`NetworkEdges`（feature `net`），`GridNeighborhood`（feature `grid`）です．
+集団用のものは [`docs/games.ja.md` の「集団用の Matching」](../games.ja.md#集団用の-matching) で説明します．
+
+対戦の表を使わずにステップを評価できるとき — 全エージェントが Held，`DecisionScope::PerStep`，評価経路が `Pairwise::new(NormalFormOutcome)` か `counting_play()`，
+Matching が `Matching::implicit()` で型を返す — は，`game_match` は PreStep でステップごとの状態を空にしますが，Decision では対戦を**書きません**．
+代わりに `game_play` がその型をたどります（[対戦を実体化しない評価](../games.ja.md#対戦を実体化しない評価) を参照）．
+`PlayOptions::materialize(true)` でこれを止められます．
 
 行動の選択や利得の計算はしません．それは `game_decide` と `game_play` が，ここで書かれた対戦から行います．
 
@@ -33,6 +40,8 @@ $$\text{encounters}_t = \mathcal{M}\big(t,\ \text{ids},\ \text{game},\ \text{hel
 組込みの `FixedPlayers` は毎ステップ同じ組を返し，標準的な 2 人の繰り返しゲームになります．
 組込みの `RoundRobin` は毎ステップすべての組 $\{i, j\}$（$i < j$）を返します．Axelrod (1984) の総当たり戦で，
 必要なら $(i, j)$ と $(j, i)$ の両方の順で組みます．
+集団用の Matching は，無作為な組と無作為な群れ（毎ステップ引き直す），集団全体での 1 つの対戦，ネットワークの辺ごとの対戦，
+Nowak & May（1992）の格子の近傍を扱います．格子の近傍では，各エージェントは近傍それぞれと，利得を受け取る中心として対戦します（`Credit::Center`）．
 
 総当たりでは，エージェントは 1 ステップに複数の対戦に，場合によっては違う役割で着きます．
 そのときに何回決定するかが**決定の粒度**です（`PerStep`，`PerAgentRole`，`PerEncounter`．[決定の粒度](../games.ja.md#決定の粒度) を参照）．
@@ -58,7 +67,8 @@ PreStep はステップごとのフィールドを空にします．Decision は
 
 | フィールド | 読み | 書き | 備考 |
 |---|:--:|:--:|---|
-| `GameWorld.plays`（`PlayArena`） | | ✓ | PreStep：空にする．Decision：`ArenaWriter::push` で対戦を追加する． |
+| `GameWorld.plays`（`PlayArena`） | | ✓ | PreStep：空にする．Decision：`ArenaWriter::push` で対戦を追加する．実体化しない経路では何も追加しない． |
+| 役割ごとの打った行動の数 | | ✓ | PreStep：空にする（実体化しない経路だけ．`game_play` が埋める）． |
 | `GameWorld.payoff` | | ✓ | PreStep：`0.0` で埋める． |
 | `GameWorld.n_played` | | ✓ | PreStep：`0` で埋める． |
 | `GameWorld.matching_state` | ✓ | ✓ | `encounters_into` に可変で渡す．`FixedPlayers` では `MatchingState::None`，`RoundRobin` では `MatchingState::RoundRobin { cursor }`（毎ステップ `cursor` += 1）．World とともに直列化される． |
@@ -81,6 +91,9 @@ PreStep はステップごとのフィールドを空にします．Decision は
 | `matching: M`（`M: Matching<G, X>`） | — | structural | `assemble` に渡す．組込み：`FixedPlayers::pairs(&[(a, b), …])` / `FixedPlayers::new(vec![[AgentId; 2], …])`，`RoundRobin::new()`． |
 | `RoundRobin::both_orders(bool)` | `false` | structural | `true`：各組 `(i, j)` の後に `(j, i)` も積む．各エージェントはどの相手とも両方の役割で対戦する． |
 | `RoundRobin::self_play(bool)` | `false` | structural | `true` は拒否される（自分自身との対戦には対応しない）． |
+| `RandomPairs::new()`，`RandomGroups::new(k)?`，`WholePopulation::new()` | — | structural | 集団用の Matching（feature `core`）．`RandomGroups` は `k ≥ 2` と `k` 役割のゲームを要する． |
+| `NetworkEdges::new()` | — | structural | feature `net`．ネットワークのトポロジーを要する． |
+| `GridNeighborhood::new().include_self(bool)` | `false` | structural | feature `grid`．格子のトポロジーを要する．`true` ならセルごとに自己対戦を 1 つ足す． |
 
 `FixedPlayers::check`（`assemble` の中で一度だけ走る）は，未知のエージェント，複数の組に現れるエージェント，
 役割がちょうど 2 でないゲームを拒否します（`GameError::InvalidMatching`）．
@@ -89,7 +102,11 @@ PreStep はステップごとのフィールドを空にします．Decision は
 
 `RoundRobin` はエージェントを `AgentId` で並べ，組を辞書式の順に積みます．役割 0 には番号の小さい方が着きます．
 4 人なら `(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)`，両方の順なら `(0, 1), (1, 0), (0, 2), (2, 0), …` です．
-対戦はすべて `Credit::All` です．
+`GridNeighborhood` 以外の Matching はすべて `Credit::All` を使います．
+
+Matching は `check` のほかに，席を組める役割の数（`supports_roles`．既定は 2），1 ステップにエージェントが利得を受け取る対戦の数（`encounter_bounds`．集団動学の利得の範囲を求めるのに使う），
+`PerStep` の 1 ステップに 1 人が複数の役割を持ってよいか（`allows_multi_role_per_step`．`NetworkEdges` と `GridNeighborhood` は許す），
+実体化しない型を持つか（`implicit`）を `assemble` に伝えます．
 
 独自の `Matching` が要する状態は，その構造体ではなく実験状態 `X` に置きます．構造体はコードであり，snapshot に含まれません．
 
@@ -122,7 +139,7 @@ let arena = sim.world().plays();        // this step's encounters
 ## 9. 決定論性と RNG
 
 PreStep は乱数を引きません．Decision では `encounters_into` がエンジンのステップの RNG（`ctx.rng`，`derive_seed(seed, &[1])` から）を受け取ります．
-`FixedPlayers` も `RoundRobin` もこれを引きません．`RoundRobin` の cursor は World の一部なので，再開した実行は数え続けます．
+`RandomPairs` と `RandomGroups` は，そこから 1 ステップに 1 回エージェントの ID の並べ替えを引きます．ほかの組込みの Matching は何も引きません．`RoundRobin` の cursor は World の一部なので，再開した実行は数え続けます．
 無作為に組む独自の Matching は，この RNG だけから引いてください．
 そうすれば実行も，再開した実行も再現できます．
 
@@ -138,3 +155,4 @@ PreStep は乱数を引きません．Decision では `encounters_into` がエ�
 ## 11. 参考文献
 
 - Axelrod, R. (1984). *The Evolution of Cooperation*. Basic Books.
+- Nowak, M. A., & May, R. M. (1992). Evolutionary games and spatial chaos. *Nature*, 359(6398), 826–829.

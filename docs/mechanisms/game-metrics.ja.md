@@ -16,7 +16,8 @@
 1. 対戦の表にあるそのステップの席を行動ごとに数え，`game.played_share.<id>` を書きます
    （協力のラベルを設定していれば `game.coop_rate` も，feature `metrics` では `game.action_entropy` も書きます）．
 2. 対戦したエージェントについて `game.mean_payoff` と `game.payoff_sd` を書きます．
-3. `assemble_with_aggregates` で組み立てたときは，そのステップの公開集計値の行を `game.aggregate.<name>` として写します．
+3. 集計値つきで組み立てたときは，そのステップの公開集計値の行を `game.aggregate.<name>` として写します．
+   `population_share(true)` なら，行動 `k` を保持する全エージェントの割合 `game.population_share.a<k>` を書きます．
 4. 設定した `MixedSource` から役割ごとに 1 つの混合戦略を作り，`game.regret` と，`EquilibriumTarget::Solve` なら `game.eq_distance` を書きます．
 5. 収束のカウンターを更新し，割合が `window` ステップ安定したら実行の終了を求めます．
 
@@ -38,11 +39,18 @@ $$\text{regret}(\sigma) = \max_r \Big[\max_a F_r(a, \sigma_{-r}) - F_r(\sigma)\B
 - $E$ は 2 人ゲームの完全な均衡の集合で，サポート列挙で 1 回だけ求めます．
 - `game.action_entropy` は Shannon（1948）のエントロピー $-\sum_k p_t(k) \ln p_t(k)$ で，単位は nat です．
 
+エージェントの集合を $A$，PostStep でのエージェント $i$ の保持行動を $h_i$ とすると，集団の割合は次のとおりです．
+
+$$q_t(k) = \frac{\lvert\{i \in A : h_i = k\}\rvert}{\lvert A\rvert}$$
+
+これは $p_t$ と 2 点で違います．席ではなくエージェントを数えること，そして [集団動学](../games.ja.md#集団動学) のもとでは，
+$p_t$ がそのステップで打った行動を表すのに対し，$q_t$ はそのステップの更新**後**の行動（次のステップの行動）を表すことです．
+
 ## 3. データフロー
 
 ![game_metrics data flow](../assets/mech-game-metrics.svg)
 
-対戦の表（`seats`，`actions`），エージェントごとの `payoff` と `n_played`，最後の集計値の行，`MixedSource::Reported` なら混合戦略の報告を読みます．
+対戦の表（`seats`，`actions`）— 実体化しない経路では `game_play` がそのステップについて保持した役割ごとの打った行動の数 —，保持行動（`population_share` のため），エージェントごとの `payoff` と `n_played`，最後の集計値の行，`MixedSource::Reported` なら混合戦略の報告を読みます．
 Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCumulative` を設定したときだけ，World に自分の `MetricsState` を書きます．
 
 ## 4. 6フェーズループにおける位置
@@ -56,6 +64,8 @@ Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCum
 | フィールド | 読み | 書き | 備考 |
 |---|:--:|:--:|---|
 | `PlayArena.seats`，`actions` | ✓ | | 席の役割は席の番号を役割数で割った余り．行動はすべて `Some` で，その役割の範囲内でなければならない． |
+| 役割ごとの打った行動の数 | ✓ | | ステップが実体化しない経路で動いたとき（対戦の表は空），対戦の表の代わりに読む．割合，`coop_rate`，後悔，累積の数は同じになる． |
+| `GameWorld.held` | ✓ | | `population_share(true)` のときだけ．共通の行動の集合の外にある保持行動はエラー． |
 | `GameWorld.payoff`，`n_played` | ✓ | | `mean_payoff` / `payoff_sd` に入るのは `n_played > 0` のエージェントだけ． |
 | `game` | ✓ | | 役割数と行動数を `new` に渡したゲームと照合する．利得は後悔に使う． |
 | 集計値の表 | ✓ | | 最後の行だけ．その `t` がこのステップのときだけ． |
@@ -87,6 +97,7 @@ Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCum
 | `equilibrium(EquilibriumTarget)` | `None` | observation | `Solve`：`new` の中でサポート列挙を 1 回．2 役割のみ．ソルバーの失敗，均衡の集合が不完全または空なら拒否．`game.eq_distance` を足す． |
 | `stop(tol, window)` | なし | control | 席のあるステップで割合の最大変化が `< tol` のものが `window` 回続いたら停止．`tol` は有限で `> 0`，`window ≥ 1`． |
 | `action_entropy(on)` | 有効 | observation | feature `metrics` のときだけ．共通 ID のときだけ． |
+| `population_share(on)` | 無効 | observation | `game.population_share.a<k>`（`k` を保持するエージェント ÷ 全エージェント．集団動学の後）を足す．すべての役割の行動数が等しくなければならない（`GameError::Metrics`）． |
 
 ## 8. 適用方法
 
@@ -134,6 +145,9 @@ $(T, R, P, S) = (5, 3, 1, 0)$ の囚人のジレンマで，Tit-for-Tat と常�
   `game.regret = 1`，`game.eq_distance = 2`．
 - `t ≥ 2`：`played_share.a1 = 1`，`coop_rate = 0`，`mean_payoff = 1`，`payoff_sd = 0`，`regret = 0`，`eq_distance = 0`．
 - 実行は `t = 5` で止まります．
+
+[`docs/games.ja.md` の「集団動学」](../games.ja.md#集団動学) のタカ・ハトの例（Held の 1 000 人，初期のタカ 300 人，`RandomPairs`，比例模倣）で `population_share(true)` にすると，
+`t = 1` には `game.played_share.a0 = 0.3`（対戦したタカ）と `game.population_share.a0 = 0.319`（最初の更新の後のタカ）が記録されます．
 
 ## 11. 参考文献
 

@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>game_play mechanism data flow</title>
-<desc>Interaction mechanism from socsim-games. For every encounter in the PlayArena it checks that every seat holds an action, computes one payoff per role with the OutcomeRule (NormalFormOutcome evaluates the game's payoffs), adds each payoff to the seated agent's payoff and increments n_played, applies the PayoffAggregation (Sum or Mean), and appends one StepRecord (action, payoff, n_played) per agent to the step history. Deterministic; draws no randomness.</desc>
+<desc>Interaction mechanism from socsim-games. For every encounter in the PlayArena it checks that every seat holds an action, computes one payoff per role with the OutcomeRule (NormalFormOutcome evaluates the game's payoffs), adds each payoff to the seated agent's payoff and increments n_played, applies the PayoffAggregation (Sum or Mean), and appends one StepRecord (action, payoff, n_played) per agent to the step history. With Credit::Center only seat 0 of an encounter is credited. When every agent is held under PerStep, the play path is NormalFormOutcome or counting_play(), and the matching has an implicit pattern, it traverses the pattern instead of the play arena with the same results. Deterministic; draws no randomness.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -73,7 +73,7 @@
 <path d="M498 166 H547" stroke="#534AB7" stroke-width="1.6" marker-end="url(#hr)"/>
 
 <!-- footnote -->
-<text class="body" x="380" y="284" font-size="12" fill="#6B6A64" text-anchor="middle">Runs once per step over every encounter · no RNG · unfilled seat or non-All credit → error</text>
-<text class="body" x="380" y="304" font-size="11.5" fill="#9A988F" text-anchor="middle">NormalFormOutcome evaluates the stage game's payoffs; a custom OutcomeRule may also read X.</text>
+<text class="body" x="380" y="284" font-size="12" fill="#6B6A64" text-anchor="middle">Runs once per step over every encounter · no RNG · Credit::Center credits seat 0 only</text>
+<text class="body" x="380" y="304" font-size="11.5" fill="#9A988F" text-anchor="middle">NormalFormOutcome or counting_play() may skip the play arena (implicit path); same results.</text>
 
 </svg>

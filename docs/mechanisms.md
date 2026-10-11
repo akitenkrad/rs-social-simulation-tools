@@ -9,13 +9,14 @@ a single `apply` method — and is composed with other mechanisms over the share
 like neural-network layers: each reads and writes the `WorldState`, and the
 engine runs them in a fixed order every step.
 
-This catalog documents the **thirty-three** mechanisms that ship with socsim:
+This catalog documents the **thirty-seven** mechanisms that ship with socsim:
 the ten reference [HR lifecycle](usecases.md) mechanisms (calibrated against
 published empirical findings), the nine
 [organisational-silence](packs/organizational-silence.md) mechanisms (silence
 motives + spiral + threshold cascade on a hierarchical network), the learnable
-MARL `policy` mechanism, the five normal-form game mechanisms of the
-[`socsim-games`](games.md) crate (`game_match`, `game_decide`, `game_llm_decide`, `game_play`, `game_metrics`),
+MARL `policy` mechanism, the nine normal-form game mechanisms of the
+[`socsim-games`](games.md) crate (`game_match`, `game_decide`, `game_llm_decide`, `game_play`, `game_metrics`
+and the population dynamics `imitate_best`, `fermi_update`, `replicator_update`, `moran_update`),
 and the eight social-dynamics mechanisms
 (`hegselmann_krause`, `deffuant`, `social_judgement`, `lorenz`, `si_contagion`,
 `threshold_contagion`, `axelrod`, `group_conformity`) — the general, non-HR
@@ -43,7 +44,7 @@ within a phase, mechanisms fire in scenario/insertion order. The dashed green
 arrows show **shared-state hand-offs** within a single step — e.g. `turnover`
 populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 
-## The thirty-three mechanisms
+## The thirty-seven mechanisms
 
 | Mechanism | Phase | Source | Kind | Summary |
 |---|---|---|---|---|
@@ -71,7 +72,11 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`game_decide`](mechanisms/game-decide.md) | Decision, Reward | decision rules (e.g. Axelrod 1984) | rule-driven | Each seated agent's `DecisionRule` chooses a checked action once per decision unit (per step, per role or per encounter); after play, rules learn per encounter (`learn_encounter`) and per step (`learn_step`) — rule state lives in the world (library-only). |
 | [`game_llm_decide`](mechanisms/game-llm-decide.md) | Decision, Reward | LLM agents in repeated games | LLM-driven | Agents of LLM kinds render requests that are batched, deduplicated, replayed from a response store or sent to the backend, and parsed into checked actions with retries and fallbacks (feature `llm`; library-only). |
 | [`game_play`](mechanisms/game-play.md) | Interaction | normal-form payoffs | structural | `OutcomeRule` payoffs per encounter, aggregated per agent (`Sum`/`Mean`), recorded in the step history (library-only). |
-| [`game_metrics`](mechanisms/game-metrics.md) | PostStep | game-theoretic summary statistics | observation | Records per-step action shares, payoff mean/SD, cooperation rate, regret, distance to equilibrium and public aggregates; can stop the run when play settles (library-only). |
+| [`game_metrics`](mechanisms/game-metrics.md) | PostStep | game-theoretic summary statistics | observation | Records per-step action shares, population shares, payoff mean/SD, cooperation rate, regret, distance to equilibrium and public aggregates; can stop the run when play settles (library-only). |
+| [`imitate_best`](mechanisms/imitate-best.md) | Reward | Nowak & May (1992) | deterministic imitation | Every held agent adopts the action of the highest-paid agent among itself and its grid or network neighbours, all at once; ties by action index (library-only). |
+| [`fermi_update`](mechanisms/fermi-update.md) | Reward | Szabó & Tőke (1998) | stochastic imitation | Every held agent copies one random partner with probability $1/(1 + e^{-(\pi_j - \pi_i)/K})$, all at once (library-only). |
+| [`replicator_update`](mechanisms/replicator-update.md) | Reward | Schlag (1998) | stochastic imitation | Proportional imitation: copy a better-paid random partner with probability $\beta[\pi_j - \pi_i]_+$, with $\beta \le 1/\Delta\pi$ checked at assembly (library-only). |
+| [`moran_update`](mechanisms/moran-update.md) | Reward | Moran (1958); Nowak et al. (2004) | selection (birth–death) | One birth–death event per step: a parent chosen in proportion to fitness replaces a uniformly chosen agent, with optional mutation (library-only). |
 | [`hegselmann_krause`](mechanisms/hegselmann-krause.md) | Interaction | Hegselmann & Krause (2002, 2005) | bounded-confidence | Synchronous bounded-confidence update toward the chosen mean of opinions within ε (library-only). |
 | [`deffuant`](mechanisms/deffuant.md) | Interaction | Deffuant et al. (2000) | bounded-confidence | Pairwise bounded-confidence update: two agents within ε converge by a rate μ (library-only). |
 | [`social_judgement`](mechanisms/social-judgement.md) | Interaction | Social Judgement Theory | assimilation–contrast | Assimilate messages inside ε, repel those in the rejection region — drives polarisation (library-only). |
@@ -81,10 +86,13 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`axelrod`](mechanisms/axelrod.md) | Interaction | Axelrod (1997) | cultural dissemination | On each encounter copy one differing feature with probability equal to similarity (library-only). |
 | [`group_conformity`](mechanisms/group-conformity.md) | Interaction | DeGroot (1974) | within-group averaging | Each agent moves a fraction α toward its group's mean opinion; groups converge independently (library-only). |
 
-The first four `game_*` rows are registered together by `socsim_games::assemble`
-or `assemble_with_aggregates` (`game_match`, `game_decide`, `game_play`) or
+The first four `game_*` rows are registered together by `socsim_games::assemble`,
+`assemble_with_aggregates` or `assemble_with` (`game_match`, `game_decide`, `game_play`) or
 `socsim_games::llm::assemble_with_llm` (all four); `game_metrics` is built with
-`GameMetrics::new` and added to the returned builder. They are documented in
+`GameMetrics::new` and added to the returned builder. The four population
+dynamics (`imitate_best`, `fermi_update`, `replicator_update`, `moran_update`)
+are registered by `socsim_games::assemble_with` from its `dynamics` argument,
+one at a time, for worlds of held agents. They are documented in
 context on the [normal-form games](games.md) page and are library-only. The last eight rows are the members of the general (non-HR)
 [`socsim-mechanisms`](architecture.md#crate-workspace) crate — reusable,
 domain-agnostic social-dynamics building blocks (opinion dynamics, network contagion,

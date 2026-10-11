@@ -73,7 +73,7 @@ $$\nabla_\theta J = \mathbb{E}\!\left[\sum_t \nabla_\theta \log \pi_\theta(a_t \
 
 - **上流** `ObsEncoder` が読み取る値は最新でなければならない．エンコーダーが `Employee.productivity` を読み取る場合，`learning_curve` と `peer_effect` を先に実行しておく必要があるが，これらは Environment フェーズと Interaction フェーズのメカニズムで Decision より前に発火するため，フェーズの順序付けによって自動的に満たされる．
 - **下流** `ActionApplier` が書き込む値は後続のメカニズムが消費する．必要であれば，Decision フェーズ内でそれらの消費側より前に `PolicyMechanism` を宣言する．
-- **学習ループ** 収集モードでは，`MarlTrainer` がステップ後に `buffer.close_step(rewards)` を呼び出し，エピソードの合間に学習更新を実行しなければならない．完全な学習ループのパターンは [library.ja.md#learnable-policies-marl](../library.ja.md#learnable-policies-marl) を参照．
+- **学習ループ** 収集モードでは，`MarlTrainer` がステップ後に `buffer.close_step(rewards)` を呼び出し，エピソードの合間に学習更新を実行しなければならない．完全な学習ループのパターンは [library.ja.md#学習ポリシーmarl](../library.ja.md#学習ポリシーmarl) を参照．
 - **Feature フラグ** `Cargo.toml` に `socsim-marl`（`marl` feature 付き）を追加する．
 
 ## 7. パラメータ
@@ -125,7 +125,7 @@ let mut sim = SimulationBuilder::new(world)
 sim.run()?;
 ```
 
-完全な学習ループ（REINFORCE 更新，報酬の割り当て，エピソードリセット）については [学習ポリシー (MARL)](../library.ja.md#learnable-policies-marl) を参照．
+完全な学習ループ（REINFORCE 更新，報酬の割り当て，エピソードリセット）については [学習ポリシー (MARL)](../library.ja.md#学習ポリシーmarl) を参照．
 
 ## 9. 決定論性と RNG
 

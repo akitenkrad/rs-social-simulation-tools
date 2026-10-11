@@ -20,7 +20,9 @@ step it
    configured; `game.action_entropy` under feature `metrics`);
 2. writes `game.mean_payoff` and `game.payoff_sd` over the agents that played;
 3. copies this step's public aggregate row as `game.aggregate.<name>` when the
-   simulation was assembled with `assemble_with_aggregates`;
+   simulation was assembled with aggregates, and, with
+   `population_share(true)`, writes `game.population_share.a<k>`, the share of
+   all agents holding action `k`;
 4. builds one mixed strategy per role from the configured `MixedSource` and
    writes `game.regret` and, with `EquilibriumTarget::Solve`, `game.eq_distance`;
 5. updates its convergence counter and, once the shares have been stable for
@@ -50,11 +52,23 @@ $$\text{regret}(\sigma) = \max_r \Big[\max_a F_r(a, \sigma_{-r}) - F_r(\sigma)\B
 - `game.action_entropy` is the Shannon (1948) entropy $-\sum_k p_t(k) \ln p_t(k)$
   in nats.
 
+With $A$ the agents and $h_i$ agent $i$'s held action at PostStep, the
+population share is
+
+$$q_t(k) = \frac{\lvert\{i \in A : h_i = k\}\rvert}{\lvert A\rvert}$$
+
+It differs from $p_t$ twice: it counts agents rather than seats, and under
+[population dynamics](../games.md#population-dynamics) it describes the
+actions **after** the step's update (those of the next step), while $p_t$
+describes the actions played in the step.
+
 ## 3. Data flow
 
 ![game_metrics data flow](../assets/mech-game-metrics.svg)
 
-Reads the play arena (`seats`, `actions`), the per-agent `payoff` and
+Reads the play arena (`seats`, `actions`) — or, on the implicit play path, the
+per-role counts of the played actions that `game_play` kept for the step — the
+held actions (for `population_share`), the per-agent `payoff` and
 `n_played`, the last aggregate row and, for `MixedSource::Reported`, the
 mixed-strategy reports. Writes one row to the recorder's table `"game"` and,
 only when `stop` or `MixedSource::PlayedCumulative` is configured, its own
@@ -73,6 +87,8 @@ after it.
 | Field | Read | Write | Notes |
 |---|:--:|:--:|---|
 | `PlayArena.seats`, `actions` | ✓ | | A seat's role is its index modulo the role count. Every action must be `Some` and inside its role. |
+| per-role played-action counts | ✓ | | Read instead of the arena when the step ran on the implicit path (the arena is empty). Same shares, `coop_rate`, regret and cumulative counts. |
+| `GameWorld.held` | ✓ | | Only with `population_share(true)`; a held action outside the common action set is an error. |
 | `GameWorld.payoff`, `n_played` | ✓ | | Only agents with `n_played > 0` enter `mean_payoff` / `payoff_sd`. |
 | `game` | ✓ | | Role and action counts are checked against the game passed to `new`; payoffs are used for regret. |
 | aggregate table | ✓ | | Only the last row, and only if its `t` is this step's. |
@@ -110,6 +126,7 @@ Policy states, held actions, plays and payoffs are never written: adding
 | `equilibrium(EquilibriumTarget)` | `None` | observation | `Solve`: support enumeration once in `new`; two roles only; rejected if the solver fails or the equilibrium set is incomplete or empty. Adds `game.eq_distance`. |
 | `stop(tol, window)` | off | control | Stop after `window` consecutive seated steps whose largest share change is `< tol`. `tol` finite `> 0`, `window ≥ 1`. |
 | `action_entropy(on)` | on | observation | Feature `metrics` only; pooled ids only. |
+| `population_share(on)` | off | observation | Adds `game.population_share.a<k>` (agents holding `k` ÷ all agents, after any population dynamics). Every role must have the same number of actions (`GameError::Metrics`). |
 
 ## 8. How to apply
 
@@ -167,6 +184,13 @@ against an unconditional defector with `cooperate_label("C")`,
 - `t ≥ 2`: `played_share.a1 = 1`, `coop_rate = 0`, `mean_payoff = 1`,
   `payoff_sd = 0`, `regret = 0`, `eq_distance = 0`;
 - the run stops at `t = 5`.
+
+In the hawk–dove example of
+[`docs/games.md` § Population dynamics](../games.md#population-dynamics)
+(1 000 held agents, 300 initial hawks, `RandomPairs`, proportional imitation)
+with `population_share(true)`, `t = 1` records `game.played_share.a0 = 0.3`
+(the hawks that played) and `game.population_share.a0 = 0.319` (the hawks after
+the first update).
 
 ## 11. References
 

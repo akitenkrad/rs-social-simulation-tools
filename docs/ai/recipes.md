@@ -1212,8 +1212,11 @@ rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
 - Keep rules, matchings and outcome rules stateless (`&self`); per-agent memory
   goes in `X::PolicyState`, everything else in `X`. Custom matching state goes in
   `X` too.
-- Only **two-role** games are assembled (`GameError::UnsupportedRoles`), and only
-  `Credit::All` encounters are played.
+- The matching decides the role count (`Matching::supports_roles`): the built-in
+  pair matchings take **two roles**, `RandomGroups::new(k)` takes `k`,
+  `WholePopulation` one per agent (`GameError::UnsupportedRoles` otherwise;
+  LLM assembly stays two-role). `GridNeighborhood` uses `Credit::Center` (only
+  seat 0 is credited).
 - `world().payoffs()` / `n_played()` are **per step** (reset in PreStep);
   `PayoffAggregation::Mean` divides by `n_played`.
 - A rule returning an invalid action stops the step by default; use
@@ -1244,7 +1247,8 @@ rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
   built from action indices — never parse labels out of column names; use
   `metric_action_ids(&game)` + `action_label`.
 - `played_share` counts **seats**, not agents (an agent in three encounters
-  counts three times); there is no population-share column.
+  counts three times); `MetricsOptions::population_share(true)` adds
+  `game.population_share.a<k>` (agents holding `k` at PostStep).
 - `game.regret` is on by default for two-role games; `game.eq_distance` needs
   `EquilibriumTarget::Solve`, which solves once in `new` and fails there for
   non-two-player or degenerate games (`GameError::Metrics`).
@@ -1268,6 +1272,146 @@ rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
 - See also [`docs/games.md`](../games.md) (§ Metrics) and the `game_match` /
   `game_decide` / `game_play` / `game_metrics` pages under `docs/mechanisms/`.
 - LLM-driven players: see [Recipe 8b — LLM agents in a normal-form game](#recipe-8b--llm-agents-in-a-normal-form-game-socsim-games-feature-llm).
+- Imitation / selection without decision rules (spatial or well-mixed
+  evolutionary games): see [Recipe 10b — Population dynamics](#recipe-10b--population-dynamics-socsim-games).
+
+---
+
+### Recipe 10b — Population dynamics (`socsim-games`)
+
+**When to use.** Evolutionary game models in which agents do not choose by a
+rule but hold a strategy that spreads by imitation or reproduction: spatial
+games on a lattice (Nowak & May), games on networks (Fermi / pairwise
+comparison), well-mixed proportional imitation, or the Moran process. Every
+agent is `AssignKind::Held`; one population dynamic is passed to
+`assemble_with` and rewrites `held` in Reward from the step's payoffs.
+
+**Dependencies.** Recipe 10's, plus `features = ["engine", "grid"]` for a
+lattice or `["engine", "net"]` (+ `socsim-net` for `SocialNetwork`) for a
+network; add `"metrics"` only if you want `game.action_entropy`.
+
+**Code — well-mixed hawk–dove with proportional imitation.** Grounded in
+`crates/socsim-games/examples/hawk_dove_large.rs` and `tests/hawk_dove_abm.rs`
+(`socsim-log` provides `InMemoryRecorder`):
+
+```rust
+use socsim_games::catalog::HawkDove;
+use socsim_games::{
+    assemble_with, build_world, AssignGroup, AssignKind, Assignment, GameMetrics, InitialActions,
+    MetricsOptions, NormalFormOutcome, Pairwise, PlayOptions, ProportionalImitation, RandomPairs,
+    RuleBook, Update,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    let n = 1_000;
+    let seed = 7;
+    // Action 0 = hawk, 1 = dove. With V = 2, C = 4 one encounter pays in [-1, 2].
+    let game = HawkDove::new(2.0, 4.0).unwrap();
+    let metrics = GameMetrics::new(&game, MetricsOptions::new().population_share(true)).unwrap();
+
+    let rules = RuleBook::new(); // no rules: every agent is Held
+    let mut initial = vec![1; n];
+    initial[..300].fill(0); // 300 hawks, 700 doves
+    let held = Assignment::Ordered(vec![AssignGroup { kind: AssignKind::Held, count: n }]);
+    let world = build_world(game, n, (), InitialActions::PerAgent(initial), &rules, &held, 1, 200, seed)
+        .unwrap();
+
+    let mut sim = assemble_with(
+        world,
+        RandomPairs::new(),                // n is even: every agent plays exactly once
+        rules,
+        Pairwise::new(NormalFormOutcome),  // the play path of `assemble`
+        ProportionalImitation::new(1.0 / 3.0, Update::Synchronous).unwrap(), // beta = 1 / (2 - (-1))
+        PlayOptions::new(),
+        seed,
+    )
+    .unwrap()
+    .add_mechanism(Box::new(metrics))
+    .recorder(Box::new(InMemoryRecorder::new()))
+    .build();
+    sim.run().unwrap();
+
+    let recorder = sim.recorder().as_any().unwrap().downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| {
+        [1, 50, 200].contains(&row.t)
+            && (row.key == "game.played_share.a0" || row.key == "game.population_share.a0")
+    }) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+}
+```
+
+Prints `population_share.a0` 0.319 at `t = 1` and ≈ 0.5 (= V/C) by `t = 50`.
+
+**Code — lattice (Nowak–May).** Grounded in `examples/nowak_may.rs`; attach the
+topology after `build_world`, then use `GridNeighborhood` + `ImitateBest`:
+
+```rust
+let world = build_world(game, side * side, (), initial, &rules, &held, 1, steps, seed)?
+    .with_topology(Topology::grid(GridSpec {
+        rows: side,
+        cols: side,
+        boundary: GridBoundary::Toroidal,          // or Fixed
+        neighborhood: GridNeighbors::Moore,        // or VonNeumann
+    })?)?;
+```
+
+```rust
+let mut sim = assemble_with(
+    world,
+    GridNeighborhood::new().include_self(true),          // Moore + self-play, Credit::Center
+    rules,                                               // empty RuleBook
+    Pairwise::new(NormalFormOutcome),
+    ImitateBest::new(Update::Synchronous),               // ties: KeepOwn
+    PlayOptions::new(),
+    seed,
+)?
+.build();
+```
+
+**Choosing the pieces.**
+
+| Want | Matching | Dynamic | Topology |
+|---|---|---|---|
+| Spatial PD (Nowak & May 1992) | `GridNeighborhood::new().include_self(true)` | `ImitateBest` | `Topology::grid` (required) |
+| Games on networks | `NetworkEdges::new()` | `FermiUpdate::new(k, ..)?` | `Topology::network` |
+| Well-mixed replicator-like | `RandomPairs::new()` / `RandomGroups::new(k)?` | `ProportionalImitation::new(beta, ..)?` | none |
+| Fixation probabilities | `RandomPairs::new()` | `MoranUpdate::new(Fitness::Linear { w }, mutation, ..)?` | none (required) |
+| n-player anonymous game (El Farol, minority, public goods) | `WholePopulation::new()` / `RandomGroups::new(k)?` + play `counting_play()` | any copy dynamic except `ImitateBest` without topology | optional |
+
+**Gotchas.**
+- `Update::Synchronous` is a required constructor argument (no default).
+  Everything is synchronous: next actions come from the pre-update state.
+- Any agent with a decision rule makes `assemble_with` fail
+  (`GameError::Population`). Mixing learning rules with imitation is not
+  supported.
+- `ProportionalImitation`: `beta ≤ 1 / Δπ`, Δπ = width of the **per-step**
+  payoff range; with `PayoffAggregation::Sum` this scales with the number of
+  encounters (Moore + self-play: ×9), and matchings without
+  `encounter_bounds` (`FixedPlayers`, `RoundRobin`, custom) are rejected under
+  `Sum` — use `Mean`. A user-defined `OutcomeRule` cannot be bounded.
+  `MoranUpdate` with `Fitness::Linear` needs `1 − w + w·π_min > 0` (same range).
+- `ImitateBest` needs a grid/network; `MoranUpdate` refuses any topology.
+- At PostStep `payoffs()` are from the actions **played**, `held()` are the
+  **updated** actions; `played_share(t) ≠ population_share(t)`.
+- With all agents held, `PerStep`, `Pairwise<NormalFormOutcome>` /
+  `counting_play()` and `WholePopulation` / `NetworkEdges` /
+  `GridNeighborhood`, the step runs without the play arena: `world.plays()` is
+  empty. Pass `PlayOptions::new().materialize(true)` if you need it; results
+  are identical either way.
+- Random initial placements: shuffle with your own stream
+  (`derive_seed(seed, &[0, 2])` in the examples, or `[4]+`), never with the
+  engine stream.
+- Solvers for comparison (default build): `solve::pure_nash_counts` (anonymous
+  games), `solve::replicator_integrate` / `replicator_fixed_points`,
+  `solve::ess_verdict`, `HawkDove::hawk_share_ess()`.
+- Run the examples: `cargo run --release -p socsim-games --features
+  core,engine,grid --example nowak_may -- --steps 200 --seed 1` (CSV
+  `generation,cooperator_share`) and `cargo run --release -p socsim-games
+  --features core,engine --example hawk_dove_large -- --n 1000000 --steps 10`.
+  Details: [`docs/games.md` § Population dynamics](../games.md#population-dynamics)
+  and `docs/mechanisms/{imitate-best,fermi-update,replicator-update,moran-update}.md`.
 
 ---
 

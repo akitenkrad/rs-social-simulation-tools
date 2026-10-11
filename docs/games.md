@@ -12,10 +12,13 @@ The crate is library-only (no `ModulePack`, not wired into the `socsim` binary).
 This page covers the building blocks, where their state lives, what a rule is
 allowed to see, how to assemble a runnable simulation, and the built-in learning
 rules and decision scopes (see
-[Learning rules and decision scope](#learning-rules-and-decision-scope)), and the
+[Learning rules and decision scope](#learning-rules-and-decision-scope)),
+populations of agents that imitate or reproduce on a lattice, a network or in a
+well-mixed population (see [Population dynamics](#population-dynamics)), and the
 per-step metrics mechanism `game_metrics` (see [Metrics](#metrics)). Separately from the
 simulation, the crate ships classic games and solvers for finite games — Nash
-equilibria, dominance, minimax and logit QRE (see
+equilibria, dominance, minimax, logit QRE, equilibria of anonymous games, the
+replicator dynamics and evolutionary stability (see
 [Solving finite games](#solving-finite-games)).
 
 ---
@@ -24,15 +27,18 @@ equilibria, dominance, minimax and logit QRE (see
 
 | Feature | Adds | socsim dependencies |
 |---|---|---|
-| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`, `AggregateGame`), `MatrixGame`, the built-in games (`catalog`), mixed strategies (`mixed`), the solvers (`solve`), the learning-rule cores (`learn`), `AggregateSpec` and the metric action ids (`metric_action_ids`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
-| `core` | the world (`GameWorld`), rules (including the learning rules), outcome rules, matching, views, `build_world`, the metrics mechanism `GameMetrics` | `socsim-core` |
-| `engine` | `assemble` and `assemble_with_aggregates` (both return a `SimulationBuilder`); implies `core` | `socsim-core`, `socsim-engine` |
+| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`, `AggregateGame`, `AnonymousGame`, `CommonActionSpace`), `MatrixGame`, the built-in games (`catalog`), mixed strategies (`mixed`), the solvers (`solve`, including `pure_nash_counts`, the replicator dynamics and `ess_verdict`), the learning-rule cores (`learn`), `AggregateSpec` and the metric action ids (`metric_action_ids`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
+| `core` | the world (`GameWorld`, `Topology`), rules (including the learning rules), outcome rules, the matchings (`FixedPlayers`, `RoundRobin`, `RandomPairs`, `RandomGroups`, `WholePopulation`), views, `build_world`, the configuration types of the population dynamics (`ImitateBest`, `FermiUpdate`, `ProportionalImitation`, `MoranUpdate`), the metrics mechanism `GameMetrics` | `socsim-core` |
+| `engine` | `assemble`, `assemble_with_aggregates` and `assemble_with` (all return a `SimulationBuilder`), the play paths (`Pairwise`, `counting_play()`) and the population-dynamics mechanisms; implies `core` | `socsim-core`, `socsim-engine` |
+| `net` | `Topology::network` / `Topology::directed_network` and the matching `NetworkEdges` (see [Topology](#topology-gameworldwith_topology)); implies `core` | `socsim-core`, `socsim-net` |
+| `grid` | `Topology::grid` (`GridSpec`) and the matching `GridNeighborhood`; implies `core` | `socsim-core`, `socsim-grid` |
 | `metrics` | the `game.action_entropy` column of `GameMetrics` (see [Metrics](#metrics)); implies `core` | `socsim-core`, `socsim-metrics` (default features off — only its dependency-free `stats` module) |
 | `llm` | LLM-backed decision rules, the response store and the replay manifest (see [LLM decisions](#llm-decisions-feature-llm)); implies `core`. The `game_llm_decide` mechanism and `assemble_with_llm` also need `engine` | `socsim-core`, `socsim-llm` (default features only — no networking) |
 | `live` | `live_backend_factory()` (the cache-free Ollama → OpenAI backend); implies `llm` | as `llm`, plus `socsim-llm/live` |
 
-Without `llm`, the crate does not depend on `socsim-llm`, and without `metrics`
-it does not depend on `socsim-metrics`; it never depends on
+Without `llm`, the crate does not depend on `socsim-llm`, without `metrics`
+it does not depend on `socsim-metrics`, and without `net` / `grid` it does not
+depend on `socsim-net` / `socsim-grid`; it never depends on
 `socsim-config` or `socsim-runner`. A simulation needs `core` and `engine`:
 
 ```toml
@@ -134,6 +140,27 @@ Rules and outcome rules state the rung they need as a trait bound —
 `UniformRandom` and `TitForTat` require `FiniteGame`, `NormalFormOutcome`
 requires `NormalFormGame` — so a mismatch is a compile error, not a runtime one.
 
+### Anonymous games and `CommonActionSpace`
+
+Two more traits (default build) describe games played by populations:
+
+| Trait | Means | Methods |
+|---|---|---|
+| `AnonymousGame: FiniteGame` | a player's payoff depends only on its own action and on **how many** of the other players choose each action, not on who they are | `payoff_by_counts(a, counts_others)`: `counts_others[k]` is the number of *other* players choosing `k`; the entries sum to `n_roles() - 1` |
+| `CommonActionSpace: StageGame` | a marker: every role chooses from the same action set, so an action can be copied from one agent to another whatever their roles | none |
+
+`payoff_by_counts` must agree with `payoff` on every profile: it is what the
+counting play path ([`counting_play()`](#anonymous-games-in-a-simulation-counting_play))
+and the solver [`pure_nash_counts`](#pure_nash_counts) evaluate instead of
+enumerating profiles. `CommonActionSpace` is required by the dynamics that copy
+actions between agents (`imitate_best`, `fermi_update`, `replicator_update`,
+`moran_update`); using one of them with a game that does not implement it is a
+compile error. The marker is a promise, and assembly still checks it at run
+time: for a `FiniteGame` every role must have the same number of actions
+(`GameError::Population` otherwise). `MatrixGame` and every built-in game
+implement `CommonActionSpace`; the four population games of the catalog also
+implement `AnonymousGame`.
+
 ### `MatrixGame`
 
 `MatrixGame` is the built-in `FiniteGame`: one row-major payoff tensor per role,
@@ -153,17 +180,23 @@ an oversized game (`TooLarge`: more than 10⁶ profiles or 10⁷ payoff elements
 `payoff(0, (i, j)) == payoff(1, (j, i))`. `MatrixGame` serialises with serde, so
 it is part of a snapshot.
 
-The simulation layer currently assembles **two-role** encounters only:
-`assemble` rejects any other `n_roles()` with `GameError::UnsupportedRoles`.
+How many roles an encounter may have is decided by the matching
+(`Matching::supports_roles`): `FixedPlayers`, `RoundRobin`, `RandomPairs`,
+`NetworkEdges` and `GridNeighborhood` seat two roles, `RandomGroups::new(k)`
+seats `k`, and `WholePopulation` seats one role per agent. `assemble` rejects a
+game whose `n_roles()` the matching does not support with
+`GameError::UnsupportedRoles`. LLM decisions (`assemble_with_llm`) remain
+two-role only.
 
 ### Built-in games: `catalog`
 
-`socsim_games::catalog` provides five classic two-player games. Each one
+`socsim_games::catalog` provides five classic two-player games and four games
+for populations. Each one
 implements `FiniteGame`, so it plugs into `build_world`, the built-in rules and
-the [solvers](#solving-finite-games) exactly like a `MatrixGame`; `to_matrix()`
-converts it to an equivalent `MatrixGame` with the same labels. Action labels
-are ASCII, and where the game has a cooperative side (`C`, `stag`) it is action
-`0`.
+the [solvers](#solving-finite-games) exactly like a `MatrixGame`; on the
+two-player games `to_matrix()` converts it to an equivalent `MatrixGame` with
+the same labels. Action labels are ASCII, and where the game has a cooperative
+side (`C`, `stag`) it is action `0`.
 
 | Type | Actions `0, 1, …` | Constructors | Checked at construction |
 |---|---|---|---|
@@ -181,6 +214,29 @@ always written out. In the default matching pennies, role 0 wins when the
 coins differ. In rock–paper–scissors the winner receives `win`, the loser
 `-loss` and a tie `0`; with the default `win = loss = 1` this is the standard
 antisymmetric zero-sum form (with `win ≠ loss` the game is not zero-sum).
+
+The population games are symmetric, implement `AnonymousGame` and
+`CommonActionSpace`, and have two actions:
+
+| Type | Roles | Actions `0, 1` | Payoff | Constructor and checks |
+|---|---|---|---|---|
+| `HawkDove` | 2 | `H`, `D` | $HH = (V-C)/2$, $HD = V$, $DH = 0$, $DD = V/2$ (row player) | `new(v, c)`: `V > 0`, `C > 0`. `hawk_share_ess()` returns $V/C$ when $V < C$, else `1`. Has `to_matrix()` |
+| `ElFarol` | `n` | `attend`, `stay` | attending pays $+1$ when the number of attendees $A$ (the player included) is at most `capacity`, $-1$ when $A$ exceeds it; staying pays $0$ | `new(n, capacity)`: `n ≥ 2`, `0 < capacity < n` |
+| `MinorityGame` | `n` (odd) | `a0`, `a1` | $+1$ for the players on the minority side, $0$ for the majority | `new(n)`: `n ≥ 3` and odd (so there is never a tie) |
+| `PublicGoodsFinite` | `k` | `C`, `D` | with $m$ contributors in the group (the player included), $P_C = r\,c\,m/k - c$, $P_D = r\,c\,m/k$ | `new(k, r, cost)`: `k ≥ 2`, `r > 0`, `cost > 0` (`1 < r < k` is not required) |
+
+The hawk–dove table is the one of Maynard Smith (1982); with $V < C$ the
+evolutionarily stable share of hawks is $V/C$. `ElFarol` follows the bar
+problem of Arthur (1994), whose $N = 100$ and threshold 60 are qualitative: the
+$\pm 1$ payoffs and the treatment of exactly `capacity` attendees ($+1$) are
+choices of this crate. Its only pure equilibrium is attendance equal to
+`capacity`. `MinorityGame` is the game of Challet & Zhang (1997) (winners score
+a point, losers nothing). `PublicGoodsFinite` uses the payoffs of Hauert, De
+Monte, Hofbauer & Sigmund (2002); for $r < k$ not contributing dominates.
+`ElFarol` and `MinorityGame` also implement `AggregateGame` with one public
+value, `attendance` (`Sum`): the number of players choosing action `0` in the
+encounter. In the minority game the minority side is `0` when
+`attendance` $< n/2$ and `1` otherwise.
 
 Every constructor returns `Result<_, CatalogError>`: `NonFinite` for a NaN or
 infinite payoff, `Condition(_)` when the payoffs lack the game's defining
@@ -338,8 +394,18 @@ impl OutcomeRule<MatrixGame, ReputationState> for ReputationDiscount {
 }
 ```
 
-Encounters must use `Credit::All` (every seat is credited with its payoff);
-other credit modes are not yet provided and stop the step with an error.
+An encounter's `credit` says which seats are credited with their payoff:
+
+- `Credit::All` — every seat adds its payoff to its agent's `payoff` and
+  increments its `n_played`. Every matching except `GridNeighborhood` uses it.
+- `Credit::Center` — only seat 0 (the "center") is credited; the other seats
+  take part in the encounter but their payoff is not added to their agents.
+  `GridNeighborhood` uses it: each agent plays one encounter as the center
+  with each neighbor, so an agent is credited exactly once per neighbor (and
+  once more for self-play), never twice for the same pair.
+
+The play arena still stores the payoff of every seat, and the played-action
+shares of `game_metrics` count every seat, whatever the credit.
 
 ---
 
@@ -426,11 +492,12 @@ All state that a resumed run needs is stored **in the world**:
 | per-agent step history (ring of `history_len`) | `world.history(agent)` |
 | per-pair encounter history (ring of `history_len` per pair; only when a rule asks for it) | through `DecisionContext::pair_history` (see [Pair history](#pair-history)) |
 | the matching's state (`MatchingState`, e.g. the `RoundRobin` cursor) | serialised with the world |
+| the topology (grid or network) | set with `GameWorld::with_topology`; serialised with the world (a grid as its `GridSpec`) |
 | the experiment state | `world.x()` |
 
-The three mechanisms (`game_match`, `game_decide`, `game_play`), the
-`RuleBook`, the `Matching` and the `OutcomeRule` hold **no** state that affects a
-resumed run — they are code, supplied again when the simulation is rebuilt. That
+The three mechanisms (`game_match`, `game_decide`, `game_play`), the population
+dynamics, the `RuleBook`, the `Matching` and the `OutcomeRule` hold **no** state
+that affects a resumed run — they are code, supplied again when the simulation is rebuilt. That
 is what makes the engine's [snapshot & resume](architecture.md#snapshots-save--resume)
 exact for game simulations:
 
@@ -496,6 +563,10 @@ A `Matching<G, X>` seats agents into encounters at the start of `Decision`:
 pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
     fn name(&self) -> &str;
     fn check(&self, ctx: &MatchContext<'_, G, X>) -> Result<(), GameError>;
+    fn supports_roles(&self, n_roles: usize) -> bool { n_roles == 2 }
+    fn encounter_bounds(&self, ctx: &MatchContext<'_, G, X>) -> Option<EncounterBounds> { None }
+    fn allows_multi_role_per_step(&self) -> bool { false }
+    fn implicit(&self) -> Option<ImplicitPattern> { None }
     fn init_state(&self, ctx: &MatchContext<'_, G, X>) -> MatchingState { MatchingState::None }
     fn encounters_into(
         &self,
@@ -507,13 +578,27 @@ pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
 }
 ```
 
-`encounters_into` pushes one encounter per `out.push(&seats, Credit::All)`
-(`seats` has one agent per role). `check` runs once in `assemble` to validate the
+`encounters_into` pushes one encounter per `out.push(&seats, credit)`
+(`seats` has one agent per role; `credit` is `Credit::All` or `Credit::Center`,
+see [Outcome rules](#outcome-rules)). The four optional methods describe the
+matching to `assemble`:
+
+| Method | Default | Meaning |
+|---|---|---|
+| `supports_roles(n)` | `n == 2` | the role counts the matching can seat; others are rejected with `UnsupportedRoles` |
+| `encounter_bounds(ctx)` | `None` | the fewest and most encounters an agent is credited with per step (`EncounterBounds { min, max }`); used to bound per-step payoffs (see [Conditions checked at assembly](#conditions-checked-at-assembly)) |
+| `allows_multi_role_per_step()` | `false` | `true` lets an agent hold several roles in one step under `DecisionScope::PerStep`; it then decides once and plays that action in every seat |
+| `implicit()` | `None` | a pattern (`ImplicitPattern`) that `game_play` can traverse without building the play arena (see [Evaluating without materialising encounters](#evaluating-without-materialising-encounters)) |
+
+`check` runs once in `assemble` to validate the
 matching against the world; `ctx.decision_scope()` tells it the
 [decision scope](#decision-scope) in use. The built-in
 `FixedPlayers::pairs(&[(0, 1), …])` plays the same pairs every step and rejects
 unknown agents, an agent listed twice, and games without exactly two roles. The
-built-in [`RoundRobin`](#roundrobin) seats every pair of agents every step. An
+built-in [`RoundRobin`](#roundrobin) seats every pair of agents every step.
+The matchings for populations — `RandomPairs`, `RandomGroups`,
+`WholePopulation`, `NetworkEdges` and `GridNeighborhood` — are described in
+[Population matchings](#population-matchings). An
 agent that is not seated in a step does not decide or play that step.
 
 A custom matching keeps any state it needs **in `X`** (updated by your own
@@ -544,8 +629,17 @@ Interaction  game_play    OutcomeRule → payoffs → pair history → aggregati
                           (→ aggregate row, under assemble_with_aggregates)
 Reward       game_decide  learn_encounter (per encounter) + learn_step (rule state)
                           (→ post-learning mixed reports, with report_mixed)
+             dynamics     (assemble_with only) imitation / selection → held
 PostStep     game_metrics (optional, added by you) → one "game" row of metrics
 ```
+
+`assemble_with` can register a fourth mechanism, a population dynamic
+(`imitate_best`, `fermi_update`, `replicator_update` or `moran_update`). It runs
+in Reward after `game_decide`, so any learning precedes imitation and
+selection; see [Population dynamics](#population-dynamics). When the
+[implicit play path](#evaluating-without-materialising-encounters) is in use,
+`game_match` writes no encounters in Decision and `game_play` traverses the
+matching's pattern instead of the play arena.
 
 With the `llm` feature, `assemble_with_llm` registers a fourth mechanism,
 [`game_llm_decide`](mechanisms/game-llm-decide.md) (Decision, Reward), between
@@ -594,22 +688,47 @@ pub fn assemble_with_aggregates<G: AggregateGame, X, M: Matching<G, X>, O: Outco
     seed: u64,
     aggregate_history_len: usize,
 ) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>;
+
+pub fn assemble_with<G, X, M: Matching<G, X>, P: PlayPath<G, X>, D: PopulationDynamics<G, X>>(
+    world: GameWorld<G, X>,
+    matching: M,
+    rules: RuleBook<G, X>,
+    play: P,        // Pairwise::new(outcome) | counting_play(), optionally .with_aggregates(n)
+    dynamics: D,    // NoDynamics | ImitateBest | FermiUpdate | ProportionalImitation | MoranUpdate
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>;
 ```
+
+`assemble(world, matching, rules, outcome, opts, seed)` is
+`assemble_with(world, matching, rules, Pairwise::new(outcome), NoDynamics, opts, seed)`,
+and `assemble_with_aggregates(.., seed, n)` is the same with
+`Pairwise::new(outcome).with_aggregates(n)`. `PlayPath` and
+`PopulationDynamics` are sealed: the play paths are `Pairwise<O>` (every
+encounter evaluated by an `OutcomeRule`), `Counting` from `counting_play()`
+(anonymous games, see
+[Anonymous games in a simulation](#anonymous-games-in-a-simulation-counting_play))
+and either of them wrapped by `.with_aggregates(history_len)`; the dynamics are
+`NoDynamics` and the four types of [Population dynamics](#population-dynamics).
 
 `build_world` checks: `history_len > 0` (`InvalidHistoryLength`); the
 assignment counts and `PerAgent` length equal `n_agents` (`AgentCount`); every
 initial action passes `check_action` for every role; every assigned kind is in
 the `RuleBook` (`RuleError::UnknownKind`); every `init_state` succeeds.
 
-`assemble` checks: the game has two roles (`UnsupportedRoles`); every rule kind
+`assemble` checks: the matching supports the game's role count
+(`UnsupportedRoles`); every rule kind
 in the world is in the `RuleBook`; with `OnInvalidAction::Fallback`, every active
 kind has a fallback action that is valid for every role; `report_mixed(true)`
 is not combined with `DecisionScope::PerEncounter` (`GameError::Metrics`); and
 `Matching::check`. `assemble_with_aggregates` does the same and additionally
 requires `aggregate_history_len > 0` (`InvalidAggregateHistoryLength`); it is
 `assemble` plus the public aggregate table of
-[Public aggregates](#public-aggregates-aggregategame).
-It sets the engine seed to `derive_seed(seed, &[1])` and returns the builder, so
+[Public aggregates](#public-aggregates-aggregategame). `assemble_with` makes
+the same checks and, with a population dynamic, the checks of
+[Conditions checked at assembly](#conditions-checked-at-assembly) (errors
+`GameError::Population`).
+Each of them sets the engine seed to `derive_seed(seed, &[1])` and returns the builder, so
 you can still add a scheduler, a recorder or extra mechanisms before `build()`.
 Pass the **same** `seed` to both functions. Calling `.seed(...)` on the returned
 builder overrides the engine stream.
@@ -622,6 +741,7 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
     .on_invalid_action(OnInvalidAction::Stop)           // Stop (default) | Fallback(map)
     .decision_scope(DecisionScope::PerEncounter)        // PerStep (default) | PerAgentRole | PerEncounter
     .report_mixed(true)                                 // false (default) | true
+    .materialize(true)                                  // false (default) | true
 ```
 
 - **`PayoffAggregation`** — how an agent's payoffs from several encounters in
@@ -640,6 +760,9 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
   through `GameWorld::reported_mixed`; see
   [Reporting mixed strategies](#reporting-mixed-strategies). Rejected together
   with `DecisionScope::PerEncounter`.
+- **`materialize`** — `true` forces `game_play` to build the play arena even
+  when the step could be evaluated without it; see
+  [Evaluating without materialising encounters](#evaluating-without-materialising-encounters).
 
 ---
 
@@ -1670,6 +1793,445 @@ Steps without any LLM decision record nothing.
 
 ---
 
+## Population dynamics
+
+In evolutionary game theory the agents do not reason about the game. Each one
+holds a strategy and plays it; strategies that earn more then spread, by
+imitation of better-paid agents or by reproduction in proportion to fitness.
+`socsim-games` models this with **held** agents (agents without a decision
+rule, `AssignKind::Held`) and one **population dynamic**: a mechanism that, in
+Reward, rewrites the held actions from the payoffs the step has just produced.
+Pass it as the `dynamics` argument of `assemble_with`.
+
+A well-mixed hawk–dove population: 1 000 agents are paired at random every step
+and update by proportional imitation. Starting from 30 % hawks, the hawk share
+moves to the evolutionarily stable share $V/C = 0.5$:
+
+```rust
+use socsim_games::catalog::HawkDove;
+use socsim_games::{
+    assemble_with, build_world, AssignGroup, AssignKind, Assignment, GameMetrics, InitialActions,
+    MetricsOptions, NormalFormOutcome, Pairwise, PlayOptions, ProportionalImitation, RandomPairs,
+    RuleBook, Update,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    let n = 1_000;
+    let seed = 7;
+    // Action 0 = hawk, 1 = dove. With V = 2, C = 4 one encounter pays in [-1, 2].
+    let game = HawkDove::new(2.0, 4.0).unwrap();
+    let metrics = GameMetrics::new(&game, MetricsOptions::new().population_share(true)).unwrap();
+
+    let rules = RuleBook::new(); // no rules: every agent is Held
+    let mut initial = vec![1; n];
+    initial[..300].fill(0); // 300 hawks, 700 doves
+    let held = Assignment::Ordered(vec![AssignGroup { kind: AssignKind::Held, count: n }]);
+    let world = build_world(game, n, (), InitialActions::PerAgent(initial), &rules, &held, 1, 200, seed)
+        .unwrap();
+
+    let mut sim = assemble_with(
+        world,
+        RandomPairs::new(),                // n is even: every agent plays exactly once
+        rules,
+        Pairwise::new(NormalFormOutcome),  // the play path of `assemble`
+        ProportionalImitation::new(1.0 / 3.0, Update::Synchronous).unwrap(), // beta = 1 / (2 - (-1))
+        PlayOptions::new(),
+        seed,
+    )
+    .unwrap()
+    .add_mechanism(Box::new(metrics))
+    .recorder(Box::new(InMemoryRecorder::new()))
+    .build();
+    sim.run().unwrap();
+
+    let recorder = sim.recorder().as_any().unwrap().downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| {
+        [1, 50, 200].contains(&row.t)
+            && (row.key == "game.played_share.a0" || row.key == "game.population_share.a0")
+    }) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+}
+```
+
+```text
+t=1 game.played_share.a0 = 0.3
+t=1 game.population_share.a0 = 0.319
+t=50 game.played_share.a0 = 0.497
+t=50 game.population_share.a0 = 0.498
+t=200 game.played_share.a0 = 0.54
+t=200 game.population_share.a0 = 0.511
+```
+
+At `t = 1` the 300 initial hawks played (`played_share.a0 = 0.3`), and after
+the first update 319 agents hold hawk (`population_share.a0`). Because every
+agent plays exactly once here, `played_share` at step `t` equals
+`population_share` at step `t − 1`. A finite population keeps fluctuating
+around $V/C$.
+
+### The four dynamics
+
+| Mechanism | Configuration (`assemble_with` argument) | Rule for agent $i$ | Topology | Randomness |
+|---|---|---|---|---|
+| [`imitate_best`](mechanisms/imitate-best.md) | `ImitateBest::new(update)`, `.tie_break(ImitationTie::{KeepOwn, LowestAction})` | adopt the action of the highest-paid agent among $i$ and its neighbours | grid or network, required | none |
+| [`fermi_update`](mechanisms/fermi-update.md) | `FermiUpdate::new(k, update)?` | draw one partner $j$; adopt $j$'s action with probability $1/(1 + \exp[-(\pi_j - \pi_i)/K])$ | optional | partner + one uniform draw |
+| [`replicator_update`](mechanisms/replicator-update.md) | `ProportionalImitation::new(beta, update)?` | draw one partner $j$; adopt $j$'s action with probability $\beta\,[\pi_j - \pi_i]_+$ | optional | partner + one uniform draw |
+| [`moran_update`](mechanisms/moran-update.md) | `MoranUpdate::new(fitness, mutation, update)?` | one birth–death event per step: a parent chosen in proportion to fitness replaces one uniformly chosen agent | none allowed | four draws per step |
+
+$\pi_i$ is agent $i$'s payoff for the step, after `PayoffAggregation` (what
+`world.payoffs()` holds). The dynamics never recompute payoffs.
+
+- **`imitate_best`** (Nowak & May, 1992). Ties are broken by action index,
+  never by neighbour position, so the rule commutes with the symmetries of the
+  lattice. `ImitationTie::KeepOwn` (the default) keeps the agent's own action
+  when its payoff is among the highest and otherwise adopts the lowest action
+  index among the best neighbours; `LowestAction` adopts the lowest action index
+  among the agent and its neighbours that share the highest payoff.
+- **`fermi_update`** (Szabó & Tőke, 1998). The partner is drawn uniformly from
+  the agent's neighbours, or, without a topology, from all other agents; it is
+  never the agent itself. $K > 0$ is the noise: $K \to 0$ approaches
+  deterministic imitation of a better partner, a large $K$ random copying. The
+  probability is evaluated as $1/(1 + e^{-z})$ for $z \ge 0$ and
+  $e^{z}/(1 + e^{z})$ for $z < 0$, $z = (\pi_j - \pi_i)/K$, so it never
+  overflows.
+- **`replicator_update`** is the proportional imitation rule of Schlag (1998):
+  a better-paid partner is copied with a probability proportional to the payoff
+  difference, a worse-paid one never. In a large well-mixed population its
+  expected change is a discrete form of the replicator dynamics, hence the
+  mechanism's name. The partner is drawn as for `fermi_update`.
+- **`moran_update`** (Moran, 1958; Nowak, Sasaki, Taylor & Fudenberg, 2004;
+  Traulsen, Shoresh & Nowak, 2008). The parent is drawn from all agents with
+  probability proportional to its fitness, the agent that dies is drawn
+  uniformly from all agents (the parent included), and the dying agent's held
+  action becomes the parent's — or, with probability `mutation`, an action drawn
+  uniformly. Fitness is `Fitness::Linear { w }`, $1 - w + w\,\pi$ with
+  $w \in [0, 1]$, or `Fitness::Exponential { w }`, $e^{w\pi}$ with finite $w$.
+  With constant fitness $r$ for a single mutant against $1$ for the residents,
+  the probability that the mutant takes over $N$ agents is
+  $\rho = (1 - 1/r)/(1 - 1/r^N)$, $1/N$ when neutral.
+
+An agent without neighbours keeps its action and draws nothing.
+
+### Synchronous update
+
+Every constructor takes the update schedule as a required argument; the only
+schedule is `Update::Synchronous`, and it has no default value, so that adding
+further schedules can never change the meaning of an existing configuration.
+Under `Synchronous` every agent's next action is computed from the **same
+pre-update state** into a buffer, and all actions are written together at the
+end of the step: no agent sees another agent's new action within the step.
+Applied in place, one agent after the other, the same rule would make the
+result depend on the order of the agents and would break the symmetry of a
+symmetric lattice configuration. `moran_update` writes exactly one held action
+per step, after both the parent and the dying agent have been drawn from the
+pre-update state.
+
+### What `PostStep` sees
+
+The dynamics run in Reward, after `game_play` has written the payoffs and after
+`game_decide`'s learning. At PostStep, therefore:
+
+| Read | Describes |
+|---|---|
+| `world.payoffs()`, `n_played()`, `plays()`, the step history | the actions played in this step, **before** the update |
+| `world.held()` | the actions **after** the update — the ones the agents will play next step |
+
+`game_metrics` reports both sides. `game.played_share.<id>` counts this step's
+seats (the played actions), and `game.population_share.a<k>`, enabled with
+`MetricsOptions::population_share(true)`, is the share of **all agents** that
+hold action `k` after the update. The two differ in content (before and after
+the update) and in denominator (seats and agents): an agent seated in nine
+encounters counts nine times in `played_share` and once in `population_share`,
+and an agent seated in none counts only in `population_share`. See
+[Columns](#columns).
+
+### Conditions checked at assembly
+
+`assemble_with` rejects a configuration in which a dynamic is not well defined,
+with `GameError::Population` (the constructors already reject non-finite or
+out-of-range parameters with the same error):
+
+- **Held agents only.** Every agent must be `AssignKind::Held`. An agent with a
+  decision rule would overwrite `held` in Decision, so the dynamics refuse to
+  mix with rules.
+- **A common action space.** The game must implement `CommonActionSpace`
+  (otherwise the call does not compile), and every role must have the same
+  number of actions.
+- **Topology.** `imitate_best` requires a grid or network topology;
+  `moran_update` requires a world without topology. `fermi_update` and
+  `replicator_update` accept both.
+- **The upper bound of `replicator_update`.** The adoption probability
+  $\beta\,[\pi_j - \pi_i]_+$ must never exceed one, so
+  $\beta \le 1/\Delta\pi$, where $\Delta\pi$ is the width of the attainable
+  per-step payoff range.
+- **Positive linear fitness of `moran_update`.** With `Fitness::Linear { w }`,
+  $1 - w + w\,\pi_{\min}$ must be positive at the lowest attainable per-step
+  payoff $\pi_{\min}$. `Fitness::Exponential` is always positive.
+
+The attainable per-step range is derived from the payoff range of one
+encounter, $[p_{\min}, p_{\max}]$, and from the matching's
+`encounter_bounds` (`min` and `max` encounters an agent is credited with):
+
+- the one-encounter range comes from every action profile of the game with
+  `Pairwise::new(NormalFormOutcome)` (at most 10⁶ profiles), and from every
+  count vector with `counting_play()`. A user-defined `OutcomeRule` cannot be
+  bounded, so `replicator_update` and `moran_update` with `Linear` fitness are
+  rejected with it;
+- under `PayoffAggregation::Sum` the range spans $c \cdot p$ for
+  $c \in \{\texttt{min}, \texttt{max}\}$ and $p \in \{p_{\min}, p_{\max}\}$; a
+  matching that reports no bounds (`FixedPlayers`, `RoundRobin`, a custom
+  matching by default) is rejected — use `PayoffAggregation::Mean`;
+- under `Mean` it is $[p_{\min}, p_{\max}]$;
+- when `min` is `0` (an agent can sit out, e.g. `RandomPairs` with an odd
+  population), `0` is added to the range.
+
+For hawk–dove with $V = 2$, $C = 4$ one encounter pays in $[-1, 2]$. Under
+`RandomPairs` each agent is credited with at most one encounter, so
+$\Delta\pi = 3$ and $\beta \le 1/3$. Under `GridNeighborhood` with Moore
+neighbours and self-play every agent is credited with 9 encounters, so `Sum`
+gives $[-9, 18]$ and $\beta \le 1/27$, while `Mean` keeps $\beta \le 1/3$.
+Requesting $\beta = 0.5$ in the example above fails:
+
+```text
+invalid population dynamics: replicator_update requires beta <= 1 / 3 (the per-step payoff range), got 0.5
+```
+
+At run time a non-finite payoff stops the step with a mechanism error, as does a
+non-positive total fitness in `moran_update`.
+
+### Population matchings
+
+| Matching | Roles | Encounters per step | Credit | `encounter_bounds` | Implicit | Randomness |
+|---|---|---|---|---|---|---|
+| `RandomPairs::new()` | 2 | shuffles the agents and seats consecutive pairs; with an odd population one agent sits out | `All` | `1..1`, or `0..1` for odd $n$ | no | one shuffle |
+| `RandomGroups::new(k)?` | `k` (`k ≥ 2`) | shuffles the agents and seats consecutive groups of `k`; the last $n \bmod k$ sit out | `All` | `1..1`, or `0..1` when `k` does not divide $n$ | no | one shuffle |
+| `WholePopulation::new()` | one per agent | one encounter with every agent, seats in `AgentId` order | `All` | `1..1` | yes | none |
+| `NetworkEdges::new()` (feature `net`) | 2 | one encounter per edge `(source, target)`, edges in sorted order | `All` | fewest and most incident edges of an agent | yes | none |
+| `GridNeighborhood::new().include_self(b)` (feature `grid`) | 2 | for each cell in index order, one encounter `[center, neighbour]` per neighbour, then `[center, center]` if `include_self(true)` | `Center` | the agent's neighbour count (+1 with self-play) | yes | none |
+
+`RandomGroups::new(k)` with `k < 2` is `GameError::InvalidMatching`, and so is
+`WholePopulation` when the game's role count differs from the number of agents.
+`NetworkEdges` and `GridNeighborhood` need the matching topology
+(`InvalidMatching` otherwise) and seat one agent in several roles per step, so
+they declare `allows_multi_role_per_step()`: a rule-driven agent decides once
+per step and plays that action in all its seats. On a directed network
+`NetworkEdges` seats every arc once and credits both ends; the neighbours of
+the dynamics are the out-neighbours.
+
+`GridNeighborhood` with `include_self(true)` and Moore neighbours is the
+interaction of Nowak & May (1992): every agent plays the stage game with its
+eight neighbours and with itself, and is credited once per encounter in which it
+is the center.
+
+### Topology: `GameWorld::with_topology`
+
+A world built by `build_world` has no topology (`Topology::None`). Attach one
+before assembling:
+
+```rust
+let world = build_world(game, side * side, (), initial, &rules, &held, 1, steps, seed)?
+    .with_topology(Topology::grid(GridSpec {
+        rows: side,
+        cols: side,
+        boundary: GridBoundary::Toroidal,          // or Fixed
+        neighborhood: GridNeighbors::Moore,        // or VonNeumann
+    })?)?;
+```
+
+| Constructor | Feature | Neighbours of agent $i$ |
+|---|---|---|
+| `Topology::grid(GridSpec { rows, cols, boundary, neighborhood })` | `grid` | the cells adjacent to cell $i$, where cell $i$ is row `i / cols`, column `i % cols` |
+| `Topology::network(SocialNetwork)` | `net` | its neighbours in the undirected network |
+| `Topology::directed_network(DiSocialNetwork)` | `net` | its out-neighbours |
+
+`with_topology` returns `GameError::Topology` unless the grid has exactly one
+cell per agent, or the network's vertices are exactly the world's `AgentId`s
+and it has no self-loops. Neighbour lists are sorted and deduplicated, so the
+order of edge insertion does not matter. The topology is part of the world and
+of a snapshot: a grid is stored as its `GridSpec` and rebuilt on load. Mechanisms
+read it through `MatchContext::topology()` and `OutcomeContext::topology()`, and
+`GameWorld` implements `socsim_core::Neighbors`. A network fits `NetworkEdges`
+and any dynamic except `moran_update`:
+
+```rust
+let ids: Vec<AgentId> = (0..n as u64).map(AgentId).collect();
+let network = SocialNetwork::watts_strogatz(
+    &ids, 4, 0.1, &mut SimRng::from_seed(derive_seed(seed, &[4])), // labels [0]..[3] are taken
+);
+let world = build_world(PrisonersDilemma::weak(1.5)?, n, (), initial, &rules, &held, 1, 50, seed)?
+    .with_topology(Topology::network(network))?;
+let mut sim = assemble_with(
+    world,
+    NetworkEdges::new(),                                   // one encounter per edge
+    rules,
+    Pairwise::new(NormalFormOutcome),
+    FermiUpdate::new(0.1, Update::Synchronous)?,           // a random neighbour per agent
+    PlayOptions::new().payoff_aggregation(PayoffAggregation::Mean),
+    seed,
+)?
+.build();
+```
+
+### Anonymous games in a simulation: `counting_play()`
+
+For a game that implements `AnonymousGame`, `counting_play()` replaces
+`Pairwise::new(NormalFormOutcome)` as the play path. Within each encounter it
+counts the actions once and computes the payoff of each distinct action once
+from the counts of the other seats, instead of evaluating the normal form seat
+by seat. It yields the same payoffs as `Pairwise::new(NormalFormOutcome)`, and
+pays off when an encounter seats many agents (`RandomGroups`,
+`WholePopulation`). It cannot be combined with a user-defined outcome rule, and
+`counting_play()` with a game that is not anonymous does not compile.
+`counting_play().with_aggregates(n)` also records the game's public aggregates,
+as `assemble_with_aggregates` does.
+
+The El Farol bar with 100 agents in one encounter, under the Fermi rule:
+
+```rust
+use socsim_games::catalog::ElFarol;
+use socsim_games::{
+    assemble_with, build_world, counting_play, AssignGroup, AssignKind, Assignment, FermiUpdate,
+    GameMetrics, InitialActions, MetricsOptions, PlayOptions, RuleBook, Update, WholePopulation,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    let n = 100;
+    let seed = 3;
+    // One encounter seats all 100 agents; attending pays +1 up to 60 attendees, -1 above.
+    let game = ElFarol::new(n, 60).unwrap();
+    let metrics = GameMetrics::new(&game, MetricsOptions::new().population_share(true)).unwrap();
+    let rules = RuleBook::new();
+    let held = Assignment::Ordered(vec![AssignGroup { kind: AssignKind::Held, count: n }]);
+    let initial = (0..n).map(|i| usize::from(i >= 80)).collect(); // 80 attend, 20 stay home
+    let world = build_world(game, n, (), InitialActions::PerAgent(initial), &rules, &held, 1, 100, seed)
+        .unwrap();
+
+    let mut sim = assemble_with(
+        world,
+        WholePopulation::new(),
+        rules,
+        counting_play().with_aggregates(8),                     // payoffs from counts + `attendance`
+        FermiUpdate::new(0.1, Update::Synchronous).unwrap(),
+        PlayOptions::new(),
+        seed,
+    )
+    .unwrap()
+    .add_mechanism(Box::new(metrics))
+    .recorder(Box::new(InMemoryRecorder::new()))
+    .build();
+    sim.run().unwrap();
+
+    let recorder = sim.recorder().as_any().unwrap().downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| {
+        [1, 2, 3, 100].contains(&row.t)
+            && (row.key == "game.aggregate.attendance" || row.key == "game.population_share.a0")
+    }) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+    println!("arena encounters at the end: {}", sim.world().plays().n_encounters());
+}
+```
+
+```text
+t=1 game.aggregate.attendance = 80
+t=1 game.population_share.a0 = 0.6
+t=2 game.aggregate.attendance = 60
+t=2 game.population_share.a0 = 0.86
+t=3 game.aggregate.attendance = 86
+t=3 game.population_share.a0 = 0.72
+t=100 game.aggregate.attendance = 49
+t=100 game.population_share.a0 = 0.76
+arena encounters at the end: 0
+```
+
+`population_share.a0` at step `t` is the attendance of step `t + 1`: the shares
+are recorded after the update. At `t = 1` the bar is crowded (80 > 60), every
+attendee earns $-1$ and most of those who meet a stay-at-home switch; at `t = 2`
+exactly 60 attend, every attendee earns $+1$, and stay-at-homes switch back.
+Because every agent updates at once, attendance keeps overshooting the
+capacity — the synchronous counterpart of the bar problem's fluctuations. The
+last line shows that this run never built the play arena (see the next
+section).
+
+### Evaluating without materialising encounters
+
+By default (`PlayOptions::materialize(false)`) `game_play` evaluates the step
+by traversing the matching's pattern directly, without filling
+`GameWorld::plays`, when **every** one of these conditions holds:
+
+- every agent is held (no agent is assigned a rule);
+- the decision scope is `DecisionScope::PerStep`;
+- the play path is `Pairwise::new(NormalFormOutcome)` or `counting_play()` (with
+  or without aggregates), not a user-defined `OutcomeRule`;
+- `Matching::implicit()` returns a pattern: `WholePopulation`, `NetworkEdges`
+  and `GridNeighborhood` do, `RandomPairs`, `RandomGroups`, `FixedPlayers` and
+  `RoundRobin` do not.
+
+Otherwise, or with `PlayOptions::materialize(true)`, the encounters are written
+to the play arena first. Both paths produce the same payoffs, play counts,
+step records, aggregate rows and metric columns; on the implicit path
+`game_match` writes no encounters, `world.plays()` stays empty, and
+`game_metrics` reads per-role counts of the played actions that `game_play`
+keeps for the step. A Moore neighbourhood with self-play has about nine
+encounters per agent, so on a large lattice the arena can take far more memory
+than the rest of the world; the implicit path never allocates it. Set `materialize(true)` when you
+need to read `world.plays()` yourself. A custom matching that returns a pattern
+from `implicit()` is evaluated by that pattern on the implicit path, not by its
+own `encounters_into`, so it must describe exactly the same encounters.
+
+### Examples: `nowak_may` and `hawk_dove_large`
+
+Two programs under `crates/socsim-games/examples/` run the population dynamics
+at scale.
+
+**`nowak_may`** — the spatial prisoner's dilemma of Nowak & May (1992) on a
+100 × 100 torus: Moore neighbours with self-play (`GridNeighborhood`), the weak
+prisoner's dilemma with $b = 1.85$ (`PrisonersDilemma::weak(1.85)`),
+`ImitateBest` with `KeepOwn`, 10 % initial defectors placed at random from the
+seed. It prints the cooperator share (`game.population_share.a0`) after each
+generation as CSV:
+
+```sh
+cargo run --release -p socsim-games --features core,engine,grid --example nowak_may -- --steps 200 --seed 1
+```
+
+```text
+generation,cooperator_share
+1,0.3805
+2,0.2485
+3,0.1984
+...
+200,0.3242
+```
+
+Defectors first invade (the share falls to about 0.19 by generation 4), then
+clusters of cooperators recover and the share fluctuates; over generations
+21–200 of this run it stays between 0.27 and 0.36 and averages 0.320. Nowak &
+May report that it fluctuates around 0.318 for $1.8 < b < 2$; within that
+interval the synchronous evolution does not depend on the exact $b$. Two runs
+with the same seed print identical output.
+
+**`hawk_dove_large`** — a well-mixed hawk–dove population ($V = 2$, $C = 4$)
+under `RandomPairs` and `ProportionalImitation` with $\beta = 1/3$, half hawks
+at the start. It keeps only the held actions between steps (`history_len = 1`,
+no metrics mechanism), so memory grows linearly with the population, and prints
+one summary line:
+
+```sh
+cargo run --release -p socsim-games --features core,engine --example hawk_dove_large
+# n=10000 steps=10 seed=1 hawk_share_initial=0.5 hawk_share_final=0.4932 mean_payoff_last_step=0.5156
+cargo run --release -p socsim-games --features core,engine --example hawk_dove_large -- --n 1000000 --steps 10
+# n=1000000 steps=10 seed=1 hawk_share_initial=0.5 hawk_share_final=0.499876 mean_payoff_last_step=0.500256
+```
+
+The population starts at the stable share $V/C = 0.5$ and stays there up to
+sampling noise, which shrinks as $n$ grows; at that share the mean payoff is
+$0.5$.
+
+---
+
 ## Metrics
 
 `GameMetrics` is a read-only mechanism, named `game_metrics`, that records one
@@ -1697,6 +2259,7 @@ before the game moves into `build_world` — and returns
 | `equilibrium(EquilibriumTarget)` | `None` | `Solve` adds `game.eq_distance` |
 | `stop(tol, window)` | off | requests the end of the run once the action shares stop changing; `tol` finite and `> 0`, `window ≥ 1`, else `GameError::Metrics` |
 | `action_entropy(on)` | on | feature `metrics` only: adds or removes `game.action_entropy` |
+| `population_share(on)` | off | adds `game.population_share.a<k>`; every role must have the same number of actions, else `GameError::Metrics` |
 
 A two-agent prisoner's dilemma, Tit-for-Tat against an unconditional defector:
 
@@ -1800,13 +2363,14 @@ rows out (the default) sees the keys `game.<column>`:
 | `game.action_entropy` | feature `metrics`, `action_entropy(true)` (the default), pooled ids, and the step has a seat | Shannon entropy $-\sum_k p_k \ln p_k$ of the pooled `played_share` values, in nats |
 | `game.mean_payoff` | at least one agent played (`n_played() > 0`) | mean of `payoffs()` (after `PayoffAggregation`) over the agents that played |
 | `game.payoff_sd` | as `mean_payoff` | population standard deviation (divided by $n$) of the same payoffs |
-| `game.aggregate.<name>` | the simulation was assembled with `assemble_with_aggregates` and the reduction is defined | the step's reduced aggregate (see [Public aggregates](#public-aggregates-aggregategame)) |
+| `game.aggregate.<name>` | the simulation was assembled with aggregates (`assemble_with_aggregates`, or a play path with `.with_aggregates(n)`) and the reduction is defined | the step's reduced aggregate (see [Public aggregates](#public-aggregates-aggregategame)) |
+| `game.population_share.a<k>` | `population_share(true)` and the world has at least one agent | agents whose `held` action is `k` at PostStep ÷ all agents — after any [population dynamics](#population-dynamics), so the actions of the next step |
 | `game.regret` | regret is on and the mixed-strategy profile is defined | $\max_r \big[\max_a F_r(a, \sigma_{-r}) - F_r(\sigma)\big]$ (`mixed::regret`) |
 | `game.eq_distance` | `EquilibriumTarget::Solve` and the profile is defined | $\min_{\sigma^*} \sum_r \sum_a \lvert \sigma_r(a) - \sigma^*_r(a)\rvert$ over the solved equilibria |
 
 Within a row the columns come in the order played shares, `coop_rate`,
-`action_entropy`, `mean_payoff`, `payoff_sd`, aggregates, `regret`,
-`eq_distance`.
+`action_entropy`, `mean_payoff`, `payoff_sd`, aggregates, population shares,
+`regret`, `eq_distance`.
 
 **An undefined column is left out of the row, never written as NaN.** A step
 without encounters records no share, cooperation or entropy column; a step in
@@ -1822,11 +2386,17 @@ NaN in the other's columns. The mechanism also checks
 every step that the world's game still has the role and action counts it was
 built for.
 
-`played_share` counts **seats in the play arena**, not agents: an agent seated in
+`played_share` counts **seats**, not agents: an agent seated in
 three encounters counts three times. That is why it is defined under every
 [decision scope](#decision-scope), including the scopes that do not write `held`.
-A population share — the fraction of agents holding each strategy — is a
-different quantity and is not part of `game_metrics`.
+On the [implicit play path](#evaluating-without-materialising-encounters) the
+seats are counted without the play arena, with the same result. The
+population share `game.population_share.a<k>` is a different quantity: the
+fraction of **agents** holding action `k` at the end of the step. With
+population dynamics it describes the actions after the update, while
+`played_share` describes the actions played before it (see
+[What `PostStep` sees](#what-poststep-sees)). The ids of population shares are
+always `a<k>`, whatever the labels.
 
 ### Action ids: `metric_action_ids`
 
@@ -2043,7 +2613,8 @@ check). A name is therefore one segment of the metric name
 `game.aggregate.<name>`.
 
 Assemble with `assemble_with_aggregates(.., seed, aggregate_history_len)`
-instead of `assemble`. At the end of Interaction, `game_play` calls
+instead of `assemble` (or, with `assemble_with`, wrap the play path:
+`Pairwise::new(outcome).with_aggregates(n)` or `counting_play().with_aggregates(n)`). At the end of Interaction, `game_play` calls
 `aggregate_into` once per encounter (`EncounterId` order) and reduces the
 values over the step's encounters — `Sum` adds them (`0` for a step without
 encounters), `Mean` averages them (undefined for a step without encounters) —
@@ -2222,8 +2793,9 @@ would mix two distributions. The feature adds nothing else.
 
 `GameMetrics::describe()` returns `(pattern, meaning)` pairs for the columns
 this configuration can write: `game.played_share.{action}`, `game.mean_payoff`,
-`game.payoff_sd`, then `game.coop_rate`, `game.regret`, `game.eq_distance` and
-`game.action_entropy` when enabled, and `game.aggregate.{name}` (always listed,
+`game.payoff_sd`, then `game.coop_rate`, `game.regret`, `game.eq_distance`,
+`game.action_entropy` and `game.population_share.a{k}` when enabled, and
+`game.aggregate.{name}` (always listed,
 since it depends on how the simulation is assembled). A repository that records
 runs with [runvault](https://github.com/akitenkrad/rs-runvault) can copy them
 into its `runvault.toml`: a pattern with a `{…}` segment is a
@@ -2265,7 +2837,7 @@ Every stream derives from the one `seed` passed to `build_world` and `assemble`:
 | Label | Stream |
 |---|---|
 | `derive_seed(seed, &[0])` | world initialisation (`Assignment::Shuffled`) |
-| `derive_seed(seed, &[1])` | the engine (scheduler, `Matching` and `decide` draws via the step RNG) |
+| `derive_seed(seed, &[1])` | the engine (scheduler, `Matching`, `decide` and population-dynamics draws via the step RNG) |
 | `derive_seed(seed, &[2])` | `decision_root`, stored in the world; `game_llm_decide` derives its generation seeds and fallback streams from it (see [Seeds](#one-decision-step-of-game_llm_decide)) |
 | `derive_seed(seed, &[3, agent, generation])` | rule-state initialisation (`RuleInitContext::init_seed`) |
 
@@ -2280,6 +2852,17 @@ is reproducible step for step. `game_metrics` and the mixed-strategy reports dra
 no randomness and leave the policy states, held actions and plays untouched, so
 adding them does not change a run's trajectory; the aggregate table draws no
 randomness either.
+
+Population dynamics draw from the same engine stream, in Reward after any
+learning, visiting agents in ascending `AgentId` order. `fermi_update` and
+`replicator_update` draw, per agent, one partner (`gen_range`) and then one
+uniform `f64`; an agent without neighbours draws nothing. `imitate_best` draws
+nothing. `moran_update` draws four values per step: one uniform `f64` for the
+parent, one `gen_range` for the agent that dies, one uniform `f64` for the
+mutation decision and one uniform action for the mutant, which is drawn even
+when no mutation happens. `RandomPairs` and `RandomGroups` draw one shuffle
+per step in Decision; the other built-in matchings draw nothing. The dynamics
+keep no state outside the world, so a snapshot resumes them exactly.
 
 ---
 
@@ -2355,6 +2938,10 @@ action.
 | `zero_sum_minimax(&game)` | 2, zero-sum | `MinimaxSolution`: value and optimal strategies | LP; primal and dual both solved and checked |
 | `maximin_security_level(&game, role)` | 2 | `SecurityLevel`: one role's maximin guarantee | LP; primal and dual both solved and checked |
 | `logit_qre(&game, &options)` | n | `QreSolution`: one logit QRE at the given λ | local fixed-point iteration, not branch tracking |
+| `pure_nash_counts(&game)` | n, anonymous | `Vec<CountProfile>`: every pure equilibrium as a count vector | `G: AnonymousGame`; ≤ 10⁶ count vectors |
+| `replicator_integrate(&game, &x0, &options)` | 2, symmetric | `ReplicatorRun`: the replicator trajectory's end point | classical RK4 with a fixed step |
+| `replicator_fixed_points(&game)` | 2, symmetric | `FixedPointSet`: rest points on every face of the simplex | ≤ 20 actions |
+| `ess_verdict(&game, &resident)` | 2, symmetric | `EssVerdict::{True, False, Inconclusive}` | decided by the tangent-space quadratic form; `Inconclusive` near ties |
 
 Errors are `SolveError`: `UnsupportedRoles` for a role count a solver does not
 accept, `NotZeroSum`, `InvalidLabel`, `MaxPivots`, `Lp(LpFailure)`,
@@ -2523,6 +3110,84 @@ exact logit QRE it is at most `ln |S_i| / λ`, where `|S_i|` is the role's
 number of actions, so it shrinks as λ grows. The solver reports this regret but
 does not use it as an acceptance test.
 
+### `pure_nash_counts`
+
+For an [anonymous game](#anonymous-games-and-commonactionspace) only the number
+of players choosing each action matters, so an equilibrium is a **count
+vector** rather than a profile. `pure_nash_counts(&game)` visits every count
+vector of `n_roles()` players over the common action set (the
+$\binom{n + m - 1}{m - 1}$ compositions instead of the $m^n$ profiles) and keeps
+those in which no player gains more than `tol` by switching action, evaluated
+with `payoff_by_counts`. It returns `CountProfile { counts }` in lexicographic
+order of `counts`. Every role must have the same number of actions
+(`InvalidOptions` otherwise), and more than 10⁶ count vectors is `TooLarge`. For
+`ElFarol::new(100, 60)` the only equilibrium is `[60, 40]` (attendance equal to
+the capacity); for `MinorityGame::new(n)` there are two,
+`[(n−1)/2, (n+1)/2]` and `[(n+1)/2, (n−1)/2]`.
+
+### `replicator_integrate` and `replicator_fixed_points`
+
+Both work on a **symmetric two-player** game (`is_symmetric()`; otherwise
+`UnsupportedRoles` or `InvalidOptions`) with payoff matrix $A$ of role 0, and
+the replicator dynamics of Taylor & Jonker (1978):
+
+$$\dot x_i = x_i\,\big((Ax)_i - x^\top A x\big)$$
+
+`replicator_integrate(&game, &x0, &ReplicatorOptions)` integrates it from the
+mixed strategy `x0` with the classical fourth-order Runge–Kutta method and a
+fixed step `dt`. After each step, entries within `tol` below zero are set to
+zero and the state is renormalised to the simplex (a larger negative entry or a
+non-finite state is `NotConverged`). It stops as soon as
+$\lVert \dot x \rVert_\infty <$ `tol` (`converged: true`) or when `t` reaches
+`t_max` (`converged: false`), and returns
+`ReplicatorRun { state, t, steps, converged }`.
+
+| `ReplicatorOptions` | Default | Meaning |
+|---|---|---|
+| `dt` | `0.01` | step, finite and `> 0`, set with `.with_dt(dt)` |
+| `t_max` | `10_000` | time limit, finite and `≥ 0`, set with `.with_t_max(t)` |
+| `tol` | `1e-12` | stopping threshold on $\lVert \dot x \rVert_\infty$, finite and `> 0`, set with `.with_tol(t)` |
+
+`replicator_fixed_points(&game)` enumerates the rest points of the dynamics: on
+every support (every face of the simplex) it solves the indifference equations
+$(Ax)_i = (Ax)_j$ for the actions in the support. It returns
+`FixedPointSet { isolated, components, inconclusive }`: `isolated` holds the
+`FixedPoint { support, point }` with a unique solution strictly inside its
+face; `components` holds `AffineComponent { support, base, directions }`, a
+positive-dimensional family of rest points through `base` along `directions`
+(for the zero game the whole simplex is one); `inconclusive` lists the
+supports whose system was ill-conditioned (condition estimate above 10¹²) or
+could not be decided. A component contained in a larger one, and an isolated
+point lying on a component, are dropped.
+A rest point is not necessarily a Nash equilibrium: every pure strategy is one,
+whatever the game. More than 20 actions is `TooLarge`.
+
+### `ess_verdict`
+
+`ess_verdict(&game, &resident)` decides whether the mixed strategy `resident`
+of a symmetric two-player game is an evolutionarily stable strategy in the sense
+of Maynard Smith (1974): $p$ is an ESS when, for every mutant $q \ne p$,
+$E(p, p) > E(q, p)$, or $E(p, p) = E(q, p)$ and $E(p, q) > E(q, q)$. It
+returns an `EssVerdict`:
+
+- `False` when some pure strategy does better than `resident` against itself
+  (it is not a symmetric Nash equilibrium);
+- otherwise the mutants that matter are those built from the best responses to
+  `resident`. When they are exactly the actions of its support, the verdict is
+  the sign of the payoff quadratic form on the tangent space of that face: all
+  eigenvalues of its symmetric part below `−tol` give `True`, one above `tol`
+  gives `False`, and a form that vanishes (as for standard rock–paper–scissors
+  at the uniform mix) gives `False`;
+- when best responses outside the support exist (at most three best
+  responses), the form is checked on the cone of feasible mutant directions;
+- `Inconclusive` when the deciding eigenvalue or direction value is within
+  `tol` of zero, or when best responses outside the support exist and there
+  are more than three best responses.
+
+`tol` is the game's [tolerance](#tolerance-and-verification). For
+`HawkDove::new(2.0, 4.0)` the mix $(1/2, 1/2)$ is `True` and pure dove is
+`False`; for `HawkDove::new(2.0, 2.0)` pure hawk is `True`.
+
 ### Examples
 
 **Battle of the Sexes: all equilibria vs. one path.** Support enumeration finds
@@ -2666,3 +3331,76 @@ lambda 5 from (stag, stag): P(stag) = 0.9901
 ```
 
 Each regret stays below `ln 2 / λ` (about 1.39 at λ = 0.5).
+
+**Population games: count equilibria, the replicator dynamics and the ESS.**
+The equilibria of the anonymous games come as count vectors; for hawk–dove the
+replicator dynamics from 10 % hawks reaches the stable share $V/C$, which is
+the only interior rest point and an ESS:
+
+```rust
+use socsim_games::catalog::{ElFarol, HawkDove, MinorityGame, PublicGoodsFinite};
+use socsim_games::solve::{
+    ess_verdict, pure_nash_counts, replicator_fixed_points, replicator_integrate,
+    ReplicatorOptions,
+};
+use socsim_games::MixedStrategy;
+
+fn main() {
+    // Anonymous games: equilibria as count vectors (number of players per action).
+    let bar = ElFarol::new(100, 60).unwrap();
+    let minority = MinorityGame::new(5).unwrap();
+    let pgg = PublicGoodsFinite::new(5, 3.0, 1.0).unwrap();
+    for (name, counts) in [
+        ("El Farol (n = 100, capacity 60)", pure_nash_counts(&bar).unwrap()),
+        ("minority game (n = 5)", pure_nash_counts(&minority).unwrap()),
+        ("public goods (k = 5, r = 3)", pure_nash_counts(&pgg).unwrap()),
+    ] {
+        let counts: Vec<_> = counts.into_iter().map(|profile| profile.counts).collect();
+        println!("{name}: {counts:?}");
+    }
+
+    // Hawk-dove with V = 2, C = 4: the stable hawk share is V / C = 0.5.
+    let hd = HawkDove::new(2.0, 4.0).unwrap();
+    println!("hawk_share_ess = {}", hd.hawk_share_ess());
+    let x0 = MixedStrategy::new(vec![0.1, 0.9]).unwrap();
+    let run = replicator_integrate(&hd, &x0, &ReplicatorOptions::new()).unwrap();
+    println!(
+        "from x0 = 0.1: x = {:.10} at t = {:.2} (converged: {})",
+        run.state.probs()[0],
+        run.t,
+        run.converged
+    );
+    for point in replicator_fixed_points(&hd).unwrap().isolated {
+        println!("rest point {:.4?} on support {:?}", point.point.probs(), point.support);
+    }
+    let mixed = MixedStrategy::new(vec![0.5, 0.5]).unwrap();
+    let dove = MixedStrategy::pure(2, 1).unwrap();
+    println!(
+        "ESS: (0.5, 0.5) {:?}, pure dove {:?}",
+        ess_verdict(&hd, &mixed).unwrap(),
+        ess_verdict(&hd, &dove).unwrap()
+    );
+    let hawk = MixedStrategy::pure(2, 0).unwrap();
+    println!("V = C = 2, pure hawk: {:?}", ess_verdict(&HawkDove::new(2.0, 2.0).unwrap(), &hawk).unwrap());
+}
+```
+
+```text
+El Farol (n = 100, capacity 60): [[60, 40]]
+minority game (n = 5): [[2, 3], [3, 2]]
+public goods (k = 5, r = 3): [[0, 5]]
+hawk_share_ess = 0.5
+from x0 = 0.1: x = 0.5000000000 at t = 53.07 (converged: true)
+rest point [1.0000, 0.0000] on support [0]
+rest point [0.0000, 1.0000] on support [1]
+rest point [0.5000, 0.5000] on support [0, 1]
+ESS: (0.5, 0.5) True, pure dove False
+V = C = 2, pure hawk: True
+```
+
+In the public-goods game with $r = 3 < k = 5$ not contributing dominates, so the
+only equilibrium is that nobody contributes (`[0, 5]`: zero `C`, five `D`).
+For hawk–dove $\dot x = x(1 - x)(1 - 2x)$; the integration stops once
+$\lvert \dot x \rvert < 10^{-12}$. The two pure rest points are not stable:
+pure dove is not even an equilibrium. With $V = C$ the stable state is pure
+hawk ($E(H, H) = E(D, H) = 0$ and $E(H, D) = V > E(D, D) = V/2$).

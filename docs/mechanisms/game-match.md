@@ -18,8 +18,20 @@ owns the *who plays whom* part of a step:
 - at the start of **Decision** it hands the world to the configured `Matching`,
   which writes this step's encounters — one seat per role — into the play arena.
 
-Two matchings are built in: `FixedPlayers` (the same pairs every step) and
-`RoundRobin` (every pair of agents every step).
+Seven matchings are built in: `FixedPlayers` (the same pairs every step),
+`RoundRobin` (every pair of agents every step), and the population matchings
+`RandomPairs`, `RandomGroups`, `WholePopulation`, `NetworkEdges` (feature `net`)
+and `GridNeighborhood` (feature `grid`), described in
+[`docs/games.md` § Population matchings](../games.md#population-matchings).
+
+When the step can be evaluated without the play arena — every agent held,
+`DecisionScope::PerStep`, the play path `Pairwise::new(NormalFormOutcome)` or
+`counting_play()`, and a matching that returns a pattern from
+`Matching::implicit()` — `game_match` still resets the per-step state in
+PreStep but writes **no** encounters in Decision; `game_play` traverses the
+pattern instead (see
+[Evaluating without materialising encounters](../games.md#evaluating-without-materialising-encounters)).
+`PlayOptions::materialize(true)` turns this off.
 
 It does not choose actions or compute payoffs; `game_decide` and `game_play`
 do that from the encounters it writes.
@@ -40,7 +52,11 @@ where each encounter is a tuple of agents (one per role) with a credit mode.
 The built-in `FixedPlayers` returns the same pairs every step, which is the
 standard repeated two-player game. The built-in `RoundRobin` returns every pair
 $\{i, j\}$, $i < j$, every step — the round-robin tournament of Axelrod (1984) —
-optionally in both orders $(i, j)$ and $(j, i)$.
+optionally in both orders $(i, j)$ and $(j, i)$. The population matchings
+cover random pairing and random groups (re-drawn every step), a single
+encounter of the whole population, one encounter per network edge, and the
+lattice neighbourhood of Nowak & May (1992), in which every agent meets each
+neighbour as the credited center (`Credit::Center`).
 
 In a round-robin an agent sits in several encounters per step, possibly in
 different roles. How many decisions it then makes is the **decision scope**
@@ -72,7 +88,8 @@ Registers **PreStep** and **Decision**.
 
 | Field | Read | Write | Notes |
 |---|:--:|:--:|---|
-| `GameWorld.plays` (`PlayArena`) | | ✓ | PreStep: cleared. Decision: encounters appended through `ArenaWriter::push`. |
+| `GameWorld.plays` (`PlayArena`) | | ✓ | PreStep: cleared. Decision: encounters appended through `ArenaWriter::push` — nothing on the implicit path. |
+| per-role played-action counts | | ✓ | PreStep: cleared (implicit path only; filled by `game_play`). |
 | `GameWorld.payoff` | | ✓ | PreStep: filled with `0.0`. |
 | `GameWorld.n_played` | | ✓ | PreStep: filled with `0`. |
 | `GameWorld.matching_state` | ✓ | ✓ | Passed mutably to `encounters_into`: `MatchingState::None` for `FixedPlayers`, `MatchingState::RoundRobin { cursor }` for `RoundRobin` (`cursor` += 1 per step). Serialised with the world. |
@@ -99,6 +116,9 @@ Registers **PreStep** and **Decision**.
 | `matching: M` (`M: Matching<G, X>`) | — | structural | Passed to `assemble`. Built-in: `FixedPlayers::pairs(&[(a, b), …])` / `FixedPlayers::new(vec![[AgentId; 2], …])`, `RoundRobin::new()`. |
 | `RoundRobin::both_orders(bool)` | `false` | structural | `true`: after each pair `(i, j)` also push `(j, i)`, so every agent plays both roles against every opponent. |
 | `RoundRobin::self_play(bool)` | `false` | structural | `true` is rejected (self-play is not supported). |
+| `RandomPairs::new()`, `RandomGroups::new(k)?`, `WholePopulation::new()` | — | structural | Population matchings (feature `core`); `RandomGroups` needs `k ≥ 2` and a game with `k` roles. |
+| `NetworkEdges::new()` | — | structural | Feature `net`; needs a network topology. |
+| `GridNeighborhood::new().include_self(bool)` | `false` | structural | Feature `grid`; needs a grid topology; `true` adds a self-play encounter per cell. |
 
 `FixedPlayers::check` (run once in `assemble`) rejects an unknown agent, an agent
 listed in more than one pair, and a game without exactly two roles
@@ -109,7 +129,15 @@ three or more agents or `both_orders(true)` (`GameError::InvalidMatching`).
 `RoundRobin` sorts the agents by `AgentId` and pushes the pairs in
 lexicographic order with the lower id in role 0: for four agents
 `(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)`; with both orders
-`(0, 1), (1, 0), (0, 2), (2, 0), …`. All encounters use `Credit::All`.
+`(0, 1), (1, 0), (0, 2), (2, 0), …`. Every matching except `GridNeighborhood`
+uses `Credit::All`.
+
+Besides `check`, a matching tells `assemble` which role counts it can seat
+(`supports_roles`; two by default), how many encounters an agent is credited
+with per step (`encounter_bounds`, used to bound payoffs for the population
+dynamics), whether an agent may hold several roles in one `PerStep` step
+(`allows_multi_role_per_step`; `NetworkEdges` and `GridNeighborhood` allow it)
+and whether it has an implicit pattern (`implicit`).
 
 A custom `Matching` keeps any state it needs in the experiment state `X`, not in
 its own struct — the struct is code and is not part of a snapshot.
@@ -146,8 +174,9 @@ and a decision scope that fits it, e.g.
 ## 9. Determinism & RNG
 
 PreStep draws no randomness. In Decision, `encounters_into` receives the engine
-step RNG (`ctx.rng`, seeded from `derive_seed(seed, &[1])`); neither
-`FixedPlayers` nor `RoundRobin` draws from it. The `RoundRobin` cursor is part
+step RNG (`ctx.rng`, seeded from `derive_seed(seed, &[1])`). `RandomPairs`
+and `RandomGroups` draw one shuffle of the agent ids per step from it; the
+other built-in matchings draw nothing. The `RoundRobin` cursor is part
 of the world, so a resumed run continues the count. A randomised custom matching must draw only from that RNG so
 that a run — and a resumed run — stays reproducible.
 
@@ -168,3 +197,4 @@ With `RoundRobin::new()` and `n` agents, each step has `n(n − 1)/2` encounters
 ## 11. References
 
 - Axelrod, R. (1984). *The Evolution of Cooperation*. Basic Books.
+- Nowak, M. A., & May, R. M. (1992). Evolutionary games and spatial chaos. *Nature*, 359(6398), 826–829.

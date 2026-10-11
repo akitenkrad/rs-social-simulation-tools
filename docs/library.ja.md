@@ -315,7 +315,7 @@ let mut sim = SimulationBuilder::new(world)
 | ラベル | ゲームのシミュレーションでのストリーム |
 |---|---|
 | `derive_seed(seed, &[0])` | ワールド初期化（規則の割り当ての並べ替え） |
-| `derive_seed(seed, &[1])` | エンジン（`assemble` が `SimulationBuilder::seed` に渡す） |
+| `derive_seed(seed, &[1])` | エンジン（`assemble` と `assemble_with` が `SimulationBuilder::seed` に渡す）．無作為な Matching，`decide`，集団動学はここから引く |
 | `derive_seed(seed, &[2])` | `decision_root`．決定時のストリームのためにゲームの World に保存される |
 | `derive_seed(seed, &[3, agent, generation])` | 規則の状態の初期化（`RuleInitContext::init_seed`） |
 

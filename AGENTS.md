@@ -73,10 +73,14 @@ networks), `socsim-grid` (spatial), `socsim-packs` (bundled CLI packs),
 `socsim-mechanisms` (opinion/contagion/cultural/group catalog), `socsim-marl`
 (learnable policies), `socsim-llm` (LLM agents), `socsim-games` (normal-form
 games: stage games, decision rules, matching, payoffs, per-step metrics
-`game_metrics`; features `core` / `engine`, `socsim-llm` only with feature
-`llm`, `socsim-metrics` only with feature `metrics`; built-in classic games and
-finite-game solvers — Nash, dominance, minimax, logit QRE — in the default
-build). Library-only data/IO:
+`game_metrics`, population dynamics of held agents `imitate_best` /
+`fermi_update` / `replicator_update` / `moran_update` via `assemble_with`;
+features `core` / `engine`, `socsim-net` only with feature `net` (network
+topology, `NetworkEdges`), `socsim-grid` only with feature `grid` (lattice
+topology, `GridNeighborhood`), `socsim-llm` only with feature `llm`,
+`socsim-metrics` only with feature `metrics`; built-in classic and population
+games and finite-game solvers — Nash, dominance, minimax, logit QRE,
+anonymous-game equilibria, replicator dynamics, ESS — in the default build). Library-only data/IO:
 `socsim-results` (run dirs, CSV/JSON), `socsim-metrics` (stats/distribution/
 agreement), `socsim-survey` (config-driven recode engine), `socsim-datasets`
 (dataset schemas + registry + optional acquisition), `socsim-reproduce`

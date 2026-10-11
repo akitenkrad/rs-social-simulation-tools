@@ -10,8 +10,9 @@
 この crate はライブラリ専用です（`ModulePack` を持たず，`socsim` バイナリには組み込まれていません）．
 このページでは，部品，その状態の置き場所，規則が見てよい情報，実行可能なシミュレーションの組み立て方，
 組込みの学習則と決定の粒度（[学習則と決定の粒度](#学習則と決定の粒度) を参照），
+格子・ネットワーク・よく混ざった集団の上で模倣や繁殖をするエージェントの集団（[集団動学](#集団動学) を参照），
 ステップごとの指標を記録する Mechanism `game_metrics`（[指標](#指標) を参照）を説明します．
-シミュレーションとは別に，古典的なゲームと有限ゲームのソルバー（Nash 均衡，支配，ミニマックス，ロジット QRE）も提供します（[有限ゲームを解く](#有限ゲームを解く) を参照）．
+シミュレーションとは別に，古典的なゲームと有限ゲームのソルバー（Nash 均衡，支配，ミニマックス，ロジット QRE，匿名ゲームの均衡，レプリケータ動学，進化的安定性）も提供します（[有限ゲームを解く](#有限ゲームを解く) を参照）．
 
 ---
 
@@ -19,14 +20,16 @@
 
 | feature | 追加されるもの | socsim への依存 |
 |---|---|---|
-| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`，`AggregateGame`），`MatrixGame`，組込みのゲーム（`catalog`），混合戦略（`mixed`），ソルバー（`solve`），学習則の計算（`learn`），`AggregateSpec` と指標用の行動 ID（`metric_action_ids`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
-| `core` | World（`GameWorld`），規則（学習則を含む），利得規則，Matching，ビュー，`build_world`，指標の Mechanism `GameMetrics` | `socsim-core` |
-| `engine` | `assemble` と `assemble_with_aggregates`（どちらも `SimulationBuilder` を返す）．`core` を含意 | `socsim-core`，`socsim-engine` |
+| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`，`AggregateGame`，`AnonymousGame`，`CommonActionSpace`），`MatrixGame`，組込みのゲーム（`catalog`），混合戦略（`mixed`），ソルバー（`solve`．`pure_nash_counts`，レプリケータ動学，`ess_verdict` を含む），学習則の計算（`learn`），`AggregateSpec` と指標用の行動 ID（`metric_action_ids`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
+| `core` | World（`GameWorld`，`Topology`），規則（学習則を含む），利得規則，Matching（`FixedPlayers`，`RoundRobin`，`RandomPairs`，`RandomGroups`，`WholePopulation`），ビュー，`build_world`，集団動学の設定の型（`ImitateBest`，`FermiUpdate`，`ProportionalImitation`，`MoranUpdate`），指標の Mechanism `GameMetrics` | `socsim-core` |
+| `engine` | `assemble`，`assemble_with_aggregates`，`assemble_with`（どれも `SimulationBuilder` を返す），対戦の評価経路（`Pairwise`，`counting_play()`），集団動学の Mechanism．`core` を含意 | `socsim-core`，`socsim-engine` |
+| `net` | `Topology::network` / `Topology::directed_network` と Matching `NetworkEdges`（[トポロジー](#トポロジーgameworldwith_topology) を参照）．`core` を含意 | `socsim-core`，`socsim-net` |
+| `grid` | `Topology::grid`（`GridSpec`）と Matching `GridNeighborhood`．`core` を含意 | `socsim-core`，`socsim-grid` |
 | `metrics` | `GameMetrics` の列 `game.action_entropy`（[指標](#指標) を参照）．`core` を含意 | `socsim-core`，`socsim-metrics`（既定の feature を切ったもの．依存の無い `stats` モジュールだけ） |
 | `llm` | LLM の決定規則，応答ストア，再生の manifest（[LLM による決定](#llm-による決定) を参照）．`core` を含意．Mechanism `game_llm_decide` と `assemble_with_llm` には `engine` も要る | `socsim-core`，`socsim-llm`（既定の feature だけ．ネットワークなし） |
 | `live` | `live_backend_factory()`（キャッシュなしの Ollama → OpenAI のバックエンド）．`llm` を含意 | `llm` と同じ＋`socsim-llm/live` |
 
-`llm` を有効にしなければ，この crate は `socsim-llm` に依存せず，`metrics` を有効にしなければ `socsim-metrics` に依存しません．`socsim-config` と `socsim-runner` には常に依存しません．
+`llm` を有効にしなければ，この crate は `socsim-llm` に依存せず，`metrics` を有効にしなければ `socsim-metrics` に依存せず，`net` / `grid` を有効にしなければ `socsim-net` / `socsim-grid` に依存しません．`socsim-config` と `socsim-runner` には常に依存しません．
 シミュレーションを走らせるには `core` と `engine` が要ります．
 
 ```toml
@@ -127,6 +130,23 @@ cargo run -p socsim-games --example ipd_pair --features core,engine
 `UniformRandom` と `TitForTat` は `FiniteGame` を，`NormalFormOutcome` は `NormalFormGame` を要求するので，
 組み合わせの誤りは実行時ではなくコンパイル時のエラーになります．
 
+### 匿名ゲームと `CommonActionSpace`
+
+集団で行うゲームを表すトレイトがさらに 2 つあります（既定のビルド）．
+
+| トレイト | 意味 | メソッド |
+|---|---|---|
+| `AnonymousGame: FiniteGame` | プレイヤーの利得は，自分の行動と，ほかのプレイヤーが各行動を**何人**選んだかだけで決まり，誰が選んだかには依らない | `payoff_by_counts(a, counts_others)`：`counts_others[k]` は行動 `k` を選んだ**ほかの**プレイヤーの人数．和は `n_roles() - 1` |
+| `CommonActionSpace: StageGame` | 目印．すべての役割が同じ行動の集合から選ぶので，役割が違っても行動をエージェントからエージェントへ写せる | なし |
+
+`payoff_by_counts` はどの行動の組でも `payoff` と一致しなければなりません．
+人数で数える評価経路（[`counting_play()`](#シミュレーションの中の匿名ゲームcounting_play)）とソルバー [`pure_nash_counts`](#pure_nash_counts) は，
+行動の組を列挙する代わりにこれを評価します．
+`CommonActionSpace` は，エージェントの間で行動を写す動学（`imitate_best`，`fermi_update`，`replicator_update`，`moran_update`）が要求します．
+これを実装しないゲームと組み合わせるとコンパイルエラーになります．
+目印は約束にすぎないので，組み立ての時にも実行時の検査をします．`FiniteGame` ではすべての役割の行動数が等しくなければなりません（違えば `GameError::Population`）．
+`MatrixGame` と組込みのゲームはすべて `CommonActionSpace` を実装し，catalog の集団用の 4 つのゲームは `AnonymousGame` も実装します．
+
 ### `MatrixGame`
 
 `MatrixGame` は組込みの `FiniteGame` です．役割ごとに行優先の利得テンソルを 1 つ持ち，行動は 0 始まりの番号です．
@@ -144,14 +164,17 @@ cargo run -p socsim-games --example ipd_pair --features core,engine
 （2 役割，行動の数が等しく，`payoff(0, (i, j)) == payoff(1, (j, i))`）．
 `MatrixGame` は serde で直列化できるので，snapshot に含まれます．
 
-シミュレーション層が現在組み立てるのは **2 役割**の対戦だけです．
-それ以外の `n_roles()` は `assemble` が `GameError::UnsupportedRoles` で拒否します．
+1 つの対戦の役割の数は Matching が決めます（`Matching::supports_roles`）．
+`FixedPlayers`，`RoundRobin`，`RandomPairs`，`NetworkEdges`，`GridNeighborhood` は 2 役割，`RandomGroups::new(k)` は `k` 役割，
+`WholePopulation` はエージェント 1 人につき 1 役割の対戦を組みます．
+Matching が扱えない `n_roles()` のゲームは，`assemble` が `GameError::UnsupportedRoles` で拒否します．
+LLM による決定（`assemble_with_llm`）は引き続き 2 役割だけです．
 
 ### 組込みのゲーム：`catalog`
 
-`socsim_games::catalog` は古典的な 2 人ゲームを 5 つ提供します．どれも `FiniteGame` を実装しているので，
+`socsim_games::catalog` は古典的な 2 人ゲームを 5 つと，集団用のゲームを 4 つ提供します．どれも `FiniteGame` を実装しているので，
 `MatrixGame` と同じように `build_world`，組込みの規則，[ソルバー](#有限ゲームを解く) に渡せます．
-`to_matrix()` は同じラベルを持つ等価な `MatrixGame` に変換します．
+2 人ゲームでは，`to_matrix()` が同じラベルを持つ等価な `MatrixGame` に変換します．
 行動のラベルは ASCII で，協力側を持つゲーム（`C`，`stag`）ではそれが行動 `0` です．
 
 | 型 | 行動 `0, 1, …` | コンストラクタ | 構築時に確かめる条件 |
@@ -168,6 +191,23 @@ cargo run -p socsim-games --example ipd_pair --features core,engine
 既定のマッチング・ペニーでは，硬貨の面が異なるときに役割 0 が勝ちます．
 じゃんけんでは勝者が `win`，敗者が `-loss`，引き分けが `0` を受け取ります．
 既定の `win = loss = 1` では標準の反対称なゼロ和の形になります（`win ≠ loss` のときはゼロ和ではありません）．
+
+集団用のゲームは対称で，`AnonymousGame` と `CommonActionSpace` を実装し，行動を 2 つ持ちます．
+
+| 型 | 役割 | 行動 `0, 1` | 利得 | コンストラクタと検査 |
+|---|---|---|---|---|
+| `HawkDove` | 2 | `H`，`D` | $HH = (V-C)/2$，$HD = V$，$DH = 0$，$DD = V/2$（行プレイヤー） | `new(v, c)`：`V > 0`，`C > 0`．`hawk_share_ess()` は $V < C$ なら $V/C$，そうでなければ `1` を返す．`to_matrix()` を持つ |
+| `ElFarol` | `n` | `attend`，`stay` | 出席は，出席者数 $A$（自分を含む）が `capacity` 以下なら $+1$，超えれば $-1$．欠席は $0$ | `new(n, capacity)`：`n ≥ 2`，`0 < capacity < n` |
+| `MinorityGame` | `n`（奇数） | `a0`，`a1` | 少数派の側のプレイヤーは $+1$，多数派は $0$ | `new(n)`：`n ≥ 3` かつ奇数（同数は起きない） |
+| `PublicGoodsFinite` | `k` | `C`，`D` | 群れの拠出者数を $m$（自分を含む）として，$P_C = r\,c\,m/k - c$，$P_D = r\,c\,m/k$ | `new(k, r, cost)`：`k ≥ 2`，`r > 0`，`cost > 0`（`1 < r < k` は求めない） |
+
+タカ・ハトの利得表は Maynard Smith（1982）のものです．$V < C$ のとき，進化的に安定なタカの割合は $V/C$ です．
+`ElFarol` は Arthur（1994）のバー問題に従います．原典の $N = 100$ と閾値 60 は定性的な記述で，
+$\pm 1$ の利得と，出席者がちょうど `capacity` 人のときの扱い（$+1$）はこの crate の選択です．純粋戦略の均衡は，出席者数が `capacity` に等しい配置だけです．
+`MinorityGame` は Challet & Zhang（1997）のゲームです（勝者は 1 点，敗者は 0 点）．
+`PublicGoodsFinite` は Hauert, De Monte, Hofbauer & Sigmund（2002）の利得を使います．$r < k$ では拠出しないことが支配戦略です．
+`ElFarol` と `MinorityGame` は `AggregateGame` も実装し，公開集計値 `attendance`（`Sum`）を 1 つ持ちます．対戦で行動 `0` を選んだプレイヤーの人数です．
+少数派ゲームでは，`attendance` $< n/2$ なら少数派の側は `0`，そうでなければ `1` です．
 
 どのコンストラクタも `Result<_, CatalogError>` を返します．利得に NaN や無限大があれば `NonFinite`，
 利得がそのゲームを定める形をしていなければ `Condition(_)` です．
@@ -310,8 +350,14 @@ impl OutcomeRule<MatrixGame, ReputationState> for ReputationDiscount {
 }
 ```
 
-対戦は `Credit::All`（全席がそれぞれの利得を受け取る）でなければなりません．
-それ以外の credit の方式はまだ提供されておらず，ステップがエラーで止まります．
+対戦の `credit` は，どの席が利得を受け取るかを表します．
+
+- `Credit::All` — どの席も，自分の利得をエージェントの `payoff` に足し，`n_played` を 1 増やします．`GridNeighborhood` 以外の Matching はすべてこれを使います．
+- `Credit::Center` — 席 0（«中心»）だけが利得を受け取ります．ほかの席は対戦に加わりますが，その利得はエージェントに足されません．
+  `GridNeighborhood` がこれを使います．各エージェントは近傍 1 人につき 1 回，中心として対戦するので，
+  近傍 1 人につきちょうど 1 回（自己対戦があればもう 1 回）利得を受け取り，同じ組で 2 回受け取ることはありません．
+
+credit が何であっても，対戦の表は全席の利得を保持し，`game_metrics` の行動の割合は全席を数えます．
 
 ---
 
@@ -390,9 +436,10 @@ impl ExperimentState for ReputationState {
 | エージェントごとのステップ履歴（長さ `history_len` の環） | `world.history(agent)` |
 | 組ごとの対戦の履歴（組ごとに長さ `history_len` の環．規則が求めたときだけ） | `DecisionContext::pair_history` から（[対の履歴](#対の履歴) を参照） |
 | Matching の状態（`MatchingState`．例えば `RoundRobin` の cursor） | World とともに直列化される |
+| トポロジー（格子かネットワーク） | `GameWorld::with_topology` で設定する．World とともに直列化される（格子は `GridSpec` として） |
 | 実験状態 | `world.x()` |
 
-3 つの Mechanism（`game_match`，`game_decide`，`game_play`）と `RuleBook`，`Matching`，`OutcomeRule` は，
+3 つの Mechanism（`game_match`，`game_decide`，`game_play`），集団動学，`RuleBook`，`Matching`，`OutcomeRule` は，
 再開後の実行に影響する状態を**持ちません**．これらはコードであり，シミュレーションを組み直すときに改めて渡します．
 このため，エンジンの [snapshot と再開](architecture.ja.md#スナップショット保存と再開) はゲームのシミュレーションでも正確です．
 
@@ -451,6 +498,10 @@ resumed.restore(snapshot);                  // continues bit-identically
 pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
     fn name(&self) -> &str;
     fn check(&self, ctx: &MatchContext<'_, G, X>) -> Result<(), GameError>;
+    fn supports_roles(&self, n_roles: usize) -> bool { n_roles == 2 }
+    fn encounter_bounds(&self, ctx: &MatchContext<'_, G, X>) -> Option<EncounterBounds> { None }
+    fn allows_multi_role_per_step(&self) -> bool { false }
+    fn implicit(&self) -> Option<ImplicitPattern> { None }
     fn init_state(&self, ctx: &MatchContext<'_, G, X>) -> MatchingState { MatchingState::None }
     fn encounters_into(
         &self,
@@ -462,12 +513,23 @@ pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
 }
 ```
 
-`encounters_into` は `out.push(&seats, Credit::All)` ごとに対戦を 1 つ積みます（`seats` は役割ごとに 1 エージェント）．
+`encounters_into` は `out.push(&seats, credit)` ごとに対戦を 1 つ積みます
+（`seats` は役割ごとに 1 エージェント．`credit` は `Credit::All` か `Credit::Center`．[利得規則](#利得規則) を参照）．
+省略できる 4 つのメソッドは，Matching の性質を `assemble` に伝えます．
+
+| メソッド | 既定 | 意味 |
+|---|---|---|
+| `supports_roles(n)` | `n == 2` | 席を組める役割の数．それ以外は `UnsupportedRoles` で拒否される |
+| `encounter_bounds(ctx)` | `None` | 1 ステップにエージェントが利得を受け取る対戦の数の最小と最大（`EncounterBounds { min, max }`）．1 ステップの利得の範囲を求めるのに使う（[組み立て時の検査](#組み立て時の検査) を参照） |
+| `allows_multi_role_per_step()` | `false` | `true` なら，`DecisionScope::PerStep` でも 1 ステップに複数の役割を持てる．そのエージェントは 1 回だけ決定し，その行動をすべての席で使う |
+| `implicit()` | `None` | `game_play` が対戦の表を作らずにたどれる型（`ImplicitPattern`）（[対戦を実体化しない評価](#対戦を実体化しない評価) を参照） |
+
 `check` は `assemble` の中で一度だけ走り，Matching が World と合っているかを検査します．
 使われている [決定の粒度](#決定の粒度) は `ctx.decision_scope()` でわかります．
 組込みの `FixedPlayers::pairs(&[(0, 1), …])` は毎ステップ同じ組を対戦させ，
 未知のエージェント，2 回現れるエージェント，役割がちょうど 2 でないゲームを拒否します．
 組込みの [`RoundRobin`](#roundrobin) は，毎ステップすべての 2 人の組を対戦させます．
+集団用の Matching — `RandomPairs`，`RandomGroups`，`WholePopulation`，`NetworkEdges`，`GridNeighborhood` — は [集団用の Matching](#集団用の-matching) で説明します．
 あるステップで席に着かなかったエージェントは，そのステップでは決定も対戦もしません．
 
 独自の Matching が要する状態は，Matching の構造体ではなく **`X` に**置きます（独自の Mechanism で更新します）．
@@ -495,8 +557,14 @@ Interaction  game_play    OutcomeRule → payoffs → pair history → aggregati
                           (→ aggregate row, under assemble_with_aggregates)
 Reward       game_decide  learn_encounter (per encounter) + learn_step (rule state)
                           (→ post-learning mixed reports, with report_mixed)
+             dynamics     (assemble_with only) imitation / selection → held
 PostStep     game_metrics (optional, added by you) → one "game" row of metrics
 ```
+
+`assemble_with` は 4 つ目の Mechanism として集団動学（`imitate_best`，`fermi_update`，`replicator_update`，`moran_update` のどれか）を登録できます．
+これは Reward で `game_decide` の後に動くので，学習はいつも模倣や選択より先です．[集団動学](#集団動学) を参照してください．
+[実体化しない経路](#対戦を実体化しない評価) を使うときは，`game_match` は Decision で対戦を書かず，
+`game_play` は対戦の表の代わりに Matching の型をたどります．
 
 feature `llm` では，`assemble_with_llm` が 4 つ目の Mechanism [`game_llm_decide`](mechanisms/game-llm-decide.ja.md)（Decision，Reward）を
 `game_decide` と `game_play` の間に登録します．これは種類が LLM の規則であるエージェントの席を埋めます（[LLM による決定](#llm-による決定) を参照）．
@@ -541,17 +609,35 @@ pub fn assemble_with_aggregates<G: AggregateGame, X, M: Matching<G, X>, O: Outco
     seed: u64,
     aggregate_history_len: usize,
 ) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>;
+
+pub fn assemble_with<G, X, M: Matching<G, X>, P: PlayPath<G, X>, D: PopulationDynamics<G, X>>(
+    world: GameWorld<G, X>,
+    matching: M,
+    rules: RuleBook<G, X>,
+    play: P,        // Pairwise::new(outcome) | counting_play(), optionally .with_aggregates(n)
+    dynamics: D,    // NoDynamics | ImitateBest | FermiUpdate | ProportionalImitation | MoranUpdate
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>;
 ```
+
+`assemble(world, matching, rules, outcome, opts, seed)` は
+`assemble_with(world, matching, rules, Pairwise::new(outcome), NoDynamics, opts, seed)` と同じで，
+`assemble_with_aggregates(.., seed, n)` は評価経路を `Pairwise::new(outcome).with_aggregates(n)` にしたものです．
+`PlayPath` と `PopulationDynamics` は封印されています．評価経路は `Pairwise<O>`（どの対戦も `OutcomeRule` で評価する），
+`counting_play()` が返す `Counting`（匿名ゲーム．[シミュレーションの中の匿名ゲーム](#シミュレーションの中の匿名ゲームcounting_play) を参照），
+およびそれらを `.with_aggregates(history_len)` で包んだものです．動学は `NoDynamics` と [集団動学](#集団動学) の 4 つの型です．
 
 `build_world` の検査：`history_len > 0`（`InvalidHistoryLength`），割り当ての `count` の和と `PerAgent` の長さが `n_agents` に一致（`AgentCount`），
 初期行動がすべての役割で `check_action` を通る，割り当てた種類がすべて `RuleBook` にある（`RuleError::UnknownKind`），各 `init_state` が成功する．
 
-`assemble` の検査：ゲームが 2 役割である（`UnsupportedRoles`），World にある規則の種類がすべて `RuleBook` にある，
+`assemble` の検査：Matching がゲームの役割の数を扱える（`UnsupportedRoles`），World にある規則の種類がすべて `RuleBook` にある，
 `OnInvalidAction::Fallback` のとき使われている種類すべてに全役割で妥当な代替行動がある，
 `report_mixed(true)` と `DecisionScope::PerEncounter` を組み合わせていない（`GameError::Metrics`），`Matching::check`．
 `assemble_with_aggregates` は同じ検査に加えて `aggregate_history_len > 0` を求めます（`InvalidAggregateHistoryLength`）．
 これは `assemble` に [公開集計値](#公開集計値aggregategame) の表を足したものです．
-エンジンのシードを `derive_seed(seed, &[1])` に設定してビルダーを返すので，`build()` の前にスケジューラー，Recorder，追加の Mechanism を足せます．
+`assemble_with` も同じ検査をし，集団動学を渡したときは [組み立て時の検査](#組み立て時の検査) も行います（エラーは `GameError::Population`）．
+どの関数もエンジンのシードを `derive_seed(seed, &[1])` に設定してビルダーを返すので，`build()` の前にスケジューラー，Recorder，追加の Mechanism を足せます．
 2 つの関数には**同じ** `seed` を渡してください．返されたビルダーで `.seed(...)` を呼ぶと，エンジンのストリームが上書きされます．
 
 ### `PlayOptions`
@@ -562,6 +648,7 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
     .on_invalid_action(OnInvalidAction::Stop)           // Stop (default) | Fallback(map)
     .decision_scope(DecisionScope::PerEncounter)        // PerStep (default) | PerAgentRole | PerEncounter
     .report_mixed(true)                                 // false (default) | true
+    .materialize(true)                                  // false (default) | true
 ```
 
 - **`PayoffAggregation`** — 1 ステップに複数の対戦があるとき，エージェントの利得を `payoffs()[agent]` にどうまとめるか．
@@ -573,6 +660,8 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
 - **`DecisionScope`** — 1 ステップに複数の対戦の席に着いたエージェントが何回決定するか．[決定の粒度](#決定の粒度) を参照．
 - **`report_mixed`** — `true` なら，`game_decide` が各 Reward フェーズの終わりに，規則で動く全エージェントの学習後の混合戦略を記録します．
   `GameWorld::reported_mixed` で読めます．[混合戦略の報告](#混合戦略の報告) を参照．`DecisionScope::PerEncounter` との組み合わせは拒否されます．
+- **`materialize`** — `true` なら，対戦の表を作らずに評価できるステップでも，`game_play` に対戦の表を作らせます．
+  [対戦を実体化しない評価](#対戦を実体化しない評価) を参照．
 
 ---
 
@@ -1463,6 +1552,353 @@ LLM の決定が無いステップでは何も記録しません．
 
 ---
 
+## 集団動学
+
+進化ゲーム理論のエージェントは，ゲームについて推論しません．
+各自が 1 つの戦略を持ってそれを打ち，多く稼いだ戦略が広がります．広がり方は，より稼いだエージェントの模倣か，適応度に比例した繁殖です．
+`socsim-games` はこれを，**Held** のエージェント（決定規則を持たないエージェント．`AssignKind::Held`）と 1 つの**集団動学**で表します．
+集団動学は，Reward でそのステップの利得から保持行動を書き換える Mechanism です．
+`assemble_with` の引数 `dynamics` に渡します．
+
+よく混ざったタカ・ハトの集団の例です．1 000 人が毎ステップ無作為に組になり，比例模倣で更新します．
+タカ 30 % から始めると，タカの割合は進化的に安定な割合 $V/C = 0.5$ へ向かいます．
+
+```rust
+use socsim_games::catalog::HawkDove;
+use socsim_games::{
+    assemble_with, build_world, AssignGroup, AssignKind, Assignment, GameMetrics, InitialActions,
+    MetricsOptions, NormalFormOutcome, Pairwise, PlayOptions, ProportionalImitation, RandomPairs,
+    RuleBook, Update,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    let n = 1_000;
+    let seed = 7;
+    // Action 0 = hawk, 1 = dove. With V = 2, C = 4 one encounter pays in [-1, 2].
+    let game = HawkDove::new(2.0, 4.0).unwrap();
+    let metrics = GameMetrics::new(&game, MetricsOptions::new().population_share(true)).unwrap();
+
+    let rules = RuleBook::new(); // no rules: every agent is Held
+    let mut initial = vec![1; n];
+    initial[..300].fill(0); // 300 hawks, 700 doves
+    let held = Assignment::Ordered(vec![AssignGroup { kind: AssignKind::Held, count: n }]);
+    let world = build_world(game, n, (), InitialActions::PerAgent(initial), &rules, &held, 1, 200, seed)
+        .unwrap();
+
+    let mut sim = assemble_with(
+        world,
+        RandomPairs::new(),                // n is even: every agent plays exactly once
+        rules,
+        Pairwise::new(NormalFormOutcome),  // the play path of `assemble`
+        ProportionalImitation::new(1.0 / 3.0, Update::Synchronous).unwrap(), // beta = 1 / (2 - (-1))
+        PlayOptions::new(),
+        seed,
+    )
+    .unwrap()
+    .add_mechanism(Box::new(metrics))
+    .recorder(Box::new(InMemoryRecorder::new()))
+    .build();
+    sim.run().unwrap();
+
+    let recorder = sim.recorder().as_any().unwrap().downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| {
+        [1, 50, 200].contains(&row.t)
+            && (row.key == "game.played_share.a0" || row.key == "game.population_share.a0")
+    }) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+}
+```
+
+```text
+t=1 game.played_share.a0 = 0.3
+t=1 game.population_share.a0 = 0.319
+t=50 game.played_share.a0 = 0.497
+t=50 game.population_share.a0 = 0.498
+t=200 game.played_share.a0 = 0.54
+t=200 game.population_share.a0 = 0.511
+```
+
+`t = 1` では初期の 300 人のタカが対戦し（`played_share.a0 = 0.3`），最初の更新の後には 319 人がタカを保持しています（`population_share.a0`）．
+ここでは全員がちょうど 1 回ずつ対戦するので，ステップ `t` の `played_share` はステップ `t − 1` の `population_share` に等しくなります．
+有限の集団なので，割合は $V/C$ の周りで揺れ続けます．
+
+### 4 つの動学
+
+| Mechanism | 設定（`assemble_with` の引数） | エージェント $i$ の規則 | トポロジー | 乱数 |
+|---|---|---|---|---|
+| [`imitate_best`](mechanisms/imitate-best.ja.md) | `ImitateBest::new(update)`，`.tie_break(ImitationTie::{KeepOwn, LowestAction})` | $i$ と近傍の中で最も稼いだエージェントの行動を採る | 格子かネットワークが必須 | なし |
+| [`fermi_update`](mechanisms/fermi-update.ja.md) | `FermiUpdate::new(k, update)?` | 相手 $j$ を 1 人引き，確率 $1/(1 + \exp[-(\pi_j - \pi_i)/K])$ で $j$ の行動を採る | 任意 | 相手＋一様乱数 1 つ |
+| [`replicator_update`](mechanisms/replicator-update.ja.md) | `ProportionalImitation::new(beta, update)?` | 相手 $j$ を 1 人引き，確率 $\beta\,[\pi_j - \pi_i]_+$ で $j$ の行動を採る | 任意 | 相手＋一様乱数 1 つ |
+| [`moran_update`](mechanisms/moran-update.ja.md) | `MoranUpdate::new(fitness, mutation, update)?` | 1 ステップに出生と死亡を 1 回：適応度に比例して選んだ親が，一様に選んだ 1 人を置き換える | 持てない | 1 ステップに 4 回 |
+
+$\pi_i$ はエージェント $i$ のそのステップの利得で，`PayoffAggregation` を適用した後の値（`world.payoffs()` の値）です．動学は利得を計算し直しません．
+
+- **`imitate_best`**（Nowak & May, 1992）．同点は近傍の位置ではなく行動の添字で破るので，規則は格子の対称性と可換です．
+  `ImitationTie::KeepOwn`（既定）は，自分の利得が最高に並ぶなら自分の行動を保ち，そうでなければ最高の近傍のうち最小の行動の添字を採ります．
+  `LowestAction` は，最高の利得に並ぶ自分と近傍のうち最小の行動の添字を採ります．
+- **`fermi_update`**（Szabó & Tőke, 1998）．相手はエージェントの近傍から，トポロジーが無ければほかの全エージェントから一様に引きます．自分自身を引くことはありません．
+  $K > 0$ は雑音です．$K \to 0$ ではより稼いだ相手を決定的に真似る規則に近づき，$K$ が大きいと無作為な写しに近づきます．
+  確率は $z = (\pi_j - \pi_i)/K$ として，$z \ge 0$ なら $1/(1 + e^{-z})$，$z < 0$ なら $e^{z}/(1 + e^{z})$ で計算するので，溢れることはありません．
+- **`replicator_update`** は Schlag（1998）の比例模倣の規則です．より稼いだ相手は利得の差に比例した確率で写し，稼ぎの少ない相手は決して写しません．
+  大きなよく混ざった集団では，その期待変化はレプリケータ動学の離散版になります．Mechanism の名前はここから来ています．相手は `fermi_update` と同じように引きます．
+- **`moran_update`**（Moran, 1958；Nowak, Sasaki, Taylor & Fudenberg, 2004；Traulsen, Shoresh & Nowak, 2008）．
+  親は全エージェントから適応度に比例した確率で引き，死ぬエージェントは全エージェント（親を含む）から一様に引きます．
+  死ぬエージェントの保持行動は親の行動になります．ただし確率 `mutation` で，一様に引いた行動になります．
+  適応度は `Fitness::Linear { w }`（$1 - w + w\,\pi$，$w \in [0, 1]$）か `Fitness::Exponential { w }`（$e^{w\pi}$，$w$ は有限）です．
+  居住者の適応度 $1$ に対して 1 人の変異体の適応度が一定の $r$ なら，変異体が $N$ 人の集団を占める確率は $\rho = (1 - 1/r)/(1 - 1/r^N)$，中立なら $1/N$ です．
+
+近傍を持たないエージェントは行動を保ち，乱数を引きません．
+
+### 同期更新
+
+どのコンストラクタも更新の方式を必須の引数として受け取ります．方式は `Update::Synchronous` だけで，既定値はありません．
+方式を後から足しても，既存の設定の意味が変わらないようにするためです．
+`Synchronous` では，全エージェントの次の行動を**同じ更新前の状態**から計算して一時バッファに書き，ステップの終わりにまとめて確定します．
+ステップの中で，ほかのエージェントの新しい行動が見えることはありません．
+同じ規則を 1 人ずつその場で書き換える形で適用すると，結果がエージェントの順に依存し，対称な格子の配置の対称性も崩れます．
+`moran_update` は 1 ステップに保持行動をちょうど 1 つ書きます．親と死ぬエージェントはどちらも更新前の状態から引きます．
+
+### `PostStep` で見えるもの
+
+動学は Reward で，`game_play` が利得を書いた後，`game_decide` の学習の後に動きます．したがって PostStep では次のようになります．
+
+| 読むもの | 表すもの |
+|---|---|
+| `world.payoffs()`，`n_played()`，`plays()`，ステップ履歴 | このステップで打った行動（更新**前**） |
+| `world.held()` | 更新**後**の行動．次のステップでエージェントが打つ行動 |
+
+`game_metrics` は両方を報告します．`game.played_share.<id>` はこのステップの席（打った行動）を数え，
+`MetricsOptions::population_share(true)` で有効にする `game.population_share.a<k>` は，更新後に行動 `k` を保持する**全エージェント**の割合です．
+2 つは中身（更新の前か後か）も分母（席かエージェントか）も違います．9 つの対戦の席に着いたエージェントは `played_share` では 9 回，`population_share` では 1 回数え，
+どの席にも着かなかったエージェントは `population_share` でだけ数えます．[列](#列) を参照してください．
+
+### 組み立て時の検査
+
+動学がきちんと定まらない設定は，`assemble_with` が `GameError::Population` で拒否します
+（有限でない値や範囲外の値は，コンストラクタが同じエラーで先に拒否します）．
+
+- **Held のエージェントだけ．** 全エージェントが `AssignKind::Held` でなければなりません．決定規則を持つエージェントは Decision で `held` を上書きするので，動学は規則と混ざることを拒みます．
+- **共通の行動の集合．** ゲームが `CommonActionSpace` を実装していなければならず（実装していなければコンパイルできません），すべての役割の行動数が等しくなければなりません．
+- **トポロジー．** `imitate_best` は格子かネットワークのトポロジーを要し，`moran_update` はトポロジーの無い World を要します．`fermi_update` と `replicator_update` はどちらでも動きます．
+- **`replicator_update` の上限．** 採用の確率 $\beta\,[\pi_j - \pi_i]_+$ が 1 を超えてはならないので，$\beta \le 1/\Delta\pi$ でなければなりません．$\Delta\pi$ は，1 ステップに取りうる利得の値域の幅です．
+- **`moran_update` の線形の適応度の正値性．** `Fitness::Linear { w }` では，1 ステップに取りうる最小の利得 $\pi_{\min}$ で $1 - w + w\,\pi_{\min}$ が正でなければなりません．`Fitness::Exponential` は常に正です．
+
+1 ステップに取りうる値域は，1 回の対戦の利得の値域 $[p_{\min}, p_{\max}]$ と，Matching の `encounter_bounds`（エージェントが利得を受け取る対戦の数の `min` と `max`）から求めます．
+
+- 1 回の対戦の値域は，`Pairwise::new(NormalFormOutcome)` ではゲームのすべての行動の組（10⁶ 以下）から，`counting_play()` ではすべての人数ベクトルから求めます．
+  利用者定義の `OutcomeRule` では値域が求まらないので，`replicator_update` と，`Linear` の適応度の `moran_update` は拒否されます．
+- `PayoffAggregation::Sum` では，$c \in \{\texttt{min}, \texttt{max}\}$ と $p \in \{p_{\min}, p_{\max}\}$ の積 $c \cdot p$ を覆う範囲です．
+  対戦の数を報告しない Matching（`FixedPlayers`，`RoundRobin`，既定のままの独自の Matching）は拒否されます．`PayoffAggregation::Mean` を使ってください．
+- `Mean` では $[p_{\min}, p_{\max}]$ です．
+- `min` が `0` のとき（対戦しないエージェントがありうるとき．例えば奇数人の `RandomPairs`）は，値域に `0` を加えます．
+
+$V = 2$，$C = 4$ のタカ・ハトでは，1 回の対戦の利得は $[-1, 2]$ に入ります．
+`RandomPairs` では各エージェントが利得を受け取る対戦は高々 1 回なので，$\Delta\pi = 3$，$\beta \le 1/3$ です．
+Moore 近傍で自己対戦つきの `GridNeighborhood` では，各エージェントが 9 回の対戦で利得を受け取るので，`Sum` では $[-9, 18]$ で $\beta \le 1/27$，`Mean` では $\beta \le 1/3$ のままです．
+上の例で $\beta = 0.5$ を求めると，次のように失敗します．
+
+```text
+invalid population dynamics: replicator_update requires beta <= 1 / 3 (the per-step payoff range), got 0.5
+```
+
+実行時には，有限でない利得や，`moran_update` の適応度の合計が正でないことが，ステップを Mechanism のエラーで止めます．
+
+### 集団用の Matching
+
+| Matching | 役割 | 1 ステップの対戦 | Credit | `encounter_bounds` | 実体化しない経路 | 乱数 |
+|---|---|---|---|---|---|---|
+| `RandomPairs::new()` | 2 | エージェントを並べ替え，隣り合う 2 人を組にする．奇数人なら 1 人が休む | `All` | `1..1`，奇数の $n$ では `0..1` | なし | 並べ替え 1 回 |
+| `RandomGroups::new(k)?` | `k`（`k ≥ 2`） | エージェントを並べ替え，隣り合う `k` 人を群れにする．最後の $n \bmod k$ 人が休む | `All` | `1..1`，`k` が $n$ を割り切らなければ `0..1` | なし | 並べ替え 1 回 |
+| `WholePopulation::new()` | エージェントごとに 1 つ | 全エージェントで 1 つの対戦．席は `AgentId` の順 | `All` | `1..1` | あり | なし |
+| `NetworkEdges::new()`（feature `net`） | 2 | 辺 `(source, target)` ごとに 1 つの対戦．辺は整列した順 | `All` | エージェントに接する辺の数の最小と最大 | あり | なし |
+| `GridNeighborhood::new().include_self(b)`（feature `grid`） | 2 | セルを番号の順に，近傍ごとに対戦 `[center, neighbour]` を 1 つ．`include_self(true)` ならその後に `[center, center]` | `Center` | エージェントの近傍の数（自己対戦があれば ＋1） | あり | なし |
+
+`k < 2` の `RandomGroups::new(k)` と，ゲームの役割の数がエージェントの人数と違う `WholePopulation` は `GameError::InvalidMatching` です．
+`NetworkEdges` と `GridNeighborhood` は対応するトポロジーを要し（無ければ `InvalidMatching`），1 ステップに 1 人を複数の役割の席に着けるので，
+`allows_multi_role_per_step()` を宣言します．規則で動くエージェントは 1 ステップに 1 回だけ決定し，その行動をすべての席で使います．
+有向ネットワークでは，`NetworkEdges` は弧ごとに 1 回対戦させ，両端に利得を与えます．動学の近傍は出近傍です．
+
+Moore 近傍で `include_self(true)` の `GridNeighborhood` は，Nowak & May（1992）の相互作用です．
+各エージェントは 8 つの近傍と自分自身を相手に段階ゲームを行い，自分が中心の対戦ごとに 1 回利得を受け取ります．
+
+### トポロジー：`GameWorld::with_topology`
+
+`build_world` で作った World はトポロジーを持ちません（`Topology::None`）．組み立ての前に付けます．
+
+```rust
+let world = build_world(game, side * side, (), initial, &rules, &held, 1, steps, seed)?
+    .with_topology(Topology::grid(GridSpec {
+        rows: side,
+        cols: side,
+        boundary: GridBoundary::Toroidal,          // or Fixed
+        neighborhood: GridNeighbors::Moore,        // or VonNeumann
+    })?)?;
+```
+
+| コンストラクタ | feature | エージェント $i$ の近傍 |
+|---|---|---|
+| `Topology::grid(GridSpec { rows, cols, boundary, neighborhood })` | `grid` | セル $i$ に隣接するセル．セル $i$ は `i / cols` 行 `i % cols` 列 |
+| `Topology::network(SocialNetwork)` | `net` | 無向ネットワークでの近傍 |
+| `Topology::directed_network(DiSocialNetwork)` | `net` | 出近傍 |
+
+格子のセルがエージェントと同数でないとき，またはネットワークの頂点が World の `AgentId` とちょうど一致しないか自己ループを持つとき，`with_topology` は `GameError::Topology` を返します．
+近傍の並びは整列し重複を除くので，辺を足した順は結果に影響しません．
+トポロジーは World の一部で，snapshot にも入ります．格子は `GridSpec` として保存し，読み込むときに作り直します．
+Mechanism は `MatchContext::topology()` と `OutcomeContext::topology()` で読み，`GameWorld` は `socsim_core::Neighbors` を実装します．
+ネットワークは `NetworkEdges` と，`moran_update` 以外の動学に合います．
+
+```rust
+let ids: Vec<AgentId> = (0..n as u64).map(AgentId).collect();
+let network = SocialNetwork::watts_strogatz(
+    &ids, 4, 0.1, &mut SimRng::from_seed(derive_seed(seed, &[4])), // labels [0]..[3] are taken
+);
+let world = build_world(PrisonersDilemma::weak(1.5)?, n, (), initial, &rules, &held, 1, 50, seed)?
+    .with_topology(Topology::network(network))?;
+let mut sim = assemble_with(
+    world,
+    NetworkEdges::new(),                                   // one encounter per edge
+    rules,
+    Pairwise::new(NormalFormOutcome),
+    FermiUpdate::new(0.1, Update::Synchronous)?,           // a random neighbour per agent
+    PlayOptions::new().payoff_aggregation(PayoffAggregation::Mean),
+    seed,
+)?
+.build();
+```
+
+### シミュレーションの中の匿名ゲーム：`counting_play()`
+
+`AnonymousGame` を実装したゲームでは，評価経路として `Pairwise::new(NormalFormOutcome)` の代わりに `counting_play()` を使えます．
+各対戦で行動を 1 回数え，各行動の利得をほかの席の人数から 1 回ずつ計算します．席ごとに戦略形の利得を評価する代わりです．
+利得は `Pairwise::new(NormalFormOutcome)` と同じで，1 つの対戦に多くのエージェントが着くとき（`RandomGroups`，`WholePopulation`）に効きます．
+利用者定義の利得規則とは組み合わせられず，匿名でないゲームで `counting_play()` を使うとコンパイルできません．
+`counting_play().with_aggregates(n)` は，`assemble_with_aggregates` と同じようにゲームの公開集計値も記録します．
+
+100 人で 1 つの対戦をするエル・ファロル・バーを，フェルミ則で動かします．
+
+```rust
+use socsim_games::catalog::ElFarol;
+use socsim_games::{
+    assemble_with, build_world, counting_play, AssignGroup, AssignKind, Assignment, FermiUpdate,
+    GameMetrics, InitialActions, MetricsOptions, PlayOptions, RuleBook, Update, WholePopulation,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    let n = 100;
+    let seed = 3;
+    // One encounter seats all 100 agents; attending pays +1 up to 60 attendees, -1 above.
+    let game = ElFarol::new(n, 60).unwrap();
+    let metrics = GameMetrics::new(&game, MetricsOptions::new().population_share(true)).unwrap();
+    let rules = RuleBook::new();
+    let held = Assignment::Ordered(vec![AssignGroup { kind: AssignKind::Held, count: n }]);
+    let initial = (0..n).map(|i| usize::from(i >= 80)).collect(); // 80 attend, 20 stay home
+    let world = build_world(game, n, (), InitialActions::PerAgent(initial), &rules, &held, 1, 100, seed)
+        .unwrap();
+
+    let mut sim = assemble_with(
+        world,
+        WholePopulation::new(),
+        rules,
+        counting_play().with_aggregates(8),                     // payoffs from counts + `attendance`
+        FermiUpdate::new(0.1, Update::Synchronous).unwrap(),
+        PlayOptions::new(),
+        seed,
+    )
+    .unwrap()
+    .add_mechanism(Box::new(metrics))
+    .recorder(Box::new(InMemoryRecorder::new()))
+    .build();
+    sim.run().unwrap();
+
+    let recorder = sim.recorder().as_any().unwrap().downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| {
+        [1, 2, 3, 100].contains(&row.t)
+            && (row.key == "game.aggregate.attendance" || row.key == "game.population_share.a0")
+    }) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+    println!("arena encounters at the end: {}", sim.world().plays().n_encounters());
+}
+```
+
+```text
+t=1 game.aggregate.attendance = 80
+t=1 game.population_share.a0 = 0.6
+t=2 game.aggregate.attendance = 60
+t=2 game.population_share.a0 = 0.86
+t=3 game.aggregate.attendance = 86
+t=3 game.population_share.a0 = 0.72
+t=100 game.aggregate.attendance = 49
+t=100 game.population_share.a0 = 0.76
+arena encounters at the end: 0
+```
+
+ステップ `t` の `population_share.a0` は，ステップ `t + 1` の出席者数です．割合は更新の後に記録するからです．
+`t = 1` ではバーが混み（80 > 60），出席者はみな $-1$ を得て，欠席者を相手に引いた出席者が切り替えます．
+`t = 2` ではちょうど 60 人が出席し，出席者はみな $+1$ を得て，欠席者が切り替えて戻ります．
+全員が一斉に更新するので，出席者数は定員を行き過ぎ続けます．バー問題の揺れの同期版です．
+最後の行は，この実行が対戦の表を一度も作らなかったことを示します（次の節を参照）．
+
+### 対戦を実体化しない評価
+
+既定（`PlayOptions::materialize(false)`）では，次の条件が**すべて**成り立つとき，`game_play` は `GameWorld::plays` を埋めずに Matching の型を直接たどってステップを評価します．
+
+- 全エージェントが Held である（規則を割り当てたエージェントがいない）．
+- 決定の粒度が `DecisionScope::PerStep` である．
+- 評価経路が `Pairwise::new(NormalFormOutcome)` か `counting_play()`（集計値の有無は問わない）で，利用者定義の `OutcomeRule` ではない．
+- `Matching::implicit()` が型を返す．`WholePopulation`，`NetworkEdges`，`GridNeighborhood` は返し，`RandomPairs`，`RandomGroups`，`FixedPlayers`，`RoundRobin` は返さない．
+
+そうでないとき，または `PlayOptions::materialize(true)` のときは，先に対戦を対戦の表に書きます．
+どちらの経路でも，利得，対戦数，ステップの記録，集計値の行，指標の列は同じです．
+実体化しない経路では，`game_match` は対戦を書かず，`world.plays()` は空のままで，`game_metrics` は `game_play` がそのステップについて保持する役割ごとの打った行動の数を読みます．
+自己対戦つきの Moore 近傍では 1 人あたりおよそ 9 つの対戦があるので，大きな格子では対戦の表が World のほかの部分よりはるかに多くのメモリを使うことがあります．実体化しない経路はそれを確保しません．
+`world.plays()` を自分で読みたいときは `materialize(true)` にしてください．
+`implicit()` で型を返す独自の Matching は，実体化しない経路では自分の `encounters_into` ではなくその型で評価されるので，まったく同じ対戦を表すものでなければなりません．
+
+### 例：`nowak_may` と `hawk_dove_large`
+
+`crates/socsim-games/examples/` の 2 つのプログラムは，集団動学を大きな規模で走らせます．
+
+**`nowak_may`** — 100 × 100 のトーラス上の Nowak & May（1992）の空間囚人のジレンマです．
+自己対戦つきの Moore 近傍（`GridNeighborhood`），$b = 1.85$ の弱い囚人のジレンマ（`PrisonersDilemma::weak(1.85)`），`KeepOwn` の `ImitateBest`，
+seed から無作為に配置した初期の裏切り者 10 % という構成です．
+各世代の後の協力者の割合（`game.population_share.a0`）を CSV で出力します．
+
+```sh
+cargo run --release -p socsim-games --features core,engine,grid --example nowak_may -- --steps 200 --seed 1
+```
+
+```text
+generation,cooperator_share
+1,0.3805
+2,0.2485
+3,0.1984
+...
+200,0.3242
+```
+
+最初は裏切り者が侵入し（第 4 世代までに割合は約 0.19 に下がる），その後協力者の塊が持ち直して割合が揺れます．
+この実行の第 21〜200 世代では 0.27 と 0.36 の間にあり，平均は 0.320 です．
+Nowak & May は，$1.8 < b < 2$ では割合が 0.318 の周りで揺れると報告しています．この区間の中では，同期の発展は $b$ の値に依りません．
+同じ seed の 2 回の実行は同じ出力を出します．
+
+**`hawk_dove_large`** — よく混ざったタカ・ハトの集団（$V = 2$，$C = 4$）を，`RandomPairs` と $\beta = 1/3$ の `ProportionalImitation` で動かします．初期はタカが半数です．
+ステップの間に保持行動だけを持つ（`history_len = 1`，指標の Mechanism なし）ので，メモリは集団の大きさに比例して増えます．要約を 1 行出力します．
+
+```sh
+cargo run --release -p socsim-games --features core,engine --example hawk_dove_large
+# n=10000 steps=10 seed=1 hawk_share_initial=0.5 hawk_share_final=0.4932 mean_payoff_last_step=0.5156
+cargo run --release -p socsim-games --features core,engine --example hawk_dove_large -- --n 1000000 --steps 10
+# n=1000000 steps=10 seed=1 hawk_share_initial=0.5 hawk_share_final=0.499876 mean_payoff_last_step=0.500256
+```
+
+集団は安定な割合 $V/C = 0.5$ から始まり，標本の揺れを除いてそこに留まります．揺れは $n$ が大きいほど小さくなります．この割合での平均利得は $0.5$ です．
+
+---
+
 ## 指標
 
 `GameMetrics` は読むだけの Mechanism（名前は `game_metrics`）で，ゲームのステップごとの統計 — 行動の割合，利得の平均とばらつき，
@@ -1486,6 +1922,7 @@ LLM の決定が無いステップでは何も記録しません．
 | `equilibrium(EquilibriumTarget)` | `None` | `Solve` で `game.eq_distance` を足す |
 | `stop(tol, window)` | なし | 行動の割合が動かなくなったら実行の終了を求める．`tol` は有限で `> 0`，`window ≥ 1`．そうでなければ `GameError::Metrics` |
 | `action_entropy(on)` | 有効 | feature `metrics` のときだけ．`game.action_entropy` を足す／除く |
+| `population_share(on)` | 無効 | `game.population_share.a<k>` を足す．すべての役割の行動数が等しくなければ `GameError::Metrics` |
 
 2 エージェントの囚人のジレンマで，Tit-for-Tat と常に裏切る相手を対戦させます．
 
@@ -1586,11 +2023,12 @@ feature `metrics` を有効にすると，同じプログラムは `game.coop_ra
 | `game.action_entropy` | feature `metrics`，`action_entropy(true)`（既定），共通 ID，かつステップに席がある | 共通の `played_share` の値の Shannon エントロピー $-\sum_k p_k \ln p_k$（単位は nat） |
 | `game.mean_payoff` | 1 人以上が対戦した（`n_played() > 0`） | 対戦したエージェントの `payoffs()`（`PayoffAggregation` の後）の平均 |
 | `game.payoff_sd` | `mean_payoff` と同じ | 同じ利得の母標準偏差（$n$ で割る） |
-| `game.aggregate.<name>` | `assemble_with_aggregates` で組み立て，かつ集約が定義される | そのステップの集約済みの集計値（[公開集計値](#公開集計値aggregategame) を参照） |
+| `game.aggregate.<name>` | 集計値つきで組み立て（`assemble_with_aggregates`，または `.with_aggregates(n)` を付けた評価経路），かつ集約が定義される | そのステップの集約済みの集計値（[公開集計値](#公開集計値aggregategame) を参照） |
+| `game.population_share.a<k>` | `population_share(true)` で，World にエージェントが 1 人以上いる | PostStep で `held` が `k` のエージェント ÷ 全エージェント．[集団動学](#集団動学) の後の値，つまり次のステップの行動 |
 | `game.regret` | 後悔が有効で，混合戦略の組が定義される | $\max_r \big[\max_a F_r(a, \sigma_{-r}) - F_r(\sigma)\big]$（`mixed::regret`） |
 | `game.eq_distance` | `EquilibriumTarget::Solve` で，組が定義される | 解いた均衡に対する $\min_{\sigma^*} \sum_r \sum_a \lvert \sigma_r(a) - \sigma^*_r(a)\rvert$ |
 
-1 行の中の列の順は，行動の割合，`coop_rate`，`action_entropy`，`mean_payoff`，`payoff_sd`，集計値，`regret`，`eq_distance` です．
+1 行の中の列の順は，行動の割合，`coop_rate`，`action_entropy`，`mean_payoff`，`payoff_sd`，集計値，集団の割合，`regret`，`eq_distance` です．
 
 **定義されない列は行から省き，NaN として書くことはありません．** 対戦の無いステップでは割合，協力率，エントロピーの列を記録せず，
 誰も対戦しなかったステップでは利得の列を記録しません．有限でない値（計算した値，または読んだ利得）が出たときは，行を記録する前にステップを Mechanism のエラーで止めるので，
@@ -1599,9 +2037,12 @@ feature `metrics` を有効にすると，同じプログラムは `game.coop_ra
 行に無い列には NaN を書きます．列が初めて現れる前に記録した行も NaN で埋めます．
 `llm` では `game_llm_decide` も同じ表 `"game"` に自分の行を書くので，その表には 1 ステップに 2 行が入り，それぞれ相手の列が NaN になります．Mechanism は毎ステップ，World のゲームが作ったときと同じ役割数と行動数を持つことも検査します．
 
-`played_share` が数えるのは**対戦の表の席**であって，エージェントではありません．3 つの対戦の席に着いたエージェントは 3 回数えます．
+`played_share` が数えるのは**席**であって，エージェントではありません．3 つの対戦の席に着いたエージェントは 3 回数えます．
 そのため，`held` を書かない粒度も含めて，どの[決定の粒度](#決定の粒度)でも定義されます．
-集団の割合 — 各戦略を持つエージェントの割合 — は別の量で，`game_metrics` には含まれません．
+[実体化しない経路](#対戦を実体化しない評価) では対戦の表を使わずに席を数え，結果は同じです．
+集団の割合 `game.population_share.a<k>` は別の量で，ステップの終わりに行動 `k` を保持している**エージェント**の割合です．
+集団動学があるとき，これは更新の後の行動を表し，`played_share` は更新の前に打った行動を表します（[`PostStep` で見えるもの](#poststep-で見えるもの) を参照）．
+集団の割合の ID は，ラベルに依らず常に `a<k>` です．
 
 ### 行動 ID：`metric_action_ids`
 
@@ -1794,7 +2235,8 @@ pub trait AggregateGame: NormalFormGame {
 残りは小文字，数字，`_`，`-` です（`AggregateSpecError::{EmptyName, InvalidStart, InvalidCharacter { index }, TooLong { length }}`．
 デシリアライズでも同じ検査が走ります）．したがって名前は指標名 `game.aggregate.<name>` の 1 区切りになります．
 
-`assemble` の代わりに `assemble_with_aggregates(.., seed, aggregate_history_len)` で組み立てます．
+`assemble` の代わりに `assemble_with_aggregates(.., seed, aggregate_history_len)` で組み立てます
+（`assemble_with` では評価経路を包みます：`Pairwise::new(outcome).with_aggregates(n)` か `counting_play().with_aggregates(n)`）．
 Interaction の終わりに `game_play` が対戦ごとに 1 回（`EncounterId` の順）`aggregate_into` を呼び，値をそのステップの対戦にわたって集約し，
 `t` をキーとする 1 行にします．`Sum` は和（対戦の無いステップでは `0`），`Mean` は平均（対戦の無いステップでは定義されない）です．
 最後の `aggregate_history_len` 行が World に保持されるので，snapshot が持ち運びます．有限でない値はステップを止めます．
@@ -1959,7 +2401,7 @@ feature のもとでは既定で有効で（`MetricsOptions::action_entropy(fals
 
 `GameMetrics::describe()` は，この設定が書きうる列について `(pattern, meaning)` の組を返します．
 `game.played_share.{action}`，`game.mean_payoff`，`game.payoff_sd`，有効なら `game.coop_rate`，`game.regret`，`game.eq_distance`，
-`game.action_entropy`，そして `game.aggregate.{name}`（組み立て方に依存するので常に並ぶ）です．
+`game.action_entropy`，`game.population_share.a{k}`，そして `game.aggregate.{name}`（組み立て方に依存するので常に並ぶ）です．
 [runvault](https://github.com/akitenkrad/rs-runvault) で実行を記録するリポジトリは，これを `runvault.toml` に写せます．
 `{…}` の区切りを含むパターンは `[[metric_patterns]]` に，そのままの名前は `[metrics."<name>"]` に書きます．
 [行動 ID](#行動-idmetric_action_ids) の例のプログラムがちょうどそれを出力します．
@@ -1997,7 +2439,7 @@ meaning = "Public game aggregate for the completed step; present only when the s
 | ラベル | ストリーム |
 |---|---|
 | `derive_seed(seed, &[0])` | World の初期化（`Assignment::Shuffled`） |
-| `derive_seed(seed, &[1])` | エンジン（スケジューラー，およびステップの RNG を通した `Matching` と `decide` の乱数） |
+| `derive_seed(seed, &[1])` | エンジン（スケジューラー，およびステップの RNG を通した `Matching`，`decide`，集団動学の乱数） |
 | `derive_seed(seed, &[2])` | `decision_root`．World に保存される．`game_llm_decide` は生成のシードとフォールバックのストリームをここから導く（[シード](#game_llm_decide-の-decision-の流れ) を参照） |
 | `derive_seed(seed, &[3, agent, generation])` | 規則の状態の初期化（`RuleInitContext::init_seed`） |
 
@@ -2008,6 +2450,14 @@ meaning = "Public game aggregate for the completed step; present only when the s
 同じ seed と同じコードなら，実行はステップごとに再現されます．
 `game_metrics` と混合戦略の報告は乱数を引かず，規則の状態，保持行動，対戦の表に触れないので，足しても実行の軌跡は変わりません．
 集計値の表も乱数を引きません．
+
+集団動学も同じエンジンのストリームから，Reward で学習の後に，`AgentId` の昇順にエージェントを訪れて引きます．
+`fermi_update` と `replicator_update` は，エージェントごとに相手を 1 回（`gen_range`），続いて一様な `f64` を 1 回引きます．近傍を持たないエージェントは引きません．
+`imitate_best` は何も引きません．
+`moran_update` は 1 ステップに 4 回引きます．親のための一様な `f64`，死ぬエージェントのための `gen_range`，変異するかを決める一様な `f64`，変異体のための一様な行動です．
+変異体の行動は，変異が起きないときも引きます．
+`RandomPairs` と `RandomGroups` は Decision で 1 ステップに 1 回並べ替えを引き，ほかの組込みの Matching は何も引きません．
+動学は World の外に状態を持たないので，snapshot から正確に再開できます．
 
 ---
 
@@ -2070,6 +2520,10 @@ tol = 1e-10 × max(1, 利得の最大値 − 利得の最小値)    （全役割
 | `zero_sum_minimax(&game)` | 2 人，ゼロ和 | `MinimaxSolution`：ゲームの値と最適戦略 | 線形計画．主問題と双対問題を両方解いて検査する |
 | `maximin_security_level(&game, role)` | 2 人 | `SecurityLevel`：1 つの役割のマキシミン保証水準 | 線形計画．主問題と双対問題を両方解いて検査する |
 | `logit_qre(&game, &options)` | n 人 | `QreSolution`：与えた λ でのロジット QRE 1 つ | 局所的な不動点反復であり，分枝の追跡ではない |
+| `pure_nash_counts(&game)` | n 人，匿名 | `Vec<CountProfile>`：純粋戦略の均衡すべてを人数ベクトルで | `G: AnonymousGame`．人数ベクトルは 10⁶ 以下 |
+| `replicator_integrate(&game, &x0, &options)` | 2 人，対称 | `ReplicatorRun`：レプリケータ動学の軌道の終点 | 刻み一定の古典的な RK4 |
+| `replicator_fixed_points(&game)` | 2 人，対称 | `FixedPointSet`：単体のすべての面の静止点 | 行動は 20 以下 |
+| `ess_verdict(&game, &resident)` | 2 人，対称 | `EssVerdict::{True, False, Inconclusive}` | 接空間の二次形式で判定．僅差では `Inconclusive` |
 
 エラーは `SolveError` です．上のゲームの検査のほか，ソルバーが受け付けない役割の数の `UnsupportedRoles`，
 `NotZeroSum`，`InvalidLabel`，`MaxPivots`，`Lp(LpFailure)`，`VerificationFailed { duality_gap, regret }`，
@@ -2187,6 +2641,55 @@ tol = 1e-10 × max(1, 利得の最大値 − 利得の最小値)    （全役割
 有限の λ ではロジット QRE は Nash 均衡ではありません．`regrets` は返した組での各役割の通常の（正則化しない）後悔です．
 厳密なロジット QRE ではこれは `ln |S_i| / λ` 以下（`|S_i|` はその役割の行動の数）なので，λ が大きくなるほど小さくなります．
 ソルバーはこの後悔を報告しますが，受け入れの判定には使いません．
+
+### `pure_nash_counts`
+
+[匿名ゲーム](#匿名ゲームと-commonactionspace) では各行動を選ぶプレイヤーの人数だけが意味を持つので，均衡は行動の組ではなく**人数ベクトル**になります．
+`pure_nash_counts(&game)` は，`n_roles()` 人のプレイヤーを共通の行動の集合に分けるすべての人数ベクトル（$m^n$ 個の行動の組ではなく $\binom{n + m - 1}{m - 1}$ 個の組成）を調べ，
+どのプレイヤーも行動を変えて `tol` より多く得をしないものを残します．利得は `payoff_by_counts` で評価します．
+`CountProfile { counts }` を `counts` の辞書式の順で返します．
+すべての役割の行動数が等しくなければならず（違えば `InvalidOptions`），人数ベクトルが 10⁶ を超えると `TooLarge` です．
+`ElFarol::new(100, 60)` の均衡は `[60, 40]`（出席者数が定員に等しい）だけで，`MinorityGame::new(n)` の均衡は `[(n−1)/2, (n+1)/2]` と `[(n+1)/2, (n−1)/2]` の 2 つです．
+
+### `replicator_integrate` と `replicator_fixed_points`
+
+どちらも**対称な 2 人ゲーム**（`is_symmetric()`．そうでなければ `UnsupportedRoles` か `InvalidOptions`）を，役割 0 の利得行列 $A$ と Taylor & Jonker（1978）のレプリケータ動学で扱います．
+
+$$\dot x_i = x_i\,\big((Ax)_i - x^\top A x\big)$$
+
+`replicator_integrate(&game, &x0, &ReplicatorOptions)` は，混合戦略 `x0` から古典的な 4 次の Runge–Kutta 法と一定の刻み `dt` で積分します．
+各刻みの後，0 より下で `tol` 以内の成分は 0 にし，状態を単体に正規化し直します（それより大きな負の成分や有限でない状態は `NotConverged`）．
+$\lVert \dot x \rVert_\infty <$ `tol` になった時点で止まり（`converged: true`），`t` が `t_max` に達したときも止まります（`converged: false`）．
+`ReplicatorRun { state, t, steps, converged }` を返します．
+
+| `ReplicatorOptions` | 既定 | 意味 |
+|---|---|---|
+| `dt` | `0.01` | 刻み．有限で `> 0`．`.with_dt(dt)` で設定 |
+| `t_max` | `10_000` | 時間の上限．有限で `≥ 0`．`.with_t_max(t)` で設定 |
+| `tol` | `1e-12` | $\lVert \dot x \rVert_\infty$ に対する停止の閾値．有限で `> 0`．`.with_tol(t)` で設定 |
+
+`replicator_fixed_points(&game)` は動学の静止点を列挙します．すべてのサポート（単体のすべての面）について，サポート内の行動の無差別条件 $(Ax)_i = (Ax)_j$ を解きます．
+`FixedPointSet { isolated, components, inconclusive }` を返します．
+`isolated` は，面の内部に一意の解を持つ `FixedPoint { support, point }` です．
+`components` は，`base` を通り `directions` に沿う正の次元の静止点の族 `AffineComponent { support, base, directions }` です（零ゲームでは単体全体が 1 つの族になります）．
+`inconclusive` は，方程式が悪条件（条件数の推定が 10¹² 超）だったか判定できなかったサポートの一覧です．
+より大きな族に含まれる族と，族の上にある孤立点は除きます．
+静止点は Nash 均衡とは限りません．どのゲームでも，純粋戦略はすべて静止点です．行動が 20 を超えると `TooLarge` です．
+
+### `ess_verdict`
+
+`ess_verdict(&game, &resident)` は，対称な 2 人ゲームの混合戦略 `resident` が Maynard Smith（1974）の意味の進化的に安定な戦略（ESS）かを判定します．
+$p$ が ESS であるとは，$p$ と違うどの変異体 $q$ についても，$E(p, p) > E(q, p)$ か，$E(p, p) = E(q, p)$ かつ $E(p, q) > E(q, q)$ が成り立つことです．
+`EssVerdict` を返します．
+
+- `resident` に対して `resident` より良い純粋戦略があれば `False` です（対称な Nash 均衡ではない）．
+- そうでなければ，効くのは `resident` への最適応答から作った変異体です．最適応答がちょうどサポートの行動に一致するときは，その面の接空間での利得の二次形式の符号で決めます．
+  対称部分の固有値がすべて `−tol` より下なら `True`，`tol` より上の固有値があれば `False`，二次形式が消えるとき（標準のじゃんけんの一様混合など）は `False` です．
+- サポートの外にも最適応答があるとき（最適応答が 3 つ以下）は，変異体の向きがなす錐の上で二次形式を調べます．
+- 判定を決める固有値や向きの値が 0 から `tol` 以内のとき，またはサポートの外に最適応答があり最適応答が 3 つを超えるときは `Inconclusive` です．
+
+`tol` はゲームの [許容誤差](#許容誤差と検証) です．
+`HawkDove::new(2.0, 4.0)` では混合 $(1/2, 1/2)$ が `True`，純粋なハトが `False` で，`HawkDove::new(2.0, 2.0)` では純粋なタカが `True` です．
 
 ### 例
 
@@ -2324,3 +2827,72 @@ lambda 5 from (stag, stag): P(stag) = 0.9901
 ```
 
 どの後悔も `ln 2 / λ`（λ = 0.5 で約 1.39）を下回っています．
+
+**集団のゲーム：人数の均衡，レプリケータ動学，ESS．**
+匿名ゲームの均衡は人数ベクトルで返ります．タカ・ハトでは，タカ 10 % からのレプリケータ動学が安定な割合 $V/C$ に達します．これは唯一の内部の静止点で，ESS です．
+
+```rust
+use socsim_games::catalog::{ElFarol, HawkDove, MinorityGame, PublicGoodsFinite};
+use socsim_games::solve::{
+    ess_verdict, pure_nash_counts, replicator_fixed_points, replicator_integrate,
+    ReplicatorOptions,
+};
+use socsim_games::MixedStrategy;
+
+fn main() {
+    // Anonymous games: equilibria as count vectors (number of players per action).
+    let bar = ElFarol::new(100, 60).unwrap();
+    let minority = MinorityGame::new(5).unwrap();
+    let pgg = PublicGoodsFinite::new(5, 3.0, 1.0).unwrap();
+    for (name, counts) in [
+        ("El Farol (n = 100, capacity 60)", pure_nash_counts(&bar).unwrap()),
+        ("minority game (n = 5)", pure_nash_counts(&minority).unwrap()),
+        ("public goods (k = 5, r = 3)", pure_nash_counts(&pgg).unwrap()),
+    ] {
+        let counts: Vec<_> = counts.into_iter().map(|profile| profile.counts).collect();
+        println!("{name}: {counts:?}");
+    }
+
+    // Hawk-dove with V = 2, C = 4: the stable hawk share is V / C = 0.5.
+    let hd = HawkDove::new(2.0, 4.0).unwrap();
+    println!("hawk_share_ess = {}", hd.hawk_share_ess());
+    let x0 = MixedStrategy::new(vec![0.1, 0.9]).unwrap();
+    let run = replicator_integrate(&hd, &x0, &ReplicatorOptions::new()).unwrap();
+    println!(
+        "from x0 = 0.1: x = {:.10} at t = {:.2} (converged: {})",
+        run.state.probs()[0],
+        run.t,
+        run.converged
+    );
+    for point in replicator_fixed_points(&hd).unwrap().isolated {
+        println!("rest point {:.4?} on support {:?}", point.point.probs(), point.support);
+    }
+    let mixed = MixedStrategy::new(vec![0.5, 0.5]).unwrap();
+    let dove = MixedStrategy::pure(2, 1).unwrap();
+    println!(
+        "ESS: (0.5, 0.5) {:?}, pure dove {:?}",
+        ess_verdict(&hd, &mixed).unwrap(),
+        ess_verdict(&hd, &dove).unwrap()
+    );
+    let hawk = MixedStrategy::pure(2, 0).unwrap();
+    println!("V = C = 2, pure hawk: {:?}", ess_verdict(&HawkDove::new(2.0, 2.0).unwrap(), &hawk).unwrap());
+}
+```
+
+```text
+El Farol (n = 100, capacity 60): [[60, 40]]
+minority game (n = 5): [[2, 3], [3, 2]]
+public goods (k = 5, r = 3): [[0, 5]]
+hawk_share_ess = 0.5
+from x0 = 0.1: x = 0.5000000000 at t = 53.07 (converged: true)
+rest point [1.0000, 0.0000] on support [0]
+rest point [0.0000, 1.0000] on support [1]
+rest point [0.5000, 0.5000] on support [0, 1]
+ESS: (0.5, 0.5) True, pure dove False
+V = C = 2, pure hawk: True
+```
+
+$r = 3 < k = 5$ の公共財ゲームでは拠出しないことが支配戦略なので，均衡は誰も拠出しない配置だけです（`[0, 5]`：`C` が 0 人，`D` が 5 人）．
+タカ・ハトでは $\dot x = x(1 - x)(1 - 2x)$ で，積分は $\lvert \dot x \rvert < 10^{-12}$ になった時点で止まります．
+2 つの純粋な静止点は安定ではなく，純粋なハトは均衡ですらありません．
+$V = C$ では安定な状態は純粋なタカです（$E(H, H) = E(D, H) = 0$ かつ $E(H, D) = V > E(D, D) = V/2$）．

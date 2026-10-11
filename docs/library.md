@@ -318,7 +318,7 @@ passed to both functions:
 | Label | Stream in a game simulation |
 |---|---|
 | `derive_seed(seed, &[0])` | world initialisation (shuffling the rule assignment) |
-| `derive_seed(seed, &[1])` | the engine (passed to `SimulationBuilder::seed` by `assemble`) |
+| `derive_seed(seed, &[1])` | the engine (passed to `SimulationBuilder::seed` by `assemble` and `assemble_with`); random matchings, `decide` and the population dynamics draw from it |
 | `derive_seed(seed, &[2])` | `decision_root`, stored in the game world for decision-time streams |
 | `derive_seed(seed, &[3, agent, generation])` | rule-state initialisation (`RuleInitContext::init_seed`) |
 
