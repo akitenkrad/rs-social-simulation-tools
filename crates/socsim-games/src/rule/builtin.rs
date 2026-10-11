@@ -6,6 +6,8 @@ use crate::{
     RuleInitContext, Slot, StageGame, Stateless, TftState,
 };
 
+use super::pure_strategy;
+
 #[derive(Clone, Debug)]
 pub struct Fixed<A> {
     action: A,
@@ -81,6 +83,18 @@ where
             )));
         }
         Ok(rng.gen_range(0..n_actions))
+    }
+
+    fn mixed(&self, state: &X::PolicyState, role: usize, game: &G) -> Option<Vec<f64>> {
+        <X::PolicyState as Slot<Stateless>>::slot(state)?;
+        if role >= game.n_roles() {
+            return None;
+        }
+        let n_actions = game.n_actions(role);
+        if n_actions == 0 {
+            return None;
+        }
+        Some(vec![1.0 / n_actions as f64; n_actions])
     }
 }
 
@@ -170,5 +184,16 @@ where
             state.last_opponent = Some(action);
         }
         Ok(())
+    }
+
+    fn mixed(&self, state: &X::PolicyState, role: usize, game: &G) -> Option<Vec<f64>> {
+        let state = <X::PolicyState as Slot<TftState>>::slot(state)?;
+        if role >= game.n_roles() {
+            return None;
+        }
+        pure_strategy(
+            game.n_actions(role),
+            state.last_opponent.unwrap_or(self.cooperate),
+        )
     }
 }

@@ -115,6 +115,52 @@ impl FictitiousBelief {
         resolve_tie(&best_actions, self.tie_break, rng)
     }
 
+    /// Returns all best responses to the unnormalized belief counts in action
+    /// index order.
+    ///
+    /// Ties are detected with exact `f64` equality.
+    pub fn best_responses<G: FiniteGame>(
+        &self,
+        game: &G,
+        role: usize,
+    ) -> Result<Vec<usize>, LearnError> {
+        let opponent = opponent_role(game, role)?;
+        let expected = game.n_actions(opponent);
+        if self.counts.len() != expected {
+            return Err(LearnError::LengthMismatch {
+                what: "belief counts",
+                expected,
+                actual: self.counts.len(),
+            });
+        }
+
+        let mut best_value = f64::NEG_INFINITY;
+        let mut best_actions = Vec::new();
+        for action in 0..game.n_actions(role) {
+            let mut value = 0.0;
+            for (opponent_action, &count) in self.counts.iter().enumerate() {
+                if count == 0.0 {
+                    continue;
+                }
+                value += count * payoff_against(game, role, action, opponent_action);
+            }
+            if !value.is_finite() {
+                return Err(LearnError::NonFiniteCalculation);
+            }
+            if value > best_value {
+                best_value = value;
+                best_actions.clear();
+                best_actions.push(action);
+            } else if value == best_value {
+                best_actions.push(action);
+            }
+        }
+        if best_actions.is_empty() {
+            return Err(LearnError::EmptyProbabilityMass);
+        }
+        Ok(best_actions)
+    }
+
     /// Adds one opponent action to belief and empirical counts.
     pub fn observe(&mut self, opponent_action: usize) -> Result<(), LearnError> {
         if opponent_action >= self.counts.len() {
@@ -152,4 +198,22 @@ pub fn simultaneous_step<G: FiniteGame>(
     role_zero.observe(action_one)?;
     role_one.observe(action_zero)?;
     Ok((action_zero, action_one))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MatrixGame;
+
+    #[test]
+    fn best_responses_returns_every_exact_tie_in_action_order() {
+        let game = MatrixGame::bimatrix(
+            &[vec![1.0, 1.0], vec![1.0, 1.0]],
+            &[vec![0.0, 0.0], vec![0.0, 0.0]],
+        )
+        .unwrap();
+        let belief = FictitiousBelief::new(&game, 0, vec![1.0, 1.0], TieBreak::Random).unwrap();
+
+        assert_eq!(belief.best_responses(&game, 0).unwrap(), vec![0, 1]);
+    }
 }

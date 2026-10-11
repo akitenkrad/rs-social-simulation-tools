@@ -11,6 +11,7 @@ pub struct RuleDriver<G: StageGame, X: ExperimentState> {
     rules: RuleBook<G, X>,
     on_invalid_action: OnInvalidAction<G::Action>,
     decision_scope: DecisionScope,
+    report_mixed: bool,
 }
 
 impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
@@ -18,11 +19,13 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
         rules: RuleBook<G, X>,
         on_invalid_action: OnInvalidAction<G::Action>,
         decision_scope: DecisionScope,
+        report_mixed: bool,
     ) -> Self {
         Self {
             rules,
             on_invalid_action,
             decision_scope,
+            report_mixed,
         }
     }
 
@@ -87,6 +90,7 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
             plays,
             step_history,
             pair_history,
+            aggregate,
             x,
             ..
         } = step.world;
@@ -180,6 +184,7 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
                         held,
                         history: step_history,
                         pair_history: pair_history.as_ref(),
+                        aggregate: aggregate.as_ref(),
                         x,
                     };
                     let action = rule
@@ -232,6 +237,7 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
                             held,
                             history: step_history,
                             pair_history: pair_history.as_ref(),
+                            aggregate: aggregate.as_ref(),
                             x,
                         };
                         let action = rule
@@ -276,6 +282,7 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
                             held,
                             history: step_history,
                             pair_history: pair_history.as_ref(),
+                            aggregate: aggregate.as_ref(),
                             x,
                         };
                         let action = rule
@@ -307,6 +314,7 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
             policies,
             plays,
             step_history,
+            reports,
             x,
             ..
         } = step.world;
@@ -354,6 +362,44 @@ impl<G: StageGame, X: ExperimentState> RuleDriver<G, X> {
             }
             rule.learn_step(state, &context)
                 .map_err(Self::mechanism_error)?;
+        }
+
+        if self.report_mixed {
+            let reports = reports.as_mut().ok_or_else(|| {
+                SocsimError::Mechanism(
+                    "mixed-strategy reporting is enabled but the report table is missing"
+                        .to_owned(),
+                )
+            })?;
+            reports.reset(clock.t());
+            let mut agents = ids.clone();
+            agents.sort_unstable();
+            for agent in agents {
+                let agent_index = usize::try_from(agent.0)
+                    .map_err(|_| SocsimError::Mechanism("agent index exceeds usize".to_owned()))?;
+                let state_slot = policies.slot[agent_index];
+                if state_slot == PolicyTable::<X::PolicyState>::HELD {
+                    continue;
+                }
+                let state_index = state_slot as usize;
+                let kind_id = policies.kind_of[state_index];
+                let kind = &policies.kinds[kind_id.0 as usize];
+                let Some(rule) = self.rules.get_optional(kind) else {
+                    continue;
+                };
+                let state = &policies.states[state_index];
+                for role in 0..game.n_roles() {
+                    let mixed = rule
+                        .mixed(state, role, game)
+                        .filter(|values| values.iter().all(|value| value.is_finite()));
+                    if !reports.set(agent_index, role, mixed) {
+                        return Err(SocsimError::Mechanism(format!(
+                            "mixed-strategy report index is invalid for agent {} role {role}",
+                            agent.0
+                        )));
+                    }
+                }
+            }
         }
         Ok(())
     }

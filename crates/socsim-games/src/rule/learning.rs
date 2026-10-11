@@ -14,6 +14,8 @@ use crate::{
     RuleError, RuleInitContext, Slot, Stateless,
 };
 
+use super::pure_strategy;
+
 const PROBABILITY_TOLERANCE: f64 = 1.0e-12;
 
 fn unsupported(error: LearnError) -> RuleError {
@@ -131,6 +133,14 @@ where
     ) -> Result<usize, RuleError> {
         state.slot().ok_or(RuleError::MissingSlot("Stateless"))?;
         sample_probabilities(&self.probabilities, rng).map_err(unsupported)
+    }
+
+    fn mixed(&self, state: &X::PolicyState, role: usize, game: &G) -> Option<Vec<f64>> {
+        <X::PolicyState as Slot<Stateless>>::slot(state)?;
+        if role >= game.n_roles() || self.probabilities.len() != game.n_actions(role) {
+            return None;
+        }
+        Some(self.probabilities.clone())
     }
 }
 
@@ -523,6 +533,25 @@ where
     fn needs_encounter_learning(&self) -> bool {
         true
     }
+
+    fn mixed(&self, state: &X::PolicyState, role: usize, game: &G) -> Option<Vec<f64>> {
+        let state = <X::PolicyState as Slot<BeliefState>>::slot(state)?;
+        if role >= game.n_roles() {
+            return None;
+        }
+        let best = state.global.best_responses(game, role).ok()?;
+        match state.global.tie_break() {
+            TieBreak::LowestIndex => pure_strategy(game.n_actions(role), *best.first()?),
+            TieBreak::Random => {
+                let mut probabilities = vec![0.0; game.n_actions(role)];
+                let probability = 1.0 / best.len() as f64;
+                for action in best {
+                    *probabilities.get_mut(action)? = probability;
+                }
+                Some(probabilities)
+            }
+        }
+    }
 }
 
 /// Logit choice based on either recent or empirical opponent behavior.
@@ -647,6 +676,15 @@ where
     fn needs_encounter_learning(&self) -> bool {
         true
     }
+
+    fn mixed(&self, state: &X::PolicyState, role: usize, game: &G) -> Option<Vec<f64>> {
+        let state = <X::PolicyState as Slot<EstimateState>>::slot(state)?;
+        if role >= game.n_roles() {
+            return None;
+        }
+        let probabilities = state.global.selection_probabilities(game, role).ok()?;
+        (probabilities.len() == game.n_actions(role)).then_some(probabilities)
+    }
 }
 
 /// Roth--Erev reinforcement learning with recency and experimentation.
@@ -767,6 +805,14 @@ where
     fn needs_encounter_learning(&self) -> bool {
         true
     }
+
+    fn mixed(&self, state: &X::PolicyState, role: usize, game: &G) -> Option<Vec<f64>> {
+        let state = <X::PolicyState as Slot<PropensityState>>::slot(state)?;
+        if role >= game.n_roles() || state.global.propensities().len() != game.n_actions(role) {
+            return None;
+        }
+        state.global.selection_probabilities().ok()
+    }
 }
 
 /// A built-in repeated-game automaton with configurable cooperation action.
@@ -872,5 +918,13 @@ where
 
     fn needs_encounter_learning(&self) -> bool {
         true
+    }
+
+    fn mixed(&self, state: &X::PolicyState, role: usize, game: &G) -> Option<Vec<f64>> {
+        let state = <X::PolicyState as Slot<AutomatonPolicyState>>::slot(state)?;
+        if role >= game.n_roles() || game.n_actions(role) != 2 {
+            return None;
+        }
+        state.global.next_action_probabilities().ok()
     }
 }

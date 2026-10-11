@@ -7,13 +7,13 @@ use rand::seq::SliceRandom;
 use socsim_core::{derive_seed, AgentId, SimClock, SimRng};
 
 use crate::{
-    DecisionScope, ExperimentState, GameError, GameWorld, InternalPairHistory, InternalStepHistory,
-    KindCatalog, MatchingState, PlayArena, PolicyTable, RuleBook, RuleError, RuleInitContext,
-    StageGame, Topology,
+    DecisionScope, ExperimentState, GameError, GameWorld, InternalAggregateTable,
+    InternalPairHistory, InternalPolicyReports, InternalStepHistory, KindCatalog, MatchingState,
+    PlayArena, PolicyTable, RuleBook, RuleError, RuleInitContext, StageGame, Topology,
 };
 
 #[cfg(feature = "engine")]
-use crate::{MatchContext, Matching, OutcomeRule};
+use crate::{AggregateGame, AggregateReduce, MatchContext, Matching, OutcomeRule};
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -70,6 +70,7 @@ pub struct PlayOptions<A> {
     pub(crate) aggregation: PayoffAggregation,
     pub(crate) on_invalid_action: OnInvalidAction<A>,
     pub(crate) decision_scope: DecisionScope,
+    pub(crate) report_mixed: bool,
 }
 
 impl<A> Default for PlayOptions<A> {
@@ -84,6 +85,7 @@ impl<A> PlayOptions<A> {
             aggregation: PayoffAggregation::Sum,
             on_invalid_action: OnInvalidAction::Stop,
             decision_scope: DecisionScope::PerStep,
+            report_mixed: false,
         }
     }
 
@@ -99,6 +101,12 @@ impl<A> PlayOptions<A> {
 
     pub fn decision_scope(mut self, scope: DecisionScope) -> Self {
         self.decision_scope = scope;
+        self
+    }
+
+    /// Enables or disables post-learning mixed-strategy reports.
+    pub fn report_mixed(mut self, on: bool) -> Self {
+        self.report_mixed = on;
         self
     }
 }
@@ -245,6 +253,9 @@ where
         n_played: vec![0; n_agents],
         step_history: InternalStepHistory::new(n_agents, history_len),
         pair_history: needs_pair_history.then(|| InternalPairHistory::new(history_len)),
+        aggregate: None,
+        reports: None,
+        metrics_state: None,
         game,
         x,
         decision_root: derive_seed(seed, &[2]),
@@ -253,7 +264,7 @@ where
 
 #[cfg(feature = "engine")]
 pub fn assemble<G, X, M, O>(
-    mut world: GameWorld<G, X>,
+    world: GameWorld<G, X>,
     matching: M,
     rules: RuleBook<G, X>,
     outcome: O,
@@ -266,11 +277,103 @@ where
     M: Matching<G, X> + 'static,
     O: OutcomeRule<G, X> + 'static,
 {
+    assemble_internal(world, matching, rules, outcome, opts, seed, None)
+}
+
+#[cfg(feature = "engine")]
+#[allow(clippy::too_many_arguments)]
+/// Assembles a game simulation that retains public aggregate values.
+///
+/// Aggregate values are computed once per encounter and reduced into one row
+/// per completed step. `aggregate_history_len` is the maximum number of rows
+/// exposed through [`crate::DecisionContext::aggregate_history`].
+pub fn assemble_with_aggregates<G, X, M, O>(
+    mut world: GameWorld<G, X>,
+    matching: M,
+    rules: RuleBook<G, X>,
+    outcome: O,
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+    aggregate_history_len: usize,
+) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>
+where
+    G: AggregateGame,
+    X: ExperimentState,
+    M: Matching<G, X> + 'static,
+    O: OutcomeRule<G, X> + 'static,
+{
+    if aggregate_history_len == 0 {
+        return Err(GameError::InvalidAggregateHistoryLength);
+    }
+    let names = world
+        .game
+        .aggregate_spec()
+        .iter()
+        .map(|spec| spec.name().to_owned())
+        .collect();
+    let reductions = world
+        .game
+        .aggregate_spec()
+        .iter()
+        .map(|spec| spec.reduce())
+        .collect();
+    world.aggregate = Some(InternalAggregateTable::new(names, aggregate_history_len));
+    assemble_internal(
+        world,
+        matching,
+        rules,
+        outcome,
+        opts,
+        seed,
+        Some((reductions, aggregate_into::<G>)),
+    )
+}
+
+#[cfg(feature = "engine")]
+fn aggregate_into<G: AggregateGame>(game: &G, profile: &[G::Action], out: &mut [f64]) {
+    game.aggregate_into(profile, out);
+}
+
+#[cfg(feature = "engine")]
+type AggregateFn<G> = fn(&G, &[<G as StageGame>::Action], &mut [f64]);
+
+#[cfg(feature = "engine")]
+#[allow(clippy::too_many_arguments)]
+fn assemble_internal<G, X, M, O>(
+    mut world: GameWorld<G, X>,
+    matching: M,
+    rules: RuleBook<G, X>,
+    outcome: O,
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+    aggregate: Option<(Vec<AggregateReduce>, AggregateFn<G>)>,
+) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>
+where
+    G: StageGame,
+    X: ExperimentState,
+    M: Matching<G, X> + 'static,
+    O: OutcomeRule<G, X> + 'static,
+{
     if world.game.n_roles() != 2 {
         return Err(GameError::UnsupportedRoles {
             n_roles: world.game.n_roles(),
         });
     }
+    if opts.report_mixed && opts.decision_scope == DecisionScope::PerEncounter {
+        return Err(GameError::Metrics(
+            "mixed-strategy reporting does not support per-encounter decisions".to_owned(),
+        ));
+    }
+    world.reports = if opts.report_mixed {
+        Some(
+            InternalPolicyReports::new(world.clock.t(), world.ids.len(), world.game.n_roles())
+                .ok_or_else(|| {
+                    GameError::Metrics("mixed-strategy report table is too large".to_owned())
+                })?,
+        )
+    } else {
+        None
+    };
 
     let expected: Vec<_> = KindCatalog::from_rules(&rules)
         .kinds()
@@ -328,6 +431,22 @@ where
     matching.check(&context)?;
     world.matching_state = matching.init_state(&context);
 
+    let play: Box<dyn socsim_core::Mechanism<GameWorld<G, X>>> = match aggregate {
+        Some((reductions, aggregate_into)) => {
+            Box::new(crate::mechanism::PlayMechanism::<G, X, O>::with_aggregates(
+                outcome,
+                opts.aggregation,
+                opts.decision_scope,
+                reductions,
+                aggregate_into,
+            ))
+        }
+        None => Box::new(crate::mechanism::PlayMechanism::<G, X, O>::new(
+            outcome,
+            opts.aggregation,
+            opts.decision_scope,
+        )),
+    };
     let builder = socsim_engine::SimulationBuilder::new(world)
         .seed(derive_seed(seed, &[1]))
         .add_mechanism(Box::new(crate::mechanism::MatchMechanism::<G, X, M>::new(
@@ -338,11 +457,8 @@ where
             rules,
             opts.on_invalid_action,
             opts.decision_scope,
+            opts.report_mixed,
         )))
-        .add_mechanism(Box::new(crate::mechanism::PlayMechanism::<G, X, O>::new(
-            outcome,
-            opts.aggregation,
-            opts.decision_scope,
-        )));
+        .add_mechanism(play);
     Ok(builder)
 }

@@ -9,7 +9,11 @@ pub use mixed::MixedStrategy;
 #[cfg(feature = "llm")]
 pub mod llm;
 
-pub use game::{ActionError, FiniteGame, MatrixError, MatrixGame, NormalFormGame, StageGame};
+pub use game::{
+    metric_action_ids, ActionError, AggregateGame, AggregateReduce, AggregateSpec,
+    AggregateSpecError, FiniteGame, MatrixError, MatrixGame, MetricAction, MetricActionIds,
+    MetricScheme, NormalFormGame, StageGame,
+};
 pub use learn::{automaton::AutomatonKind, logit::EstimateMode, TieBreak};
 
 #[cfg(feature = "core")]
@@ -30,7 +34,7 @@ pub mod view;
 pub mod world;
 
 #[cfg(feature = "engine")]
-pub use assemble::assemble;
+pub use assemble::{assemble, assemble_with_aggregates};
 #[cfg(feature = "core")]
 pub use assemble::{
     build_world, build_world_with, AssignGroup, AssignKind, Assignment, InitialActions,
@@ -41,7 +45,7 @@ pub use error::GameError;
 #[cfg(feature = "core")]
 pub use matching::{FixedPlayers, MatchContext, Matching, MatchingState, RoundRobin};
 #[cfg(feature = "core")]
-pub use mechanism::RuleDriver;
+pub use mechanism::{EquilibriumTarget, GameMetrics, MetricsOptions, MixedSource, RuleDriver};
 #[cfg(feature = "core")]
 pub use outcome::{NormalFormOutcome, OutcomeContext, OutcomeRule};
 #[cfg(feature = "core")]
@@ -51,7 +55,8 @@ pub use rule::{
 };
 #[cfg(feature = "core")]
 pub use view::{
-    DecisionContext, DecisionScope, DecisionUnit, EncounterOutcome, LearnContext, OmniscientContext,
+    AggregateView, DecisionContext, DecisionScope, DecisionUnit, EncounterOutcome, LearnContext,
+    OmniscientContext,
 };
 #[cfg(feature = "core")]
 pub use world::{
@@ -62,6 +67,10 @@ pub use world::{
 };
 
 #[cfg(feature = "core")]
+pub(crate) use world::InternalAggregateTable;
+#[cfg(feature = "core")]
 pub(crate) use world::InternalPairHistory;
+#[cfg(feature = "core")]
+pub(crate) use world::InternalPolicyReports;
 #[cfg(feature = "core")]
 pub(crate) use world::InternalStepHistory;

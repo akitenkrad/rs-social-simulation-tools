@@ -1,7 +1,10 @@
+mod aggregate_table;
 mod arena;
 mod history;
+mod metrics_state;
 mod pair_history;
 mod policy;
+mod reports;
 mod state;
 mod topology;
 
@@ -22,7 +25,10 @@ use socsim_core::{AgentId, SimClock, WorldState};
 use crate::{matching::MatchingState, StageGame};
 
 use self::history::StepHistory;
+use self::metrics_state::MetricsState;
 use self::pair_history::PairHistory;
+use self::reports::PolicyReports;
+use aggregate_table::AggregateTable;
 
 /// Complete mutable state of a game simulation.
 ///
@@ -47,6 +53,12 @@ pub struct GameWorld<G: StageGame, X: ExperimentState = ()> {
     pub(crate) step_history: StepHistory<G::Action>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) pair_history: Option<PairHistory<G::Action>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) aggregate: Option<AggregateTable>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reports: Option<PolicyReports>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) metrics_state: Option<MetricsState>,
     pub(crate) x: X,
     pub(crate) decision_root: u64,
 }
@@ -87,6 +99,17 @@ impl<G: StageGame, X: ExperimentState> GameWorld<G, X> {
     pub fn history(&self, agent: AgentId) -> Option<HistoryView<'_, StepRecord<G::Action>>> {
         self.step_history.view(agent)
     }
+
+    /// Returns the latest mixed strategy reported for an agent and role.
+    ///
+    /// Reports are written at the end of `Reward`, after every native rule has
+    /// completed learning. They therefore describe the mixed strategy used by
+    /// the next step's decision, not the strategy that generated the current
+    /// step's action.
+    pub fn reported_mixed(&self, agent: AgentId, role: usize) -> Option<&[f64]> {
+        let agent = usize::try_from(agent.0).ok()?;
+        self.reports.as_ref()?.get(agent, role)
+    }
 }
 
 impl<G: StageGame, X: ExperimentState> WorldState for GameWorld<G, X> {
@@ -103,5 +126,8 @@ impl<G: StageGame, X: ExperimentState> WorldState for GameWorld<G, X> {
     }
 }
 
+pub(crate) use aggregate_table::AggregateTable as InternalAggregateTable;
 pub(crate) use history::StepHistory as InternalStepHistory;
+pub(crate) use metrics_state::MetricsState as InternalMetricsState;
 pub(crate) use pair_history::PairHistory as InternalPairHistory;
+pub(crate) use reports::PolicyReports as InternalPolicyReports;

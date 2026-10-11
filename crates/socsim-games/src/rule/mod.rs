@@ -64,6 +64,20 @@ pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
     fn needs_pair_history(&self) -> bool {
         false
     }
+    /// Returns the current mixed strategy for `role`, when the rule can report
+    /// one without mutating policy state or consuming randomness.
+    fn mixed(&self, _state: &X::PolicyState, _role: usize, _game: &G) -> Option<Vec<f64>> {
+        None
+    }
+}
+
+fn pure_strategy(n_actions: usize, action: usize) -> Option<Vec<f64>> {
+    if action >= n_actions {
+        return None;
+    }
+    let mut probabilities = vec![0.0; n_actions];
+    probabilities[action] = 1.0;
+    Some(probabilities)
 }
 
 #[derive(Clone, Copy, Debug)]

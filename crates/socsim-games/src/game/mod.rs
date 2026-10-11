@@ -3,11 +3,15 @@ use std::fmt::Debug;
 
 use thiserror::Error;
 
+mod aggregate;
 pub mod catalog;
 mod matrix;
+mod metric_ids;
 
+pub use aggregate::{AggregateGame, AggregateReduce, AggregateSpec, AggregateSpecError};
 pub(crate) use matrix::MAX_PROFILES;
 pub use matrix::{MatrixError, MatrixGame};
+pub use metric_ids::{metric_action_ids, MetricAction, MetricActionIds, MetricScheme};
 
 /// An invalid action supplied to a stage game.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]

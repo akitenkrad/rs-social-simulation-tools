@@ -16,10 +16,14 @@ pub enum GameError {
     AgentCount { expected: usize, actual: usize },
     #[error("history_len must be greater than zero")]
     InvalidHistoryLength,
+    #[error("aggregate_history_len must be greater than zero")]
+    InvalidAggregateHistoryLength,
     #[error("only two-role encounters are supported, got {n_roles}")]
     UnsupportedRoles { n_roles: usize },
     #[error("invalid matching: {0}")]
     InvalidMatching(String),
+    #[error("invalid game metrics configuration: {0}")]
+    Metrics(String),
     #[error("policy table kinds do not match the kind catalog")]
     InvalidKinds {
         expected: Vec<String>,

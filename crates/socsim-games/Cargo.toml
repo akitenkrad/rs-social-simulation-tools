@@ -10,6 +10,7 @@ license.workspace = true
 default = []
 core = ["dep:socsim-core", "dep:serde_json"]
 engine = ["core", "dep:socsim-engine"]
+metrics = ["core", "dep:socsim-metrics"]
 llm = ["core", "dep:socsim-llm", "dep:sha2"]
 live = ["llm", "socsim-llm/live"]
 
@@ -21,6 +22,7 @@ thiserror.workspace = true
 socsim-core = { path = "../socsim-core", optional = true }
 socsim-engine = { path = "../socsim-engine", optional = true }
 socsim-llm = { path = "../socsim-llm", optional = true }
+socsim-metrics = { path = "../socsim-metrics", optional = true, default-features = false }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 
@@ -72,6 +74,21 @@ required-features = ["core", "engine"]
 [[test]]
 name = "compile_fail"
 path = "tests/compile_fail.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "metrics_columns"
+path = "tests/metrics_columns.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "metrics_snapshot"
+path = "tests/metrics_snapshot.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "aggregate_table"
+path = "tests/aggregate_table.rs"
 required-features = ["core", "engine"]
 
 [[test]]

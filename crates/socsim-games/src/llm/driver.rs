@@ -13,8 +13,8 @@ use super::{
 };
 use crate::{
     DecisionContext, DecisionScope, DecisionUnit, ExperimentState, GameError, GameWorld,
-    KindCatalog, LearnContext, MatchContext, Matching, OnInvalidAction, OutcomeRule, PlayOptions,
-    PolicyTable, RuleBook, RuleError, StageGame,
+    InternalPolicyReports, KindCatalog, LearnContext, MatchContext, Matching, OnInvalidAction,
+    OutcomeRule, PlayOptions, PolicyTable, RuleBook, RuleError, StageGame,
 };
 
 pub struct LlmSetup<G: StageGame, X: ExperimentState> {
@@ -208,6 +208,7 @@ where
                 held: &world.held,
                 history: &world.step_history,
                 pair_history: world.pair_history.as_ref(),
+                aggregate: None,
                 x: &world.x,
             };
             let request = rule
@@ -607,6 +608,16 @@ where
             n_roles: world.game.n_roles(),
         });
     }
+    world.reports = if opts.report_mixed {
+        Some(
+            InternalPolicyReports::new(world.clock.t(), world.ids.len(), world.game.n_roles())
+                .ok_or_else(|| {
+                    GameError::Metrics("mixed-strategy report table is too large".to_owned())
+                })?,
+        )
+    } else {
+        None
+    };
 
     let catalog = KindCatalog::new().with_rules(&rules)?.with_llm(&llm.book)?;
     let expected: Vec<_> = catalog.kinds().map(str::to_owned).collect();
@@ -676,6 +687,7 @@ where
             rules,
             opts.on_invalid_action,
             opts.decision_scope,
+            opts.report_mixed,
         )))
         .add_mechanism(Box::new(LlmDriver::new(llm)))
         .add_mechanism(Box::new(crate::mechanism::PlayMechanism::<G, X, O>::new(

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use socsim_core::AgentId;
 
 use crate::{
-    world::{InternalPairHistory, InternalStepHistory},
+    world::{InternalAggregateTable, InternalPairHistory, InternalStepHistory},
     Credit, EncounterId, EncounterRef, ExperimentState, HistoryView, PairView, PeerHistory,
     PlayArena, StageGame, StepRecord, Topology,
 };
@@ -36,6 +36,7 @@ pub struct DecisionContext<'a, G: StageGame, X: ExperimentState> {
     pub(crate) held: &'a [G::Action],
     pub(crate) history: &'a InternalStepHistory<G::Action>,
     pub(crate) pair_history: Option<&'a InternalPairHistory<G::Action>>,
+    pub(crate) aggregate: Option<&'a InternalAggregateTable>,
     pub(crate) x: &'a X,
 }
 
@@ -102,6 +103,13 @@ impl<'a, G: StageGame, X: ExperimentState> DecisionContext<'a, G, X> {
             .flatten()
     }
 
+    /// Returns the public aggregate history from completed prior steps.
+    ///
+    /// `None` means aggregate collection was not enabled for this simulation.
+    pub fn aggregate_history(&self) -> Option<AggregateView<'a>> {
+        self.aggregate.map(AggregateView::new)
+    }
+
     pub fn game(&self) -> &'a G {
         self.game
     }
@@ -124,6 +132,53 @@ impl<'a, G: StageGame, X: ExperimentState> DecisionContext<'a, G, X> {
             x: self.x,
             marker: std::marker::PhantomData,
         }
+    }
+}
+
+/// Read-only chronological access to public game aggregates.
+#[derive(Clone, Copy, Debug)]
+pub struct AggregateView<'a> {
+    table: &'a InternalAggregateTable,
+}
+
+impl<'a> AggregateView<'a> {
+    pub(crate) fn new(table: &'a InternalAggregateTable) -> Self {
+        Self { table }
+    }
+
+    /// Returns aggregate names in column order.
+    pub fn names(&self) -> &'a [String] {
+        self.table.names()
+    }
+
+    /// Returns the number of retained steps.
+    pub fn len(&self) -> usize {
+        self.table.filled()
+    }
+
+    /// Returns `true` when no completed step is retained.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Iterates over `(t, values)` from oldest to newest.
+    pub fn iter(&self) -> impl Iterator<Item = (u64, &'a [Option<f64>])> + 'a {
+        self.table.iter()
+    }
+
+    /// Returns the newest retained row.
+    pub fn last(&self) -> Option<(u64, &'a [Option<f64>])> {
+        self.table.last()
+    }
+
+    /// Iterates over one named column from oldest to newest.
+    pub fn column(&self, name: &str) -> Option<impl Iterator<Item = Option<f64>> + 'a> {
+        let index = self
+            .table
+            .names()
+            .iter()
+            .position(|candidate| candidate == name)?;
+        Some(self.table.iter().map(move |(_, values)| values[index]))
     }
 }
 
