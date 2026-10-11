@@ -166,9 +166,10 @@ impl<W: Write> Recorder for JsonlRecorder<W> {
 
 /// A wide table accumulated by [`CsvRecorder`].
 ///
-/// The column schema is fixed by the first row recorded for the table;
-/// subsequent rows are aligned to it by column name (missing columns become
-/// `NaN`, unknown columns are ignored).
+/// Columns are kept in the order they were first observed. Each row is aligned
+/// to them by column name: a column missing from a row becomes `NaN`, and a
+/// column that first appears in a later row is appended, with `NaN` in the rows
+/// recorded before it.
 #[derive(Debug, Clone, Default)]
 struct WideTable {
     columns: Vec<String>,
@@ -346,11 +347,18 @@ impl Recorder for CsvRecorder {
 
     fn record_row(&mut self, t: u64, table: &str, row: &[(&str, f64)]) {
         let entry = self.tables.entry(table.to_owned()).or_default();
-        if entry.columns.is_empty() {
-            // First row fixes the column schema.
-            entry.columns = row.iter().map(|(c, _)| (*c).to_owned()).collect();
+        // Columns not seen before are appended in first-seen order; rows
+        // recorded before a column appeared are back-filled with `NaN`.
+        for (c, _) in row {
+            if !entry.columns.iter().any(|col| col == c) {
+                entry.columns.push((*c).to_owned());
+            }
         }
-        // Align the incoming row to the established column order by name.
+        let width = entry.columns.len();
+        for (_, values) in &mut entry.rows {
+            values.resize(width, f64::NAN);
+        }
+        // Align the incoming row to the column order by name.
         let values: Vec<f64> = entry
             .columns
             .iter()
@@ -439,6 +447,26 @@ mod tests {
     }
 
     #[test]
+    fn csv_recorder_appends_columns_that_appear_later() {
+        let mut rec = CsvRecorder::new();
+        rec.record_row(0, "m", &[("a", 1.0)]);
+        rec.record_row(1, "m", &[("a", 2.0), ("b", 3.0)]);
+        rec.record_row(2, "m", &[("c", 4.0), ("b", 5.0)]);
+        let csv = rec.table_csv("m").unwrap();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(
+            lines,
+            vec!["t,a,b,c", "0,1,NaN,NaN", "1,2,3,NaN", "2,NaN,5,4"]
+        );
+
+        // A pinned schema renders the late column too, missing values empty.
+        rec.set_columns("m", &["c", "a"]);
+        let csv = rec.table_csv("m").unwrap();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines, vec!["t,c,a", "0,,1", "1,,2", "2,4,"]);
+    }
+
+    #[test]
     fn csv_recorder_metrics_long_format() {
         let mut rec = CsvRecorder::new();
         rec.record_metric(0, "score", 1.5);
@@ -454,8 +482,16 @@ mod tests {
     fn csv_recorder_set_columns_pins_header_order_and_omits_extras() {
         let mut rec = CsvRecorder::new();
         // Data observed in this order: moved, avg, extra.
-        rec.record_row(0, "metrics", &[("moved", 3.0), ("avg", 0.5), ("extra", 9.0)]);
-        rec.record_row(1, "metrics", &[("moved", 1.0), ("avg", 0.75), ("extra", 8.0)]);
+        rec.record_row(
+            0,
+            "metrics",
+            &[("moved", 3.0), ("avg", 0.5), ("extra", 9.0)],
+        );
+        rec.record_row(
+            1,
+            "metrics",
+            &[("moved", 1.0), ("avg", 0.75), ("extra", 8.0)],
+        );
         // Pin a different order and drop "extra".
         rec.set_columns("metrics", &["avg", "moved"]);
         let csv = rec.table_csv("metrics").unwrap();

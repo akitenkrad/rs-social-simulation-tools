@@ -1814,11 +1814,11 @@ which no agent played records no payoff columns. Any value that is not finite
 — computed, or a played payoff it reads — stops the step with a mechanism error
 before the row is recorded, so `game_metrics` never writes NaN or infinity to
 the records or to its state in the world. A recorder that keeps rows natively
-may still pad them: `socsim_log::CsvRecorder` fixes a table's columns from its
-first row, writes NaN for a column missing from a later row and drops a column
-that first appears later (with `llm`, `game_llm_decide` writes its rows to the
-same table `"game"`). Prefer a recorder that fans rows out per key when columns
-can come and go. The mechanism also checks
+may still pad them: `socsim_log::CsvRecorder` keeps every column it has seen in
+a table and writes NaN where a row lacks one, including the rows recorded
+before a column first appeared. With `llm`, `game_llm_decide` writes its own
+row to the same table `"game"`, so such a table holds two rows per step, each
+NaN in the other's columns. The mechanism also checks
 every step that the world's game still has the role and action counts it was
 built for.
 

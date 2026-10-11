@@ -1238,9 +1238,9 @@ rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
   on the builder (it runs in PostStep). Columns land in table `"game"` as
   `game.played_share.<id>`, `game.mean_payoff`, `game.payoff_sd`, … — an
   undefined column is **missing** from the row, never NaN, so readers must
-  handle absent keys (`socsim_log::CsvRecorder` fixes a table's columns from
-  its first row, pads later gaps with NaN and drops late columns — use a
-  fan-out recorder). `<id>` is `a<k>` (pooled) or `r<role>-a<k>` (per role),
+  handle absent keys (`socsim_log::CsvRecorder` keeps every column a table has
+  seen and pads gaps — including rows before a late column appeared — with
+  NaN; with `llm`, `game_llm_decide` adds its own row to `"game"` each step). `<id>` is `a<k>` (pooled) or `r<role>-a<k>` (per role),
   built from action indices — never parse labels out of column names; use
   `metric_action_ids(&game)` + `action_label`.
 - `played_share` counts **seats**, not agents (an agent in three encounters

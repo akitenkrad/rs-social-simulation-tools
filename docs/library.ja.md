@@ -359,7 +359,7 @@ let csv = rec.table_csv("metrics").unwrap();   // "t,avg_same,n_moved\n0,0.53,0\
 std::fs::write("metrics.csv", csv).unwrap();
 ```
 
-デフォルトでは `CsvRecorder` は列が最初に観測された順序で列を発見します．**呼び出し側が定義した**列の順序とスキーマを固定したい場合 — 下流のツールが正確なヘッダーを期待する場合などに便利です — 描画の前に `set_columns` を呼び出します：
+デフォルトでは `CsvRecorder` は列が最初に観測された順序で列を発見します．後の行で初めて現れた列は末尾に足し，その列を持たない行（列が現れる前に記録した行を含む）はそこを `NaN` で描画します．**呼び出し側が定義した**列の順序とスキーマを固定したい場合 — 下流のツールが正確なヘッダーを期待する場合などに便利です — 描画の前に `set_columns` を呼び出します：
 
 ```rust,ignore
 rec.set_columns("metrics", &["n_moved", "avg_same"]);  // 列順を固定

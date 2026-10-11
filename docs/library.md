@@ -362,7 +362,7 @@ let csv = rec.table_csv("metrics").unwrap();   // "t,avg_same,n_moved\n0,0.53,0\
 std::fs::write("metrics.csv", csv).unwrap();
 ```
 
-By default `CsvRecorder` discovers columns in the order they are first observed. To pin a **caller-defined** column order and schema — useful when a downstream tool expects an exact header — call `set_columns` before rendering:
+By default `CsvRecorder` discovers columns in the order they are first observed. A column that first appears in a later row is appended, and every row that lacks a column — including the rows recorded before it appeared — renders `NaN` there. To pin a **caller-defined** column order and schema — useful when a downstream tool expects an exact header — call `set_columns` before rendering:
 
 ```rust,ignore
 rec.set_columns("metrics", &["n_moved", "avg_same"]);  // fixed order
