@@ -215,6 +215,12 @@ impl<G: ContinuousGame> ContinuousMetrics<G> {
     }
 
     /// Describes the metric column patterns emitted by this mechanism.
+    ///
+    /// Each pattern is a dotted template in which a segment written wholly as
+    /// `{name}` stands for exactly one segment of the column name, and every
+    /// other segment is literal. Braces never share a segment with literal
+    /// text, so the patterns can be copied unchanged into the
+    /// `[[metric_patterns]]` of a runvault `runvault.toml`.
     pub fn describe(&self) -> Vec<(String, String)> {
         let (mean, sd) = if self.pooled {
             (
@@ -230,12 +236,12 @@ impl<G: ContinuousGame> ContinuousMetrics<G> {
         } else {
             (
                 (
-                    "game.mean_action.r{r}-{d}",
-                    "Mean of component d of the actions over the seats of role r played in the step.",
+                    "game.mean_action.{role_component}",
+                    "Mean of component d of the actions over the seats of role r played in the step. `{role_component}` is `r<r>-<d>`.",
                 ),
                 (
-                    "game.action_sd.r{r}-{d}",
-                    "Population standard deviation of component d of the actions over the seats of role r played in the step.",
+                    "game.action_sd.{role_component}",
+                    "Population standard deviation of component d of the actions over the seats of role r played in the step. `{role_component}` is `r<r>-<d>`.",
                 ),
             )
         };

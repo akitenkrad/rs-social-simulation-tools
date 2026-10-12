@@ -298,6 +298,12 @@ impl<G: FiniteGame> GameMetrics<G> {
     }
 
     /// Describes the metric column patterns emitted by this mechanism.
+    ///
+    /// Each pattern is a dotted template in which a segment written wholly as
+    /// `{name}` stands for exactly one segment of the column name, and every
+    /// other segment is literal. Braces never share a segment with literal
+    /// text, so the patterns can be copied unchanged into the
+    /// `[[metric_patterns]]` of a runvault `runvault.toml`.
     pub fn describe(&self) -> Vec<(String, String)> {
         let played_share = match self.scheme {
             MetricScheme::Pooled => {
@@ -353,8 +359,8 @@ impl<G: FiniteGame> GameMetrics<G> {
         }
         if self.population_columns.is_some() {
             descriptions.push((
-                "game.population_share.a{k}".to_owned(),
-                "Share of all agents holding action index k at the end of the step, after any population dynamics; the denominator includes every agent."
+                "game.population_share.{action}".to_owned(),
+                "Share of all agents holding the indicated action at the end of the step, after any population dynamics; the denominator includes every agent. `{action}` is `a<k>` for action index k, the same in every role."
                     .to_owned(),
             ));
         }

@@ -19,6 +19,9 @@ use socsim_games::{
     NormalFormOutcome, PlayOptions, RandomGroups, RuleBook, WholePopulation,
 };
 
+#[path = "support/metric_patterns.rs"]
+mod metric_patterns;
+
 const STEPS: u64 = 60;
 
 type Rows = Vec<(u64, String, u64)>;
@@ -451,8 +454,51 @@ fn roles_with_different_dimensions_are_reported_per_role() {
         .into_iter()
         .map(|(name, _)| name)
         .collect();
-    assert_eq!(names[0], "game.mean_action.r{r}-{d}");
-    assert_eq!(names[1], "game.action_sd.r{r}-{d}");
+    assert_eq!(names[0], "game.mean_action.{role_component}");
+    assert_eq!(names[1], "game.action_sd.{role_component}");
+}
+
+#[test]
+fn describe_patterns_cover_every_pooled_column_recorded() {
+    let metrics = ContinuousMetrics::new(&cournot_game(), cournot_options()).unwrap();
+    let described = metrics.describe();
+    let mut simulation = cournot_simulation(3, cournot_options());
+    run(&mut simulation);
+    let rows = rows(&simulation);
+    metric_patterns::assert_patterns_cover(
+        &described,
+        rows.iter().map(|(_, name, _)| name.as_str()),
+    );
+}
+
+#[test]
+fn describe_patterns_cover_the_per_role_column_names() {
+    let metrics = ContinuousMetrics::new(
+        &Mixed1And2,
+        ContinuousMetricsOptions::new().equilibrium(ContinuousEquilibrium::Given(vec![
+            vec![0.5],
+            vec![0.5, 0.5],
+        ])),
+    )
+    .unwrap();
+    // `build_world` checks every held action against every role, so a world
+    // whose roles differ in dimension cannot be assembled and these columns
+    // cannot be recorded here. The names are the per-role form the mechanism
+    // writes, `mean_action.r<r>-<d>` and `action_sd.r<r>-<d>` in the `game`
+    // table, for role 0 with one component and role 1 with two.
+    let names = [
+        "game.mean_action.r0-0",
+        "game.mean_action.r1-0",
+        "game.mean_action.r1-1",
+        "game.action_sd.r0-0",
+        "game.action_sd.r1-0",
+        "game.action_sd.r1-1",
+        "game.mean_payoff",
+        "game.payoff_sd",
+        "game.aggregate.total",
+        "game.eq_distance",
+    ];
+    metric_patterns::assert_patterns_cover(&metrics.describe(), names);
 }
 
 // Implicit and materialized play paths give the same metric rows.

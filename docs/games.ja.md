@@ -2408,9 +2408,11 @@ feature のもとでは既定で有効で（`MetricsOptions::action_entropy(fals
 
 `GameMetrics::describe()` は，この設定が書きうる列について `(pattern, meaning)` の組を返します．
 `game.played_share.{action}`，`game.mean_payoff`，`game.payoff_sd`，有効なら `game.coop_rate`，`game.regret`，`game.eq_distance`，
-`game.action_entropy`，`game.population_share.a{k}`，そして `game.aggregate.{name}`（組み立て方に依存するので常に並ぶ）です．
-[runvault](https://github.com/akitenkrad/rs-runvault) で実行を記録するリポジトリは，これを `runvault.toml` に写せます．
+`game.action_entropy`，`game.population_share.{action}`（列は `game.population_share.a<k>`），そして `game.aggregate.{name}`（組み立て方に依存するので常に並ぶ）です．
+パターンでは，`.` で区切った 1 つの区切り全体を `{…}` と書いたものが列名の区切りちょうど 1 つに当たります．`{…}` と文字が 1 つの区切りに混ざることはありません．
+そのため [runvault](https://github.com/akitenkrad/rs-runvault) で実行を記録するリポジトリは，これをそのまま `runvault.toml` に写せます．
 `{…}` の区切りを含むパターンは `[[metric_patterns]]` に，そのままの名前は `[metrics."<name>"]` に書きます．
+`ContinuousMetrics::describe()` も同じ規則に従うので，役割ごとの列 `game.mean_action.r<r>-<d>` は `game.mean_action.{role_component}` と説明されます．
 [行動 ID](#行動-idmetric_action_ids) の例のプログラムがちょうどそれを出力します．
 
 ```toml

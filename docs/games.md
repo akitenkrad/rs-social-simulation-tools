@@ -2819,12 +2819,17 @@ would mix two distributions. The feature adds nothing else.
 `GameMetrics::describe()` returns `(pattern, meaning)` pairs for the columns
 this configuration can write: `game.played_share.{action}`, `game.mean_payoff`,
 `game.payoff_sd`, then `game.coop_rate`, `game.regret`, `game.eq_distance`,
-`game.action_entropy` and `game.population_share.a{k}` when enabled, and
-`game.aggregate.{name}` (always listed,
-since it depends on how the simulation is assembled). A repository that records
-runs with [runvault](https://github.com/akitenkrad/rs-runvault) can copy them
-into its `runvault.toml`: a pattern with a `{…}` segment is a
-`[[metric_patterns]]` entry, a plain name a `[metrics."<name>"]` entry. The
+`game.action_entropy` and `game.population_share.{action}` (the columns
+`game.population_share.a<k>`) when enabled, and `game.aggregate.{name}` (always
+listed, since it depends on how the simulation is assembled). In a pattern, a
+dot-separated segment written wholly as `{…}` stands for exactly one segment of
+the column name; braces never share a segment with literal text. A repository
+that records runs with [runvault](https://github.com/akitenkrad/rs-runvault) can
+therefore copy them unchanged into its `runvault.toml`: a pattern with a `{…}`
+segment is a `[[metric_patterns]]` entry, a plain name a `[metrics."<name>"]`
+entry. `ContinuousMetrics::describe()` follows the same rule, so its per-role
+columns `game.mean_action.r<r>-<d>` are described as
+`game.mean_action.{role_component}`. The
 example program in [Action ids](#action-ids-metric_action_ids) prints exactly
 that:
 

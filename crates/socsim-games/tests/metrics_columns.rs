@@ -1,5 +1,8 @@
 use socsim_games::{metric_action_ids, MatrixGame, MetricScheme};
 
+#[path = "support/metric_patterns.rs"]
+mod metric_patterns;
+
 fn matrix_game(action_counts: Vec<usize>) -> MatrixGame {
     let profiles = action_counts.iter().product();
     MatrixGame::new(
@@ -132,8 +135,43 @@ fn every_played_share_metric_name_has_valid_slug_syntax() {
     }
 }
 
+#[test]
+fn the_pattern_grammar_only_treats_whole_segments_as_axes() {
+    assert!(metric_patterns::matches(
+        "game.population_share.{action}",
+        "game.population_share.a0"
+    ));
+    assert!(metric_patterns::matches(
+        "game.mean_action.{role_component}",
+        "game.mean_action.r1-0"
+    ));
+    assert!(!metric_patterns::matches(
+        "game.population_share.a{k}",
+        "game.population_share.a0"
+    ));
+    assert!(!metric_patterns::matches(
+        "game.mean_action.r{r}-{d}",
+        "game.mean_action.r1-0"
+    ));
+    assert!(!metric_patterns::matches(
+        "game.aggregate.{name}",
+        "game.aggregate.a.b"
+    ));
+    assert!(!metric_patterns::is_well_formed(
+        "game.population_share.a{k}"
+    ));
+    assert!(!metric_patterns::is_well_formed(
+        "game.mean_action.r{r}-{d}"
+    ));
+    assert!(metric_patterns::is_well_formed(
+        "game.played_share.{action}"
+    ));
+    assert!(metric_patterns::is_well_formed("game.mean_payoff"));
+}
+
 mod mechanism_metrics {
     use super::has_valid_slug_syntax;
+    use super::metric_patterns;
     use std::any::Any;
     use std::borrow::Cow;
     use std::sync::Arc;
@@ -338,6 +376,13 @@ mod mechanism_metrics {
             ])
             .unwrap();
         let metrics = GameMetrics::new(&game, MetricsOptions::new()).unwrap();
+        // `game.aggregate.{name}` is listed whatever the assembly, and this one
+        // has no aggregates.
+        let described: Vec<_> = metrics
+            .describe()
+            .into_iter()
+            .filter(|(pattern, _)| pattern != "game.aggregate.{name}")
+            .collect();
         let mut rules = RuleBook::new();
         rules
             .register(
@@ -387,6 +432,13 @@ mod mechanism_metrics {
             assert_eq!(metric_value(&simulation, 1, name), Some(expected));
             assert!(has_valid_slug_syntax(name));
         }
+        metric_patterns::assert_patterns_cover(
+            &described,
+            metric_recorder(&simulation)
+                .metrics
+                .iter()
+                .map(|(_, name, _)| name.as_str()),
+        );
     }
 
     #[test]
@@ -621,6 +673,46 @@ mod mechanism_metrics {
             .metrics
             .iter()
             .all(|(_, name, _)| !name.starts_with("game.aggregate.")));
+    }
+
+    #[test]
+    fn describe_patterns_cover_every_column_recorded_with_all_options_enabled() {
+        let game = CountGame::new();
+        let options = MetricsOptions::new()
+            .cooperate_label("a0")
+            .regret(true)
+            .equilibrium(EquilibriumTarget::Solve)
+            .population_share(true);
+        #[cfg(feature = "metrics")]
+        let options = options.action_entropy(true);
+        let metrics = GameMetrics::new(&game, options).unwrap();
+        let described = metrics.describe();
+        let rules = aggregate_rules();
+        let mut simulation = assemble_with_aggregates(
+            aggregate_world(game, &rules),
+            FixedPlayers::pairs(&[(0, 1)]),
+            rules,
+            NormalFormOutcome,
+            PlayOptions::new(),
+            17,
+            2,
+        )
+        .unwrap()
+        .add_mechanism(Box::new(metrics))
+        .recorder(Box::new(MetricRecorder::default()))
+        .build();
+        for _ in 0..3 {
+            simulation.step().unwrap();
+        }
+
+        let recorded = &metric_recorder(&simulation).metrics;
+        assert!(recorded
+            .iter()
+            .any(|(_, name, _)| name == "game.population_share.a0"));
+        metric_patterns::assert_patterns_cover(
+            &described,
+            recorded.iter().map(|(_, name, _)| name.as_str()),
+        );
     }
 
     #[derive(Clone, Copy, Debug)]
