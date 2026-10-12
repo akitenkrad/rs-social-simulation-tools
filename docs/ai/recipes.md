@@ -354,6 +354,8 @@ driven** — it builds mechanisms by name from a `Scenario` config, not from a r
 closure.
 
 ```rust
+use std::path::Path;
+
 use socsim_config::{Params, Registry, Scenario};
 use socsim_runner::{run_seeds, run_sweep, summarize, SweepAxis, WorldFactory};
 
@@ -375,7 +377,7 @@ let register = |reg: &mut Registry<MyWorld>| {
 };
 
 // scenario: typically loaded from a TOML file; see crates/socsim-config.
-let scenario: Scenario = /* Scenario::from_toml_str(...)? */ todo!();
+let scenario = Scenario::from_path(Path::new("scenarios/my.toml"))?; // or Scenario::parse(&text)?
 
 // Multi-seed: run seeds 0..50 in parallel, then aggregate mean/std/min/max.
 let results = run_seeds(&scenario, &world_factory, &register, 0..50, /*parallel=*/ true)?;
@@ -399,13 +401,16 @@ for p in &points { /* p.params: Vec<(String,f64)>, p.summary: Summary */ }
 - `run_seeds` / `run_sweep` return results **sorted by seed** and parallelise
   with rayon when `parallel = true`. `WorldState: Send` is required for
   parallel.
+- If the initial world depends on mechanism params, or you need checked sweeps,
+  use a `TrialFactory` with `run_trials` / `run_trial_sweep` instead (see
+  "Choosing library mode vs CLI mode" below); these do not require `W: Send`.
 - Reset the clock per run: the runner sets
   `*world.clock_mut() = SimClock::new(scenario.simulation.t_max)` itself; if you
   hand-loop, set `SimClock::new(n_steps)` in the world factory.
-- `TODO(verify):` the exact `Scenario` constructor / field shape lives in
-  `crates/socsim-config/src/scenario.rs` (`scenario.simulation.t_max`,
-  `scenario.simulation.scheduler`, `scenario.mechanisms[].name`). Confirm there
-  before authoring a scenario by hand.
+- Load a `Scenario` with `Scenario::from_path(&Path)` or `Scenario::parse(&str)`
+  (`Scenario` also implements `FromStr`). Its fields are
+  `scenario.simulation.t_max`, `scenario.simulation.scheduler` and
+  `scenario.mechanisms[].name` (see `crates/socsim-config/src/scenario.rs`).
 
 ---
 
@@ -1460,6 +1465,31 @@ always need a bespoke `WorldState`, paper-specific metrics, and paper-specific
 output layout — all of which are most naturally expressed as Rust in your own
 crate. Reach for the CLI / `socsim-runner` scenario path only when your model is
 already expressible as a registered pack and you just want sweeps for free.
+
+**Where `TrialFactory` fits.** `socsim_runner::TrialFactory` is the bridge
+between the two modes when you want scenario files, multi-seed runs and sweeps
+for a bespoke model:
+
+- It builds a whole trial (`Trial::new(world, mechanisms, scheduler,
+  engine_seed)`) from the **entire** effective `Scenario`, so the initial world
+  may depend on `[[mechanism]]` params — which a `WorldFactory` (sees only
+  `[world]`) cannot do. Run it with `run_trial` / `run_trials`; a non-`Send`
+  world is fine.
+- **Aligning trajectories with library mode:** have `build_trial` construct the
+  same world and mechanisms as your library-mode `main`, seed world init from
+  `derive_seed(seed, &[0])` and return `engine_seed = derive_seed(seed, &[1])`
+  (the `main` must use the same two labels). Then the same seed gives the same
+  trajectory in both modes. `RegistryTrialFactory` (the adapter for an
+  existing `WorldFactory` + register pair) uses the raw seed instead, to stay
+  identical to `run_once`.
+- Use `run_trial_sweep` instead of `run_sweep` for sweeps: it can patch
+  `world.<path>`, errors on unknown keys / mechanism names / type mismatches,
+  validates every grid point before running, and returns each point's
+  effective `Scenario` (`CheckedSweepPoint::effective`, serialisable with
+  `toml::to_string`). Reject unknown `<param>` names in
+  `TrialFactory::validate` — the sweep adds a missing param as a float.
+- See [`docs/library.md`](../library.md#building-trials-from-the-whole-scenario-trialfactory-socsim-runner)
+  for a worked factory and the full key / value rules.
 
 For the per-crate capability overview that complements these task recipes, see
 [`capability-map.md`](capability-map.md).

@@ -325,6 +325,239 @@ let mut sim = SimulationBuilder::new(world)
 
 ---
 
+## シナリオ全体から試行を組み立てる：`TrialFactory`（`socsim-runner`）
+
+`socsim-runner` はシナリオTOMLを何度も — シードについて，またパラメータの格子について — 実行します．従来の入口（`run_once` / `run_seeds` / `run_sweep`）は，`WorldFactory`（`[world]` とシードだけを見る）と，`Registry` を埋めるクロージャを受け取ります．初期ワールドがメカニズムのパラメータに依存しないならこれで足りますが，依存する場合（例えば初期の信念を学習則の params から取る場合）には足りません．また，ワールドの構築関数とエンジンに**同じ生のシード**を渡します．
+
+`TrialFactory` は，**1 試行の部品をすべて実効 `Scenario` の全体から作ります** — `[world]` とすべての `[[mechanism]]` を同時に読めます — そしてエンジンのシードも自分で決めます：
+
+| 項目 | 役割 |
+|---|---|
+| `Trial<W>` | 1 試行の部品：`world`，`mechanisms`（登録順 = 同じフェーズ内の実行順），`scheduler`，`engine_seed`．`Trial::new(world, mechanisms, scheduler, engine_seed)` で作ります．構造体は `#[non_exhaustive]` なので，`socsim-runner` の外では構造体リテラルで作れません． |
+| `TrialFactory<W>` | `validate(&Scenario)`（pack 固有の検査．既定はすべて受け入れる）と `build_trial(&Scenario, seed) -> Result<Trial<W>>`．オブジェクト安全で，`Send + Sync` です． |
+| `RegistryTrialFactory<W>` | 既存の（`WorldFactory`，register）の組を `TrialFactory` として包みます． |
+| `scheduler_from_scenario(&Scenario)` | `[simulation] scheduler` が指すスケジューラー（`"sequential"` / `"random_activation"`）． |
+| `run_trial` / `run_trials` | factory を通して 1 つのシード / 多数のシードを（必要なら並列に）実行します． |
+| `run_trial_sweep` → `Vec<CheckedSweepPoint>` | 検証付きのパラメータスイープ．`[world]` も書き換えられ，格子点ごとの実効シナリオを返します． |
+
+従来の関数は変わっていません．両方の経路は 1 つの実行カーネル（クロックを `t_max` に戻す → 試行のエンジンシードでエンジンを作る → インメモリのレコーダーを付ける → 実行 → `RunResult` を取り出す）を共有します．
+
+### factory を書く
+
+以下のワールドはエージェントの集まりで，各エージェントは `level` を持ち，`drift` メカニズムが毎ステップ，エンジンの乱数でそれを揺らします．初期の `level` は `drift` のパラメータ `init` を中心に置かれます — これは `WorldFactory` からは読めません：
+
+```toml
+[simulation]
+name = "walk"
+module_pack = "walk"
+t_max = 20
+seed = 0
+scheduler = "sequential"
+
+[world]
+n = 10
+
+[[mechanism]]
+name = "drift"
+params = { init = 1.0, step = 0.1 }
+
+[output]
+log_path = "unused"
+```
+
+```rust,ignore
+use rand::Rng;
+use socsim_config::Scenario;
+use socsim_core::{derive_seed, AgentId, Mechanism, Result, SimClock, SimRng, SocsimError};
+use socsim_runner::{scheduler_from_scenario, Trial, TrialFactory};
+
+// WalkWorld { clock, agents, levels: Vec<f64> } implements WorldState;
+// Drift { step } is a Mechanism<WalkWorld> that adds step * U(-0.5, 0.5) to every
+// level and records the metric "mean_level".
+
+struct WalkFactory;
+
+impl TrialFactory<WalkWorld> for WalkFactory {
+    // Pack-specific checks: known mechanism names and parameter names.
+    fn validate(&self, scenario: &Scenario) -> Result<()> {
+        for m in &scenario.mechanisms {
+            if m.name != "drift" {
+                return Err(SocsimError::Config(format!("unknown mechanism '{}'", m.name)));
+            }
+            if let Some(k) = m.params.0.keys().find(|k| !["init", "step"].contains(&k.as_str())) {
+                return Err(SocsimError::Config(format!("drift: unknown param '{k}'")));
+            }
+        }
+        Ok(())
+    }
+
+    fn build_trial(&self, scenario: &Scenario, seed: u64) -> Result<Trial<WalkWorld>> {
+        let n = scenario.world.to_params().get_u64("n", 10) as usize;
+        // The initial world reads a [[mechanism]] param.
+        let init = scenario.mechanisms.iter()
+            .find(|m| m.name == "drift")
+            .map_or(0.0, |m| m.params.to_params().get_f64("init", 0.0));
+
+        let mut init_rng = SimRng::from_seed(derive_seed(seed, &[0])); // world-init stream
+        let world = WalkWorld {
+            clock: SimClock::new(0), // the runner resets it to t_max
+            agents: (0..n as u64).map(AgentId).collect(),
+            levels: (0..n).map(|_| init + init_rng.gen::<f64>() - 0.5).collect(),
+        };
+
+        let mut mechanisms: Vec<Box<dyn Mechanism<WalkWorld>>> = Vec::new();
+        for m in &scenario.mechanisms {
+            let p = m.params.to_params();
+            mechanisms.push(Box::new(Drift { step: p.get_f64("step", 0.1) }));
+        }
+
+        let scheduler = scheduler_from_scenario(scenario)?;
+        Ok(Trial::new(world, mechanisms, scheduler, derive_seed(seed, &[1]))) // engine stream
+    }
+}
+```
+
+factory はクロックを設定しなくてかまいません．ランナーが毎回の実行の前に `SimClock::new(scenario.simulation.t_max)` で上書きします（`run_once` と同じです）．
+
+### シード：`engine_seed` とストリームの規約
+
+`Trial::engine_seed` は `SimulationBuilder::seed` に渡される値なので，エンジンのストリームと試行のシードの関係は factory が決めます．新しい factory は [RNGストリームのラベル付け規約](#rngストリームのラベル付け規約)に従ってください：上の例のように，ワールドの初期化を `derive_seed(seed, &[0])` からシードし，`engine_seed = derive_seed(seed, &[1])` を返します．こうすると，同じシードについて，factory が作る試行は同じワールドとメカニズムを同じ規約で組み立てるライブラリモードの `main` と同じ軌跡をたどり，シナリオ / ランナーの経路とライブラリモードを比べられるままに保てます．
+
+`RunResult::seed` は常に**呼び出し側が渡した試行のシード**であり，`engine_seed` ではありません．
+
+### 実行する：`run_trial` と `run_trials`
+
+```rust,ignore
+use socsim_runner::{run_trial, run_trials, summarize};
+
+let scenario = Scenario::parse(SCENARIO)?;
+let factory = WalkFactory;
+
+let one = run_trial(&scenario, &factory, 7)?;          // validate → build_trial → run
+let many = run_trials(&scenario, &factory, &[3, 1, 2, 0], /*parallel=*/ true)?;
+println!("{:?}", many.iter().map(|r| r.seed).collect::<Vec<_>>());
+println!("{}", summarize(&many).to_csv());
+```
+
+```text
+[0, 1, 2, 3]
+key,mean,std,min,max,n
+mean_level,0.978483,0.125325,0.792544,1.145285,4
+```
+
+- `run_trials` は試行を走らせる前に `validate` を**1 回だけ**呼びます．その後，各試行は**それを走らせるスレッドの中で** `build_trial` によって作られます．`Trial` はスレッド間で受け渡されないので，`W` は `Send` でなくてかまいません（共有されるのは factory だけなので，`TrialFactory: Send + Sync` です）．
+- 結果はシードの値で安定に整列されます（重複したシードは入力順のまま）．逐次実行と並列実行は同じ結果を返します．
+- ある試行が失敗しても全試行を走らせ，失敗したシードのうち**入力の順で最初のもの**のエラーを `trial seed <s>: <error>` として返します．並列モードでも決まった結果になります．検証の失敗はそのまま返します．
+
+### 既存の（`WorldFactory`，register）の組を包む
+
+すでに `WorldFactory` と register のクロージャを持つ既存のモデルは，そのまま新しい入口を使えます：
+
+```rust,ignore
+use socsim_runner::{run_once, run_trial, RegistryTrialFactory};
+
+// walk_world_factory() -> WorldFactory<WalkWorld> builds the world from [world] and the seed;
+// register_walk(reg: &mut Registry<WalkWorld>) registers "drift".
+let wrapped = RegistryTrialFactory::new(walk_world_factory(), register_walk);
+let a = run_trial(&scenario, &wrapped, 7)?;
+let b = run_once(&scenario, &walk_world_factory(), &register_walk, 7)?;
+assert_eq!(a.series, b.series);   // identical trajectories
+```
+
+`RegistryTrialFactory::new` はワールドの構築関数と，`Fn(&mut Registry<W>) + Send + Sync + 'static` である register のクロージャの所有権を受け取ります．その `build_trial` は `run_once` と同じ順で部品を作ります（`[world]` からワールド，新しい `Registry`，シナリオの順に `[[mechanism]]` 1 つにつきメカニズム 1 つ，最後にスケジューラー）．
+
+- **シード．** 既存の pack との互換のため，ワールドの構築関数にもエンジンにも**生の**シードを渡します（`engine_seed == seed`）．そのため `run_trial` は `run_once` をビット単位で再現します．`derive_seed(seed, &[0])` / `&[1]` の規約は適用しないので，規約に従いたいときは自分で factory を書いてください．
+- **検証．** その `validate` は，クロージャが登録した名前で `Scenario::validate` を実行します：`t_max > 0`，既知のスケジューラー文字列，すべてのメカニズム名が登録済みであること．`run_once` は何も検証しないので，`t_max = 0` のシナリオは `run_once` では 0 ステップ走りますが，`run_trial` ではエラーになります．
+
+### 検証付きスイープ：`run_trial_sweep`
+
+`run_trial_sweep(&scenario, &axes, &factory, &seeds, parallel)` は `run_sweep` と同じく `SweepAxis` の値の直積を実行します（最後の軸が最も速く変わります）．ただし，すべてのキーと値を検査し，`[world]` にも届きます：
+
+```rust,ignore
+use socsim_runner::{run_trial_sweep, SweepAxis};
+
+let axes = [
+    SweepAxis { param_key: "world.n".into(),    values: vec![10.0, 40.0] },
+    SweepAxis { param_key: "drift.step".into(), values: vec![0.1, 0.5] },
+];
+let points = run_trial_sweep(&scenario, &axes, &factory, &[0, 1, 2], false)?;
+for p in &points {
+    let n = &p.effective.world.0["n"];
+    let step = &p.effective.mechanisms[0].params.0["step"];
+    let mean = p.summary.metrics.iter().find(|m| m.key == "mean_level").unwrap().mean;
+    println!("{:?}  n = {n}  step = {step}  mean = {mean:.4}", p.params);
+}
+```
+
+```text
+[("world.n", 10.0), ("drift.step", 0.1)]  n = 10  step = 0.1  mean = 1.0405
+[("world.n", 10.0), ("drift.step", 0.5)]  n = 10  step = 0.5  mean = 1.1399
+[("world.n", 40.0), ("drift.step", 0.1)]  n = 40  step = 0.1  mean = 0.9973
+[("world.n", 40.0), ("drift.step", 0.5)]  n = 40  step = 0.5  mean = 1.0489
+```
+
+`world.n` は `40.0` ではなく整数の `40` として書き戻されていることに注意してください．
+
+**キーの文法．** 各 `param_key` は次のいずれかです：
+
+| キー | 書き換える対象 |
+|---|---|
+| `world.<a>[.<b>…]` | `[world]` の中のキー．入れ子のテーブルをたどります（`world.` の後に空でない区切りが 1 つ以上）． |
+| `<mechanism>.<param>` | `<mechanism>` という名前の**すべての** `[[mechanism]]` の `<param>`．最初の `.` で分け，両方とも空でなく，`<param>` は `.` を含みません． |
+
+`.` を含まないキー，空の区切り（`world.`，`world..x`，`.x`，`m.`），`.` を含む `<param>` はエラーです．`world.` という接頭辞を予約するのはこの文法だけです — レジストリは `world` という名前のメカニズムを登録できますが，`world.<param>` は常に `[world]` を指すので，そのメカニズムのパラメータはスイープできません．
+
+**値の規則．**
+
+- 値はすべて有限でなければなりません．
+- `world.` のパスは，親のテーブルがすべて存在する既存のキーを指さなければなりません．テーブルもキーも新しく作りません．
+- 既存の値が**整数**なら，`[-2^63, 2^63)` に収まる整数値だけを受け付け，整数のまま書き戻します．既存の値が**浮動小数**なら浮動小数のままです．真偽値・文字列・配列・テーブル・日時はスイープできません．
+- `<mechanism>` は 1 つ以上の `[[mechanism]]` を指さなければなりません．既存の `<param>` は上の規則に従います．**存在しない** `<param>` は `run_sweep` と同じく浮動小数で新しく書かれるので，既定値のまま書かれていないパラメータもスイープできます．そのためスイープは `<param>` の綴り間違いと書き忘れを区別できません — 未知のパラメータは `TrialFactory::validate` で拒否してください．
+- 同じキーの軸が 2 本あるとき，値の無い軸があるときはエラーです．軸が 0 本なら，`params` が空で実効シナリオが元のシナリオと同じ格子点が 1 つできます．
+
+**実行前の検証．** すべての格子点をまず書き換え，`TrialFactory::validate` に通します．1 つでも失敗すれば**試行を 1 つも走らせません**．その後，格子点を順に実行します．格子点の中ではシードを `run_trials` と同じように実行します．
+
+**エラー．** エラーはすべて `SocsimError::Config` で，問題の軸を名指しします．上の factory で軸 1 本のスイープを行うと次のようになります：
+
+| 軸 | エラー |
+|---|---|
+| `drfit.step = 0.2` | `sweep axis 'drfit.step': mechanism 'drfit' is not in the scenario` |
+| `world.m = 5` | `sweep axis 'world.m': no key 'm' in [world]` |
+| `world.n = 10.5` | `sweep axis 'world.n': existing value is an integer; 10.5 is not an integral value representable as i64` |
+| `step = 0.2` | `sweep axis 'step': key must be 'world.<path>' or '<mechanism>.<param>'` |
+| `drift.stpe = 0.2` | `sweep combination [drift.stpe=0.2]: config error: drift: unknown param 'stpe'`（factory の `validate` が拾う） |
+
+（`SocsimError` の `Display` で表示すると，各メッセージの先頭に `config error: ` が付きます．）検証の後で失敗した試行は `trial seed <s>: <error>` として報告されます．
+
+**`run_sweep` との違い．** 従来の `run_sweep` は `[[mechanism]]` の params だけを書き換え，常に浮動小数で書き，検証をせず，`.` を含まないキーと未知のメカニズム名を**黙って無視します** — `drfit.step` のスイープは，エラーを出さずにすべての格子点で書き換えていないシナリオを走らせます．`run_trial_sweep` はこれらをすべて拒否します．`run_sweep` 自体は変わっておらず，同梱の CLI pack は引き続きそれを使います．
+
+**実効シナリオ．** 各 `CheckedSweepPoint { params, effective, summary }` は，その試行が走った書き換え後のシナリオを持ちます．書き換えが効いたことを，結果の違いから推し量るのではなく，値そのものを読んで確かめられます．`Scenario` は `Serialize` を実装しているので，`toml::to_string(&point.effective)` で `Scenario::parse` が読み戻せるシナリオファイルを書けます（`phase` の無いメカニズムの項目はそのキーなしで書かれます）：
+
+```toml
+[simulation]
+name = "walk"
+module_pack = "walk"
+t_max = 20
+seed = 0
+scheduler = "sequential"
+
+[world]
+n = 40
+
+[[mechanism]]
+name = "drift"
+
+[mechanism.params]
+init = 1.0
+step = 0.5
+
+[output]
+log_path = "unused"
+metrics = []
+```
+
+---
+
 ## メトリクスとイベントの記録
 
 `Recorder` トレイトには3つの記録メソッドがあります：

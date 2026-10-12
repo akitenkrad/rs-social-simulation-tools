@@ -328,6 +328,239 @@ To verify determinism in your own code, run two simulations with the same seed a
 
 ---
 
+## Building trials from the whole scenario: `TrialFactory` (`socsim-runner`)
+
+`socsim-runner` runs a scenario TOML many times — over seeds, and over a parameter grid. Its original entry points (`run_once` / `run_seeds` / `run_sweep`) take a `WorldFactory` (which sees only `[world]` and the seed) plus a closure that fills a `Registry`. That is enough when the initial world does not depend on mechanism parameters, but not when it does (e.g. initial beliefs taken from a learning rule's params), and it hands the **same raw seed** to the world factory and to the engine.
+
+A `TrialFactory` instead builds **every part of one trial from the whole effective `Scenario`** — `[world]` and every `[[mechanism]]` entry at once — and chooses the engine seed itself:
+
+| Item | Role |
+|---|---|
+| `Trial<W>` | The parts of one trial: `world`, `mechanisms` (registration order = execution order within a phase), `scheduler`, `engine_seed`. Build it with `Trial::new(world, mechanisms, scheduler, engine_seed)`; the struct is `#[non_exhaustive]`, so a struct literal does not compile outside `socsim-runner`. |
+| `TrialFactory<W>` | `validate(&Scenario)` (pack-specific checks; the default accepts everything) and `build_trial(&Scenario, seed) -> Result<Trial<W>>`. Object safe; `Send + Sync`. |
+| `RegistryTrialFactory<W>` | Wraps an existing (`WorldFactory`, register) pair as a `TrialFactory`. |
+| `scheduler_from_scenario(&Scenario)` | The scheduler named by `[simulation] scheduler` (`"sequential"` / `"random_activation"`). |
+| `run_trial` / `run_trials` | Run one seed / many seeds (optionally in parallel) through a factory. |
+| `run_trial_sweep` → `Vec<CheckedSweepPoint>` | A checked parameter sweep that also patches `[world]` and returns the effective scenario of every grid point. |
+
+The original functions are unchanged; both paths share one execution kernel (reset the clock to `t_max`, build the engine with the trial's engine seed, attach an in-memory recorder, run, extract the `RunResult`).
+
+### Writing a factory
+
+The world below is a set of agents, each holding a `level` that the `drift` mechanism perturbs every step with engine randomness. The initial levels are centred on `drift`'s `init` parameter — something a `WorldFactory` cannot read:
+
+```toml
+[simulation]
+name = "walk"
+module_pack = "walk"
+t_max = 20
+seed = 0
+scheduler = "sequential"
+
+[world]
+n = 10
+
+[[mechanism]]
+name = "drift"
+params = { init = 1.0, step = 0.1 }
+
+[output]
+log_path = "unused"
+```
+
+```rust,ignore
+use rand::Rng;
+use socsim_config::Scenario;
+use socsim_core::{derive_seed, AgentId, Mechanism, Result, SimClock, SimRng, SocsimError};
+use socsim_runner::{scheduler_from_scenario, Trial, TrialFactory};
+
+// WalkWorld { clock, agents, levels: Vec<f64> } implements WorldState;
+// Drift { step } is a Mechanism<WalkWorld> that adds step * U(-0.5, 0.5) to every
+// level and records the metric "mean_level".
+
+struct WalkFactory;
+
+impl TrialFactory<WalkWorld> for WalkFactory {
+    // Pack-specific checks: known mechanism names and parameter names.
+    fn validate(&self, scenario: &Scenario) -> Result<()> {
+        for m in &scenario.mechanisms {
+            if m.name != "drift" {
+                return Err(SocsimError::Config(format!("unknown mechanism '{}'", m.name)));
+            }
+            if let Some(k) = m.params.0.keys().find(|k| !["init", "step"].contains(&k.as_str())) {
+                return Err(SocsimError::Config(format!("drift: unknown param '{k}'")));
+            }
+        }
+        Ok(())
+    }
+
+    fn build_trial(&self, scenario: &Scenario, seed: u64) -> Result<Trial<WalkWorld>> {
+        let n = scenario.world.to_params().get_u64("n", 10) as usize;
+        // The initial world reads a [[mechanism]] param.
+        let init = scenario.mechanisms.iter()
+            .find(|m| m.name == "drift")
+            .map_or(0.0, |m| m.params.to_params().get_f64("init", 0.0));
+
+        let mut init_rng = SimRng::from_seed(derive_seed(seed, &[0])); // world-init stream
+        let world = WalkWorld {
+            clock: SimClock::new(0), // the runner resets it to t_max
+            agents: (0..n as u64).map(AgentId).collect(),
+            levels: (0..n).map(|_| init + init_rng.gen::<f64>() - 0.5).collect(),
+        };
+
+        let mut mechanisms: Vec<Box<dyn Mechanism<WalkWorld>>> = Vec::new();
+        for m in &scenario.mechanisms {
+            let p = m.params.to_params();
+            mechanisms.push(Box::new(Drift { step: p.get_f64("step", 0.1) }));
+        }
+
+        let scheduler = scheduler_from_scenario(scenario)?;
+        Ok(Trial::new(world, mechanisms, scheduler, derive_seed(seed, &[1]))) // engine stream
+    }
+}
+```
+
+The factory does not need to set the clock: the runner overwrites it with `SimClock::new(scenario.simulation.t_max)` before every run, exactly as `run_once` does.
+
+### Seeds: `engine_seed` and the stream convention
+
+`Trial::engine_seed` is the value handed to `SimulationBuilder::seed`, so the factory decides how the engine stream relates to the trial seed. A new factory should follow the [RNG stream labeling convention](#rng-stream-labeling-convention): seed world initialisation from `derive_seed(seed, &[0])` and return `engine_seed = derive_seed(seed, &[1])`, as above. Then, for a given seed, a trial built by the factory follows the same trajectory as a library-mode `main` that builds the same world and mechanisms with the same convention, so the scenario/runner path and library mode stay comparable.
+
+`RunResult::seed` always reports the **trial seed the caller passed**, never `engine_seed`.
+
+### Running: `run_trial` and `run_trials`
+
+```rust,ignore
+use socsim_runner::{run_trial, run_trials, summarize};
+
+let scenario = Scenario::parse(SCENARIO)?;
+let factory = WalkFactory;
+
+let one = run_trial(&scenario, &factory, 7)?;          // validate → build_trial → run
+let many = run_trials(&scenario, &factory, &[3, 1, 2, 0], /*parallel=*/ true)?;
+println!("{:?}", many.iter().map(|r| r.seed).collect::<Vec<_>>());
+println!("{}", summarize(&many).to_csv());
+```
+
+```text
+[0, 1, 2, 3]
+key,mean,std,min,max,n
+mean_level,0.978483,0.125325,0.792544,1.145285,4
+```
+
+- `run_trials` calls `validate` **once**, before any trial runs. Each trial is then built by `build_trial` **on the thread that runs it**; a `Trial` never crosses threads, so `W` does not need to be `Send` (only the factory is shared, hence `TrialFactory: Send + Sync`).
+- Results are stably sorted by seed (duplicated seeds keep their input order), and sequential and parallel runs return identical results.
+- If a trial fails, every trial still runs and the error of the failed seed that comes **first in the input order** is returned as `trial seed <s>: <error>` — deterministic even in parallel mode. A validation failure is returned as is.
+
+### Wrapping an existing (`WorldFactory`, register) pair
+
+An existing model that already has a `WorldFactory` and a register closure can use the new entry points without changes:
+
+```rust,ignore
+use socsim_runner::{run_once, run_trial, RegistryTrialFactory};
+
+// walk_world_factory() -> WorldFactory<WalkWorld> builds the world from [world] and the seed;
+// register_walk(reg: &mut Registry<WalkWorld>) registers "drift".
+let wrapped = RegistryTrialFactory::new(walk_world_factory(), register_walk);
+let a = run_trial(&scenario, &wrapped, 7)?;
+let b = run_once(&scenario, &walk_world_factory(), &register_walk, 7)?;
+assert_eq!(a.series, b.series);   // identical trajectories
+```
+
+`RegistryTrialFactory::new` takes ownership of the world factory and a register closure that is `Fn(&mut Registry<W>) + Send + Sync + 'static`. Its `build_trial` builds the parts in the same order as `run_once` (world from `[world]`, a fresh `Registry`, one mechanism per `[[mechanism]]` entry in scenario order, then the scheduler).
+
+- **Seeds.** For compatibility with existing packs it passes the **raw** seed both to the world factory and to the engine (`engine_seed == seed`), so `run_trial` reproduces `run_once` bit for bit. It does not apply the `derive_seed(seed, &[0])` / `&[1]` convention; write your own factory if you want it.
+- **Validation.** Its `validate` runs `Scenario::validate` with the names registered by the closure: `t_max > 0`, a known scheduler string, every mechanism name registered. `run_once` validates nothing, so a scenario with `t_max = 0` runs zero steps under `run_once` but is an error under `run_trial`.
+
+### Checked sweeps: `run_trial_sweep`
+
+`run_trial_sweep(&scenario, &axes, &factory, &seeds, parallel)` runs the Cartesian product of the `SweepAxis` values (the last axis varies fastest), like `run_sweep`, but checks every key and value and can reach `[world]`:
+
+```rust,ignore
+use socsim_runner::{run_trial_sweep, SweepAxis};
+
+let axes = [
+    SweepAxis { param_key: "world.n".into(),    values: vec![10.0, 40.0] },
+    SweepAxis { param_key: "drift.step".into(), values: vec![0.1, 0.5] },
+];
+let points = run_trial_sweep(&scenario, &axes, &factory, &[0, 1, 2], false)?;
+for p in &points {
+    let n = &p.effective.world.0["n"];
+    let step = &p.effective.mechanisms[0].params.0["step"];
+    let mean = p.summary.metrics.iter().find(|m| m.key == "mean_level").unwrap().mean;
+    println!("{:?}  n = {n}  step = {step}  mean = {mean:.4}", p.params);
+}
+```
+
+```text
+[("world.n", 10.0), ("drift.step", 0.1)]  n = 10  step = 0.1  mean = 1.0405
+[("world.n", 10.0), ("drift.step", 0.5)]  n = 10  step = 0.5  mean = 1.1399
+[("world.n", 40.0), ("drift.step", 0.1)]  n = 40  step = 0.1  mean = 0.9973
+[("world.n", 40.0), ("drift.step", 0.5)]  n = 40  step = 0.5  mean = 1.0489
+```
+
+Note that `world.n` was written back as the integer `40`, not `40.0`.
+
+**Key grammar.** Each `param_key` is one of:
+
+| Key | Target |
+|---|---|
+| `world.<a>[.<b>…]` | A key inside `[world]`, following nested tables (one or more non-empty segments after `world.`). |
+| `<mechanism>.<param>` | `<param>` of **every** `[[mechanism]]` entry named `<mechanism>`. Split at the first `.`; both parts non-empty and `<param>` without `.`. |
+
+A key without `.`, an empty segment (`world.`, `world..x`, `.x`, `m.`) and a `<param>` containing `.` are errors. The `world.` prefix is reserved by this syntax only — a registry may still register a mechanism named `world`, but its parameters cannot be swept with `world.<param>`, which always means `[world]`.
+
+**Value rules.**
+
+- Every value must be finite.
+- A `world.` path must name an existing key whose parent tables all exist; no table or key is created.
+- An existing **integer** accepts only an integral value within `[-2^63, 2^63)` and stays an integer; an existing **float** stays a float; booleans, strings, arrays, tables and datetimes cannot be swept.
+- `<mechanism>` must name at least one `[[mechanism]]` entry. An existing `<param>` follows the rules above; a **missing** `<param>` is added as a float, as `run_sweep` does, so parameters left at their defaults can still be swept. The sweep therefore cannot tell a misspelt `<param>` from an omitted one — reject unknown parameters in `TrialFactory::validate`.
+- Two axes with the same key, and an axis with no values, are errors. No axes at all gives one grid point with empty `params` whose effective scenario equals the base scenario.
+
+**Validation before running.** Every grid point is patched and passed to `TrialFactory::validate` first; if any point fails, **no trial runs**. The points then run in grid order; within a point the seeds run as in `run_trials`.
+
+**Errors.** Every error is `SocsimError::Config` and names the offending axis. With the factory above, a single-axis sweep gives:
+
+| Axis | Error |
+|---|---|
+| `drfit.step = 0.2` | `sweep axis 'drfit.step': mechanism 'drfit' is not in the scenario` |
+| `world.m = 5` | `sweep axis 'world.m': no key 'm' in [world]` |
+| `world.n = 10.5` | `sweep axis 'world.n': existing value is an integer; 10.5 is not an integral value representable as i64` |
+| `step = 0.2` | `sweep axis 'step': key must be 'world.<path>' or '<mechanism>.<param>'` |
+| `drift.stpe = 0.2` | `sweep combination [drift.stpe=0.2]: config error: drift: unknown param 'stpe'` (caught by the factory's `validate`) |
+
+(Displayed through `SocsimError`'s `Display`, each message is prefixed with `config error: `.) A trial that fails after validation is reported as `trial seed <s>: <error>`.
+
+**Difference from `run_sweep`.** The legacy `run_sweep` patches only `[[mechanism]]` params, always writes floats, never validates, and **silently ignores** a key without `.` and an unknown mechanism name — a sweep over `drfit.step` runs the unmodified scenario at every grid point without any error. `run_trial_sweep` rejects all of these. `run_sweep` itself is unchanged, and the bundled CLI packs still use it.
+
+**The effective scenario.** Each `CheckedSweepPoint { params, effective, summary }` carries the patched scenario its trials ran on, so you can check that a patch took effect by reading the value itself rather than inferring it from different results. `Scenario` implements `Serialize`, so `toml::to_string(&point.effective)` writes a scenario file that `Scenario::parse` reads back (a mechanism entry without `phase` is written without the key):
+
+```toml
+[simulation]
+name = "walk"
+module_pack = "walk"
+t_max = 20
+seed = 0
+scheduler = "sequential"
+
+[world]
+n = 40
+
+[[mechanism]]
+name = "drift"
+
+[mechanism.params]
+init = 1.0
+step = 0.5
+
+[output]
+log_path = "unused"
+metrics = []
+```
+
+---
+
 ## Recording metrics and events
 
 The `Recorder` trait has three recording methods:

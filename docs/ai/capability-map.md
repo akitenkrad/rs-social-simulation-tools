@@ -66,6 +66,7 @@ let final_state = sim.world();
 | Build & run a simulation | `socsim-engine` | `socsim_engine::{SimulationBuilder, Simulation, SequentialScheduler, RandomActivationScheduler}` | `run` / `run_until` / `run_observed` / `step`. |
 | Seeded / derived randomness | `socsim-rng` (re-exported by core) | `socsim_core::{SimRng, derive_seed}` | All randomness goes through this. |
 | Multi-seed runs + sweeps + summaries | `socsim-runner` | `socsim_runner::{run_once, run_seeds, run_sweep, summarize, RunResult, Summary, SweepAxis, SweepPoint, WorldFactory}` | Needs a `Scenario` + `Registry`; rayon-parallel. CLI-mode oriented. |
+| Build trials from the whole scenario + checked sweeps | `socsim-runner` | `socsim_runner::{Trial, TrialFactory, RegistryTrialFactory, scheduler_from_scenario, run_trial, run_trials, run_trial_sweep, CheckedSweepPoint}` | Factory reads `[world]` + all `[[mechanism]]` params and picks the engine seed; `run_trial_sweep` can patch `world.<path>`, rejects unknown keys / type mismatches, returns the effective `Scenario` per point. |
 | Social-network topology (ER / WS / BA) | `socsim-net` | `socsim_net::{SocialNetwork, DiSocialNetwork, WeightedNetwork}` → `erdos_renyi` / `watts_strogatz` / `barabasi_albert` | Generators take `&mut SimRng`. |
 | Spatial 2-D grid / lattice | `socsim-grid` | `socsim_grid::{Grid, GridIndex, CellGrid, Adjacency, Boundary, Neighborhood, Metric}` | `GridIndex` = agent↔cell; `CellGrid<T>` = per-cell state. |
 | Opinion / contagion / cultural / group mechanisms | `socsim-mechanisms` | `socsim_mechanisms::{HegselmannKrauseMechanism, DeffuantMechanism, SocialJudgementMechanism, LorenzMechanism, SiContagionMechanism, ThresholdContagionMechanism, PerAgentThresholdContagionMechanism, AxelrodMechanism, GroupConformityMechanism, MeanOperator}` | Reusable catalog over `socsim-core` capability traits; 4 feature families (all default-on). |
@@ -160,7 +161,7 @@ let final_state = sim.world();
   - `Params::empty()`; `get_f64(key, default)` / `get_u64` / `get_i64` / `get_bool` / `get_str(key, default: &str) -> &str`. (Note: `get_i64` exists; there is no `get_string`.) `impl From<toml::Table>`.
   - `Registry<W>::new()`; `register<F: Fn(&Params) -> Result<Box<dyn Mechanism<W>>> + 'static>(&mut self, name: &str, ctor: F)`; `build(name, &Params) -> Result<Box<dyn Mechanism<W>>>`; `names() -> Vec<&str>`.
   - `trait ModulePack<W>` — `pack_name(&self) -> &str`; `register(&self, reg: &mut Registry<W>)`.
-  - `Scenario` (`from_path(&Path)` / `parse(text)` / `impl FromStr`; `validate(&self, registry_names: &[&str])`); sections `SimulationSection { name, module_pack, t_max, seed, scheduler }`, `world: RawParams`, `mechanisms: Vec<MechanismEntry>`, `output: OutputSection`.
+  - `Scenario` (`from_path(&Path)` / `parse(text)` / `impl FromStr`; `validate(&self, registry_names: &[&str])`; `Serialize`, so `toml::to_string(&scenario)` round-trips through `parse`); sections `SimulationSection { name, module_pack, t_max, seed, scheduler }`, `world: RawParams`, `mechanisms: Vec<MechanismEntry>`, `output: OutputSection`.
 
 #### `socsim-log`
 - **Purpose:** concrete `Recorder` implementations.
@@ -177,8 +178,8 @@ let final_state = sim.world();
   - Row types: `MetricRow { t, key, value }`, `EventRow { t, kind, payload }`.
 
 #### `socsim-runner`
-- **Purpose:** single/multi-seed runs, cross-seed summaries, parameter sweeps (rayon-parallel).
-- **Engine-free?** No. **Depends-on:** `socsim-core`, `socsim-config`, `socsim-engine`, `socsim-log`.
+- **Purpose:** single/multi-seed runs, cross-seed summaries, parameter sweeps (rayon-parallel); trials built from the whole scenario by a `TrialFactory`, and checked sweeps.
+- **Engine-free?** No. **Depends-on:** `socsim-core`, `socsim-config`, `socsim-engine`, `socsim-log` (plus `rayon`, `toml`).
 - **Git dep:**
   ```toml
   socsim-runner = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-runner" }
@@ -191,6 +192,15 @@ let final_state = sim.world();
   - `summarize(results: &[RunResult]) -> Summary` (→ `Summary::to_csv()` / `to_json()`).
   - `run_sweep(scenario, axes: &[SweepAxis], world_factory, register, seeds: Vec<u64>, parallel) -> Result<Vec<SweepPoint>>`.
   - Data: `RunResult { seed, series, final_metrics, events, event_count }`, `MetricStats`, `Summary { metrics }`, `SweepAxis { param_key, values }`, `SweepPoint { params, summary }`.
+  - **Trial factories** (`src/trial.rs`, `src/checked_sweep.rs`, re-exported at the crate root):
+    - `#[non_exhaustive] struct Trial<W> { pub world, pub mechanisms: Vec<Box<dyn Mechanism<W>>>, pub scheduler: Box<dyn Scheduler<W>>, pub engine_seed: u64 }` — build with `Trial::new(world, mechanisms, scheduler, engine_seed)` (no struct literal outside the crate). The runner resets the world clock to `t_max` and always attaches its own `InMemoryRecorder`.
+    - `trait TrialFactory<W>: Send + Sync { fn validate(&self, &Scenario) -> Result<()> /* default Ok */; fn build_trial(&self, &Scenario, seed) -> Result<Trial<W>>; }` — object safe.
+    - `RegistryTrialFactory::new(world_factory: WorldFactory<W>, register: impl Fn(&mut Registry<W>) + Send + Sync + 'static)` — wraps the legacy pair; raw seed to world factory **and** engine (`run_trial` ≡ `run_once`); `validate` = `Scenario::validate(registry names)` (so `t_max = 0` errors here, not in `run_once`).
+    - `scheduler_from_scenario(&Scenario) -> Result<Box<dyn Scheduler<W>>>` (`"sequential"` / `"random_activation"`).
+    - `run_trial(scenario, &dyn TrialFactory<W>, seed) -> Result<RunResult>` — validate → build_trial → run.
+    - `run_trials(scenario, factory, seeds: &[u64], parallel) -> Result<Vec<RunResult>>` — validate once; sorted by seed (stable); on failure returns the first failed seed **in input order** as `trial seed <s>: …`. No `W: Send` bound.
+    - `run_trial_sweep(scenario, axes: &[SweepAxis], factory, seeds: &[u64], parallel) -> Result<Vec<CheckedSweepPoint>>` — keys `world.<a>[.<b>…]` (existing `[world]` key, nested tables) or `<mechanism>.<param>` (every entry with that name); existing integer stays integer (integral values only), existing float stays float, other types / non-finite values / unknown `world.` path / unknown mechanism / duplicate or empty axis → `SocsimError::Config("sweep axis '<key>': …")`; a missing `<param>` is added as a float. Every grid point is patched and `validate`d before any trial runs (`sweep combination [k=v, …]: …`).
+    - `#[non_exhaustive] struct CheckedSweepPoint { params, effective: Scenario, summary }` (`Serialize`/`Deserialize`).
 
 #### `socsim-cli` (binary `socsim`)
 - **Purpose:** the world-polymorphic `socsim` binary wrapping packs + runner.
@@ -502,6 +512,14 @@ let final_state = sim.world();
 - `Reward` — compute/apply rewards, record aggregate metrics.
 - `PostStep` — **read-only recording / convergence checks** (e.g. `MetricsMechanism` records here; `ctx.request_stop()` on convergence). Treat `PostStep` as the observation point, not a place to mutate dynamics.
 - Snapshot (synchronous) vs asynchronous updates change the dynamics — snapshot the eligible set at step start for synchronous semantics; act on whoever is currently eligible for asynchronous. Choose deliberately.
+
+**`socsim-runner` specifics**
+- **Legacy `run_sweep` silently ignores what `run_trial_sweep` rejects.** `run_sweep` patches only `[[mechanism]]` params, always as floats, and silently skips a key without `.` and an unknown mechanism name (a typo such as `drfit.step` runs the unpatched scenario at every point, no error). `run_trial_sweep` returns `SocsimError::Config` for these, for unknown `world.` paths and for type mismatches. Neither catches a misspelt `<param>` (a missing param is added as a float) — reject unknown params in `TrialFactory::validate`. `run_sweep` is unchanged and the bundled `CliPack`s still use it.
+- **`RunResult::seed` is the caller's trial seed**, never `Trial::engine_seed`.
+- **A `Trial` never crosses threads.** `run_trials` / `run_trial_sweep` share only the factory (`Send + Sync`) and build each trial on the thread that runs it, so `W` need not be `Send`. Do not build trials up front and hand them to workers.
+- **Engine seed convention.** A new `TrialFactory` should seed world init from `derive_seed(seed, &[0])` and return `engine_seed = derive_seed(seed, &[1])`, so its trajectories match a library-mode `main` that follows the same convention. `RegistryTrialFactory` deliberately uses the raw seed for both (bit-for-bit compatible with `run_once`).
+- **`world.` is reserved by the sweep-key syntax only.** A mechanism may be registered as `world`, but its params cannot be swept (`world.<x>` always means `[world]`).
+- **New runner errors are `SocsimError::Config(String)`** (no new error variants); match on the axis key in the message, not on the exact wording.
 
 **`socsim-llm` specifics**
 - Blank (whitespace-only) completions are **rejected by default** as `LlmError::EmptyResponse { endpoint, model }` (a reasoning model can spend its whole budget on a hidden trace). Opt out per call via `LlmConfig::allow_blank()`.

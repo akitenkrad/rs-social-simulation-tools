@@ -41,7 +41,11 @@ Every pack is defined by two traits and a starter TOML:
 
 2. **`CliPack`** ([`socsim-cli`](cli.md)) — an object-safe, *world-erased*
    wrapper. It exposes `name()`, `starter_toml()`, `mechanism_names()`,
-   `run_seeds()`, and `run_sweep()`, all returning world-agnostic result types.
+   `run_seeds()`, and `run_sweep()`, all returning world-agnostic result types,
+   plus `run_sweep_rows()`, which `socsim sweep` calls. `run_sweep_rows()` has a
+   default implementation that wraps `run_sweep()` (each `SweepPoint` becomes a
+   `SweepRow` with no effective scenario), so a pack only overrides it when it
+   can report the patched scenario of each combination.
    Each `CliPack` owns its concrete world internally and monomorphises the
    generic [`socsim-runner`](architecture.md) functions for it, so the CLI
    binary stays free of any one domain model.
