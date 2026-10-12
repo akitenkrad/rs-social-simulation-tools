@@ -293,35 +293,64 @@ fn cmd_sweep(
         println!("  {} = {:?}", axis.param_key, axis.values);
     }
 
-    let points = pack
-        .run_sweep(&scenario, &axes, &seeds, parallel)
+    let rows = pack
+        .run_sweep_rows(&scenario, &axes, &seeds, parallel)
         .context("sweep failed")?;
 
     std::fs::create_dir_all(out_dir)
         .with_context(|| format!("failed to create output dir '{}'", out_dir.display()))?;
 
-    for (i, point) in points.iter().enumerate() {
-        let combo_label = point
-            .params
-            .iter()
-            .map(|(k, v)| format!("{k}={v:.4}"))
-            .collect::<Vec<_>>()
-            .join("_");
-        let file_name = format!("combo_{i:04}_{combo_label}.csv");
-        let file_path = out_dir.join(&file_name);
-        std::fs::write(&file_path, point.summary.to_csv())
-            .with_context(|| format!("failed to write '{}'", file_path.display()))?;
+    for (i, row) in rows.iter().enumerate() {
+        let combo_label = write_sweep_row(out_dir, i, row)?;
 
         println!("  combo {i}: {combo_label}");
-        print_summary_table(&point.summary);
+        print_summary_table(&row.summary);
     }
 
     println!(
         "\nWrote {} CSV files to '{}'",
-        points.len(),
+        rows.len(),
         out_dir.display()
     );
     Ok(())
+}
+
+/// Label of one sweep combination: `{k}={v:.4}` joined with `_`.
+fn sweep_combo_label(params: &[(String, f64)]) -> String {
+    params
+        .iter()
+        .map(|(k, v)| format!("{k}={v:.4}"))
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+/// Write the files of one sweep combination into `out_dir` and return its label.
+///
+/// Always writes the summary CSV `combo_{i:04}_{label}.csv`.  When the row
+/// carries an effective scenario, also writes it as TOML to
+/// `combo_{i:04}_{label}.scenario.toml` (same label as the CSV).
+fn write_sweep_row(out_dir: &Path, i: usize, row: &packs::SweepRow) -> Result<String> {
+    let combo_label = sweep_combo_label(&row.params);
+
+    let file_name = format!("combo_{i:04}_{combo_label}.csv");
+    let file_path = out_dir.join(&file_name);
+    std::fs::write(&file_path, row.summary.to_csv())
+        .with_context(|| format!("failed to write '{}'", file_path.display()))?;
+
+    if let Some(effective) = &row.effective {
+        let toml_name = format!("combo_{i:04}_{combo_label}.scenario.toml");
+        let toml_path = out_dir.join(&toml_name);
+        let text = toml::to_string(effective).with_context(|| {
+            format!(
+                "failed to serialize the effective scenario for '{}'",
+                toml_path.display()
+            )
+        })?;
+        std::fs::write(&toml_path, text)
+            .with_context(|| format!("failed to write '{}'", toml_path.display()))?;
+    }
+
+    Ok(combo_label)
 }
 
 // ── summarize ─────────────────────────────────────────────────────────────────
@@ -718,5 +747,206 @@ log_path = "{log_template}"
         );
 
         let _ = fs::remove_dir_all(&tmpdir);
+    }
+
+    // ── sweep rows ────────────────────────────────────────────────────────────
+
+    use packs::{CliPack, SweepRow};
+    use socsim_runner::{MetricStats, Summary, SweepPoint};
+
+    /// A unique, freshly created directory under `std::env::temp_dir()`.
+    fn fresh_temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "socsim_cli_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn summary_of(key: &str, mean: f64) -> Summary {
+        Summary {
+            metrics: vec![MetricStats {
+                key: key.to_owned(),
+                mean,
+                std: 0.0,
+                min: mean,
+                max: mean,
+                n: 2,
+            }],
+        }
+    }
+
+    /// A pack that only implements the legacy `run_sweep`, with fixed output.
+    /// Available in every feature configuration (including no packs).
+    struct StubSweepPack;
+
+    impl CliPack for StubSweepPack {
+        fn name(&self) -> &'static str {
+            "stub-sweep"
+        }
+        fn starter_toml(&self) -> &'static str {
+            ""
+        }
+        fn mechanism_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+        fn run_seeds(
+            &self,
+            _scenario: &Scenario,
+            _seeds: &[u64],
+            _parallel: bool,
+        ) -> Result<Vec<socsim_runner::RunResult>> {
+            Ok(Vec::new())
+        }
+        fn run_sweep(
+            &self,
+            _scenario: &Scenario,
+            axes: &[SweepAxis],
+            _seeds: &[u64],
+            _parallel: bool,
+        ) -> Result<Vec<SweepPoint>> {
+            let axis = &axes[0];
+            Ok(axis
+                .values
+                .iter()
+                .map(|&v| SweepPoint {
+                    params: vec![(axis.param_key.clone(), v)],
+                    summary: summary_of("m", v * 10.0),
+                })
+                .collect())
+        }
+    }
+
+    fn assert_rows_match_points(rows: &[SweepRow], points: &[SweepPoint]) {
+        assert_eq!(rows.len(), points.len());
+        for (row, point) in rows.iter().zip(points) {
+            assert_eq!(row.params, point.params);
+            assert_eq!(
+                serde_json::to_value(&row.summary).unwrap(),
+                serde_json::to_value(&point.summary).unwrap()
+            );
+            assert!(
+                row.effective.is_none(),
+                "default adapter must not report effective"
+            );
+        }
+    }
+
+    #[test]
+    fn default_run_sweep_rows_matches_run_sweep_stub() {
+        let scenario = scenario_with_log("unused_{name}_{seed}.jsonl");
+        let axes = vec![SweepAxis {
+            param_key: "m.p".to_owned(),
+            values: vec![0.25, 0.5, 0.75],
+        }];
+        let pack = StubSweepPack;
+        let points = pack.run_sweep(&scenario, &axes, &[0, 1], false).unwrap();
+        let rows = pack
+            .run_sweep_rows(&scenario, &axes, &[0, 1], false)
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_rows_match_points(&rows, &points);
+    }
+
+    #[cfg(feature = "pack-hr-lifecycle")]
+    #[test]
+    fn default_run_sweep_rows_matches_run_sweep_hr_lifecycle() {
+        let mut scenario = Scenario::parse(include_str!(
+            "../../../scenarios/hr_lifecycle_baseline.toml"
+        ))
+        .expect("baseline scenario must parse");
+        scenario.simulation.t_max = 10;
+        let axes = vec![
+            SweepAxis {
+                param_key: "toxic_spread.p_spread".to_owned(),
+                values: vec![0.2, 0.46],
+            },
+            SweepAxis {
+                param_key: "peer_effect.alpha_peer".to_owned(),
+                values: vec![0.1],
+            },
+        ];
+        let pack = packs::dispatch("hr-lifecycle").unwrap();
+        let points = pack.run_sweep(&scenario, &axes, &[0, 1], false).unwrap();
+        let rows = pack
+            .run_sweep_rows(&scenario, &axes, &[0, 1], false)
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_rows_match_points(&rows, &points);
+    }
+
+    #[test]
+    fn write_sweep_row_writes_scenario_toml_only_when_effective_is_some() {
+        let dir = fresh_temp_dir("sweep_rows");
+
+        let mut effective = scenario_with_log("eff_{name}_{seed}.jsonl");
+        effective.simulation.t_max = 7;
+        effective.mechanisms[0].params.set_f64("p", 0.3);
+
+        let rows = [
+            SweepRow {
+                params: vec![("m.p".to_owned(), 0.3)],
+                summary: summary_of("m", 3.0),
+                effective: Some(effective.clone()),
+            },
+            SweepRow {
+                params: vec![("m.p".to_owned(), 0.6)],
+                summary: summary_of("m", 6.0),
+                effective: None,
+            },
+        ];
+
+        let labels: Vec<String> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, row)| write_sweep_row(&dir, i, row).expect("write_sweep_row"))
+            .collect();
+        assert_eq!(labels, vec!["m.p=0.3000", "m.p=0.6000"]);
+
+        // Both CSVs are written, with the summary CSV as content.
+        for (i, row) in rows.iter().enumerate() {
+            let csv = dir.join(format!("combo_{i:04}_{}.csv", labels[i]));
+            assert_eq!(fs::read_to_string(&csv).unwrap(), row.summary.to_csv());
+        }
+
+        // The `Some` row has a `.scenario.toml` with the same label, which
+        // reads back with `Scenario::parse`.
+        let toml_path = dir.join("combo_0000_m.p=0.3000.scenario.toml");
+        let text = fs::read_to_string(&toml_path).expect("scenario toml written");
+        let back = Scenario::parse(&text).expect("scenario toml parses back");
+        assert_eq!(back.simulation.name, effective.simulation.name);
+        assert_eq!(back.simulation.t_max, 7);
+        assert_eq!(back.mechanisms.len(), effective.mechanisms.len());
+        assert_eq!(back.mechanisms[0].name, "org_performance");
+        assert_eq!(back.mechanisms[0].phase.as_deref(), Some("reward"));
+        assert_eq!(
+            back.mechanisms[0].params.0.get("p"),
+            Some(&toml::Value::Float(0.3))
+        );
+        assert_eq!(back.output.log_path, effective.output.log_path);
+
+        // The `None` row has no `.scenario.toml`; nothing else was written.
+        assert!(!dir.join("combo_0001_m.p=0.6000.scenario.toml").exists());
+        let mut names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "combo_0000_m.p=0.3000.csv",
+                "combo_0000_m.p=0.3000.scenario.toml",
+                "combo_0001_m.p=0.6000.csv",
+            ]
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

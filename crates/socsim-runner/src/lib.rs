@@ -12,6 +12,26 @@
 //!   mean/std/min/max statistics.
 //! - [`run_sweep`] — grid-sweep over a parameter space, reusing [`run_seeds`]
 //!   for each combination.
+//!
+//! Trials built from the whole scenario:
+//!
+//! - [`Trial`] — the parts of one trial (world, mechanisms, scheduler and
+//!   engine seed), built with [`Trial::new`].
+//! - [`TrialFactory`] — builds a [`Trial`] from the whole effective
+//!   [`Scenario`] and a seed, so the initial world may depend on
+//!   `[[mechanism]]` params and the factory chooses the engine seed.
+//! - [`RegistryTrialFactory`] — wraps an existing ([`WorldFactory`], register)
+//!   pair as a [`TrialFactory`] that reproduces [`run_once`].
+//! - [`scheduler_from_scenario`] — the scheduler named by the scenario.
+//! - [`run_trial`] / [`run_trials`] — run one trial / many seeds (optionally
+//!   in parallel) through a factory.
+//! - [`run_trial_sweep`] — a checked grid sweep that can patch `[world]`
+//!   paths, rejects unknown keys and type mismatches, validates every grid
+//!   point before running, and returns the effective scenario of each point
+//!   as a [`CheckedSweepPoint`].
+//!
+//! Every entry point runs a trial through the same execution kernel (clock
+//! reset to `t_max`, engine, in-memory recorder, result extraction).
 
 use std::collections::HashMap;
 
@@ -19,9 +39,16 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use socsim_config::{Registry, Scenario};
-use socsim_core::{Result, SocsimError, WorldState};
-use socsim_engine::{RandomActivationScheduler, SequentialScheduler, SimulationBuilder};
-use socsim_log::{EventRow, InMemoryRecorder};
+use socsim_core::{Result, WorldState};
+use socsim_log::EventRow;
+
+mod checked_sweep;
+mod trial;
+
+pub use checked_sweep::{run_trial_sweep, CheckedSweepPoint};
+pub use trial::{
+    run_trial, run_trials, scheduler_from_scenario, RegistryTrialFactory, Trial, TrialFactory,
+};
 
 // ── WorldFactory ──────────────────────────────────────────────────────────────
 
@@ -36,7 +63,8 @@ pub type WorldFactory<W> = Box<dyn Fn(&socsim_config::Params, u64) -> Result<W> 
 /// The outcome of a single simulation trial.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunResult {
-    /// Seed used for this trial.
+    /// Seed used for this trial: the trial seed passed by the caller (for
+    /// factory-built trials this is not [`Trial::engine_seed`]).
     pub seed: u64,
 
     /// Time series for each metric key: `key → Vec<(t, value)>`.
@@ -72,8 +100,13 @@ pub struct RunResult {
 ///
 /// # Returns
 ///
-/// A [`RunResult`] populated from the [`InMemoryRecorder`] collected during
-/// the run.
+/// A [`RunResult`] populated from the
+/// [`InMemoryRecorder`](socsim_log::InMemoryRecorder) collected during the
+/// run.
+///
+/// The scenario is not validated here.  The raw `seed` is passed both to
+/// `world_factory` and to the engine; [`RegistryTrialFactory`] with
+/// [`run_trial`] reproduces this function's results for valid scenarios.
 pub fn run_once<W>(
     scenario: &Scenario,
     world_factory: &WorldFactory<W>,
@@ -83,69 +116,8 @@ pub fn run_once<W>(
 where
     W: WorldState,
 {
-    // Build world from [world] params with the correct t_max baked in.
-    // The default factory (e.g. HrWorld::new) sets t_max = u64::MAX, so we
-    // override the clock immediately after construction.
-    let world_params = scenario.world.to_params();
-    let mut world = world_factory(&world_params, seed)?;
-    *world.clock_mut() = socsim_core::SimClock::new(scenario.simulation.t_max);
-
-    // Build registry, then mechanisms in scenario order.
-    let mut registry: Registry<W> = Registry::new();
-    register(&mut registry);
-
-    let mut builder = SimulationBuilder::new(world).seed(seed);
-
-    for entry in &scenario.mechanisms {
-        let params = entry.params.to_params();
-        let mech = registry.build(&entry.name, &params)?;
-        builder = builder.add_mechanism(mech);
-    }
-
-    builder = match scenario.simulation.scheduler.as_str() {
-        "random_activation" => builder.scheduler(Box::new(RandomActivationScheduler)),
-        "sequential" => builder.scheduler(Box::new(SequentialScheduler)),
-        other => return Err(SocsimError::Config(format!("unknown scheduler '{other}'"))),
-    };
-
-    // Use InMemoryRecorder so we can inspect results after the run.
-    builder = builder.recorder(Box::new(InMemoryRecorder::new()));
-
-    let mut sim = builder.build();
-    sim.run()?;
-
-    // Downcast recorder to extract data.
-    let rec = sim
-        .recorder()
-        .as_any()
-        .and_then(|a| a.downcast_ref::<InMemoryRecorder>())
-        .ok_or_else(|| SocsimError::Mechanism("recorder downcast failed".to_owned()))?;
-
-    let mut series: HashMap<String, Vec<(u64, f64)>> = HashMap::new();
-    for row in rec.metrics() {
-        series
-            .entry(row.key.clone())
-            .or_default()
-            .push((row.t, row.value));
-    }
-
-    let mut final_metrics: HashMap<String, f64> = HashMap::new();
-    for (key, ts) in &series {
-        if let Some(&(_, last_val)) = ts.last() {
-            final_metrics.insert(key.clone(), last_val);
-        }
-    }
-
-    let events: Vec<EventRow> = rec.events().to_vec();
-    let event_count = events.len();
-
-    Ok(RunResult {
-        seed,
-        series,
-        final_metrics,
-        events,
-        event_count,
-    })
+    let trial = trial::build_registry_trial(scenario, world_factory, register, seed)?;
+    trial::execute_trial(scenario, trial, seed)
 }
 
 // ── run_seeds ─────────────────────────────────────────────────────────────────

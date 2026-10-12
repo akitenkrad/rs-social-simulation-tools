@@ -17,7 +17,39 @@
 use anyhow::{bail, Result};
 
 use socsim_config::Scenario;
-use socsim_runner::{RunResult, SweepAxis, SweepPoint};
+use socsim_runner::{RunResult, Summary, SweepAxis, SweepPoint};
+
+// ── SweepRow ───────────────────────────────────────────────────────────────────
+
+/// One grid combination of a `socsim sweep`, as consumed by the CLI.
+///
+/// This is the CLI-side result type of [`CliPack::run_sweep_rows`].  It carries
+/// the same `params` and `summary` as a [`SweepPoint`], plus the effective
+/// (patched) scenario for packs that can report it.
+#[derive(Debug, Clone)]
+pub struct SweepRow {
+    /// Parameter values used for this grid point (in sweep axis order).
+    pub params: Vec<(String, f64)>,
+    /// Aggregated summary across all seeds for this grid combination.
+    pub summary: Summary,
+    /// The effective scenario after the sweep patch was applied.
+    ///
+    /// `None` for packs that run the legacy [`CliPack::run_sweep`] path, which
+    /// does not report the patched scenario.  When `Some`, `socsim sweep`
+    /// writes it next to the combination's CSV as
+    /// `combo_{i:04}_{label}.scenario.toml`.
+    pub effective: Option<Scenario>,
+}
+
+impl From<SweepPoint> for SweepRow {
+    fn from(point: SweepPoint) -> Self {
+        Self {
+            params: point.params,
+            summary: point.summary,
+            effective: None,
+        }
+    }
+}
 
 // ── CliPack trait ──────────────────────────────────────────────────────────────
 
@@ -52,6 +84,25 @@ pub trait CliPack: Send + Sync {
         seeds: &[u64],
         parallel: bool,
     ) -> Result<Vec<SweepPoint>>;
+
+    /// Run a grid parameter sweep and return one [`SweepRow`] per combination.
+    ///
+    /// This is the entry point used by `socsim sweep`.  The default
+    /// implementation delegates to [`CliPack::run_sweep`] and maps every
+    /// [`SweepPoint`] to a row with `effective: None`, so packs that do not
+    /// override it keep their existing sweep behaviour.  A pack that can report
+    /// the effective (patched) scenario of each combination overrides this
+    /// method and returns `effective: Some(..)`.
+    fn run_sweep_rows(
+        &self,
+        scenario: &Scenario,
+        axes: &[SweepAxis],
+        seeds: &[u64],
+        parallel: bool,
+    ) -> Result<Vec<SweepRow>> {
+        let points = self.run_sweep(scenario, axes, seeds, parallel)?;
+        Ok(points.into_iter().map(SweepRow::from).collect())
+    }
 }
 
 // ── Registry / dispatch ─────────────────────────────────────────────────────────

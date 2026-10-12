@@ -31,7 +31,7 @@
 
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use socsim_core::{Result, SocsimError};
 
@@ -40,7 +40,7 @@ use crate::Params;
 // ── SimulationSection ─────────────────────────────────────────────────────────
 
 /// The `[simulation]` table of a scenario TOML.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationSection {
     /// Human-readable run name (used in output path substitution).
     pub name: String,
@@ -63,7 +63,7 @@ pub struct SimulationSection {
 /// One entry in the `[[mechanism]]` array.
 ///
 /// Order in the TOML array is preserved and used as the composition order.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MechanismEntry {
     /// Registry name of the mechanism (must be registered in the pack's
     /// [`Registry`][crate::Registry]).
@@ -72,6 +72,7 @@ pub struct MechanismEntry {
     /// Informational phase label (not enforced at runtime; the mechanism's
     /// own [`phases()`][socsim_core::Mechanism::phases] governs which phases
     /// it actually runs in).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
 
     /// Per-mechanism parameters forwarded to its constructor.
@@ -81,9 +82,10 @@ pub struct MechanismEntry {
 
 // ── RawParams ─────────────────────────────────────────────────────────────────
 
-/// A thin serde-deserializable wrapper around a TOML table, used for the
-/// `[mechanism.params]` sub-table.  Converts into [`Params`] on demand.
-#[derive(Debug, Clone, Deserialize, Default)]
+/// A thin serde wrapper around a TOML table, used for the
+/// `[mechanism.params]` sub-table.  Converts into [`Params`] on demand and
+/// serialises as the inner table.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawParams(#[serde(default)] pub toml::Table);
 
 impl From<RawParams> for Params {
@@ -107,7 +109,7 @@ impl RawParams {
 // ── OutputSection ─────────────────────────────────────────────────────────────
 
 /// The `[output]` table of a scenario TOML.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputSection {
     /// Path template for the JSONL log file.
     ///
@@ -136,7 +138,11 @@ impl OutputSection {
 /// Deserialises from a TOML file conforming to design §7.  The `[[mechanism]]`
 /// array is **order-preserving**: the composition order equals the declaration
 /// order in the TOML file.
-#[derive(Debug, Clone, Deserialize)]
+///
+/// A scenario also serialises back to TOML (`toml::to_string`), and the
+/// output parses with [`Scenario::parse`] to the same content; a mechanism
+/// entry without a `phase` is written without the key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scenario {
     /// `[simulation]` section.
     pub simulation: SimulationSection,
@@ -328,5 +334,92 @@ metrics  = ["org_performance", "avg_tenure"]
             .output
             .resolve_log_path(&s.simulation.name, s.simulation.seed);
         assert_eq!(resolved, "runs/test_42.jsonl");
+    }
+
+    /// Serialise through `toml::Value` so two scenarios can be compared
+    /// without a `PartialEq` impl.
+    fn as_value(s: &Scenario) -> toml::Value {
+        toml::Value::try_from(s).expect("scenario serialises to a TOML value")
+    }
+
+    #[test]
+    fn serialize_round_trip_preserves_content() {
+        let original = Scenario::parse(MINIMAL_TOML).expect("should parse");
+        // The second entry has no `phase`; the round trip must keep it `None`.
+        assert!(original.mechanisms[1].phase.is_none());
+
+        let text = toml::to_string(&original).expect("scenario serialises to TOML");
+        let back = Scenario::parse(&text).expect("serialised TOML parses back");
+
+        assert_eq!(as_value(&back), as_value(&original));
+        assert_eq!(toml::to_string(&back).unwrap(), text);
+
+        assert_eq!(back.simulation.name, "test");
+        assert_eq!(back.simulation.module_pack, "hr-lifecycle");
+        assert_eq!(back.simulation.t_max, 60);
+        assert_eq!(back.simulation.seed, 42);
+        assert_eq!(back.simulation.scheduler, "random_activation");
+        assert_eq!(back.world.0, original.world.0);
+        assert_eq!(back.mechanisms.len(), 2);
+        assert_eq!(back.mechanisms[0].name, "learning_curve");
+        assert_eq!(back.mechanisms[0].phase.as_deref(), Some("environment"));
+        assert_eq!(back.mechanisms[0].params.0, original.mechanisms[0].params.0);
+        assert_eq!(back.mechanisms[1].name, "org_performance");
+        assert!(back.mechanisms[1].phase.is_none());
+        assert!(back.mechanisms[1].params.0.is_empty());
+        assert_eq!(back.output.log_path, original.output.log_path);
+        assert_eq!(back.output.metrics, original.output.metrics);
+    }
+
+    #[test]
+    fn serialize_omits_absent_phase() {
+        let s = Scenario::parse(MINIMAL_TOML).expect("should parse");
+        let value = as_value(&s);
+        let entries = value["mechanism"].as_array().expect("mechanism array");
+        assert_eq!(
+            entries[0].get("phase").and_then(|v| v.as_str()),
+            Some("environment")
+        );
+        assert!(entries[1].get("phase").is_none());
+    }
+
+    #[test]
+    fn serialize_round_trip_keeps_value_types() {
+        let text = r#"
+[simulation]
+name        = "types"
+module_pack = "p"
+t_max       = 3
+seed        = 0
+scheduler   = "sequential"
+
+[world]
+n     = 3
+alpha = 1.5
+flag  = true
+label = "x"
+[world.game]
+temptation = 1.6
+
+[[mechanism]]
+name = "m"
+[mechanism.params]
+k = 2
+x = 0.25
+
+[output]
+log_path = "out.jsonl"
+"#;
+        let original = Scenario::parse(text).expect("should parse");
+        let back = Scenario::parse(&toml::to_string(&original).unwrap()).unwrap();
+        assert_eq!(as_value(&back), as_value(&original));
+        assert_eq!(back.world.0["n"], toml::Value::Integer(3));
+        assert_eq!(back.world.0["alpha"], toml::Value::Float(1.5));
+        assert_eq!(back.world.0["flag"], toml::Value::Boolean(true));
+        assert_eq!(back.world.0["label"], toml::Value::String("x".to_owned()));
+        assert_eq!(back.world.0["game"]["temptation"], toml::Value::Float(1.6));
+        assert_eq!(back.mechanisms[0].params.0["k"], toml::Value::Integer(2));
+        assert_eq!(back.mechanisms[0].params.0["x"], toml::Value::Float(0.25));
+        assert!(back.output.metrics.is_empty());
     }
 }

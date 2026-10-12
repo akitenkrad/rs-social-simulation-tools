@@ -4573,6 +4573,7 @@ dependencies = [
  "socsim-engine",
  "socsim-log",
  "socsim-packs",
+ "toml 0.8.23",
 ]
 
 [[package]]
