@@ -220,7 +220,10 @@ fn run_once_populates_events_with_payloads() {
     // consumers can analyse them.
     let hiring = result.events.iter().find(|e| e.kind == "hiring");
     let turnover = result.events.iter().find(|e| e.kind == "turnover");
-    assert!(hiring.is_some(), "should record at least one `hiring` event");
+    assert!(
+        hiring.is_some(),
+        "should record at least one `hiring` event"
+    );
     assert!(
         turnover.is_some(),
         "should record at least one `turnover` event"

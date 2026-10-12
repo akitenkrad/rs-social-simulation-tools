@@ -15,7 +15,7 @@
 //!    them into a `Registry` in one call.
 //!
 //! 4. [`Scenario`] — a deserialised scenario TOML (design §7).
-//!    Use [`Scenario::from_path`] or [`Scenario::from_str`] to load, then
+//!    Use [`Scenario::from_path`] or [`Scenario::parse`] to load, then
 //!    [`Scenario::validate`] to check consistency against a registry.
 //!
 //! # Dependency note
