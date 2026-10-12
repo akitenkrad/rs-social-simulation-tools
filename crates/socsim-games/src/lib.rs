@@ -13,8 +13,8 @@ pub mod llm;
 pub use game::{
     check_continuous_action, metric_action_ids, ActionError, AggregateGame, AggregateReduce,
     AggregateSpec, AggregateSpecError, AnonymousGame, CommonActionSpace, ContinuousGame,
-    DescribeGame, FiniteGame, MatrixError, MatrixGame, MetricAction, MetricActionIds, MetricScheme,
-    NormalFormGame, NumericBr, StageGame,
+    ContinuousSpec, DescribeGame, FiniteGame, FiniteSpec, MatrixError, MatrixGame, MetricAction,
+    MetricActionIds, MetricScheme, NormalFormGame, NumericBr, StageGame,
 };
 pub use learn::{automaton::AutomatonKind, logit::EstimateMode, TieBreak};
 pub use solve::{
@@ -48,8 +48,8 @@ pub use assemble::{
 };
 #[cfg(feature = "core")]
 pub use assemble::{
-    build_world, build_world_with, AssignGroup, AssignKind, Assignment, InitialActions,
-    OnInvalidAction, PayoffAggregation, PlayOptions,
+    build_world, build_world_with, uniform_initial_actions, AssignGroup, AssignKind, Assignment,
+    InitialActions, OnInvalidAction, PayoffAggregation, PlayOptions,
 };
 #[cfg(feature = "core")]
 pub use error::GameError;

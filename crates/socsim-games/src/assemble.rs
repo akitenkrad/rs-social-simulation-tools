@@ -5,11 +5,15 @@ use std::collections::BTreeMap;
 #[cfg(feature = "engine")]
 use std::collections::BTreeSet;
 
+use std::any::Any;
+use std::fmt::Debug;
+
 use rand::seq::SliceRandom;
+use rand::Rng;
 use socsim_core::{derive_seed, AgentId, SimClock, SimRng};
 
 use crate::{
-    DecisionScope, ExperimentState, GameError, GameWorld, InternalAggregateTable,
+    ContinuousGame, DecisionScope, ExperimentState, GameError, GameWorld, InternalAggregateTable,
     InternalPairHistory, InternalPolicyReports, InternalStepHistory, KindCatalog, MatchingState,
     PlayArena, PolicyTable, RuleBook, RuleError, RuleInitContext, StageGame, Topology,
 };
@@ -17,11 +21,159 @@ use crate::{
 #[cfg(feature = "engine")]
 use crate::{AggregateGame, MatchContext, Matching, OutcomeRule};
 
+/// The held actions every agent starts with.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum InitialActions<A> {
+    /// Every agent holds the same action.
     Same(A),
+    /// Agent `i` holds the `i`-th action; the length must equal the number of
+    /// agents.
     PerAgent(Vec<A>),
+    /// Exact shares of the population, as `(action, share)` pairs.
+    ///
+    /// The number of agents holding each action is fixed by the largest
+    /// remainder method: every action first receives `floor(n * share)`
+    /// agents, and the agents still unassigned go one each to the actions
+    /// with the largest fractional parts, ties going to the pair listed
+    /// first. The actions are then laid out in the listed order and shuffled
+    /// with the random stream `derive_seed(seed, &[0, 2])`, which is
+    /// independent of the stream `[0]` used by [`Assignment::Shuffled`].
+    ///
+    /// Every share must be finite and non-negative, the shares must sum to one
+    /// within `1e-9`, every action must be valid for every role, and an action
+    /// may be listed only once. Two actions are the same when they compare
+    /// equal (`usize` and `Vec<f64>` actions) or, for other action types,
+    /// when their `Debug` representations coincide. A violation is reported
+    /// as [`GameError::Config`] (or as [`GameError::Action`] for an invalid
+    /// action).
+    Shares(Vec<(A, f64)>),
+}
+
+/// Tolerance of the sum of initial-action shares around one.
+const SHARE_SUM_TOLERANCE: f64 = 1e-9;
+
+fn same_action<A: Debug + 'static>(a: &A, b: &A) -> bool {
+    let (left, right) = (a as &dyn Any, b as &dyn Any);
+    if let (Some(left), Some(right)) = (left.downcast_ref::<usize>(), right.downcast_ref::<usize>())
+    {
+        return left == right;
+    }
+    if let (Some(left), Some(right)) = (
+        left.downcast_ref::<Vec<f64>>(),
+        right.downcast_ref::<Vec<f64>>(),
+    ) {
+        return left == right;
+    }
+    format!("{a:?}") == format!("{b:?}")
+}
+
+/// Resolves [`InitialActions::Shares`] into one action per agent.
+fn resolve_shares<G: StageGame>(
+    game: &G,
+    shares: Vec<(G::Action, f64)>,
+    n_agents: usize,
+    seed: u64,
+) -> Result<Vec<G::Action>, GameError> {
+    if shares.is_empty() {
+        return Err(GameError::Config(
+            "initial action shares: at least one action is required".to_owned(),
+        ));
+    }
+    for (index, (_, share)) in shares.iter().enumerate() {
+        if !share.is_finite() || *share < 0.0 {
+            return Err(GameError::Config(format!(
+                "initial action shares[{index}]: share {share} must be finite and non-negative"
+            )));
+        }
+    }
+    let total: f64 = shares.iter().map(|(_, share)| share).sum();
+    if (total - 1.0).abs() > SHARE_SUM_TOLERANCE {
+        return Err(GameError::Config(format!(
+            "initial action shares: shares sum to {total}, expected 1"
+        )));
+    }
+    for (action, _) in &shares {
+        for role in 0..game.n_roles() {
+            game.check_action(role, action)?;
+        }
+    }
+    for (index, (action, _)) in shares.iter().enumerate() {
+        if let Some(first) = shares[..index]
+            .iter()
+            .position(|(earlier, _)| same_action(earlier, action))
+        {
+            return Err(GameError::Config(format!(
+                "initial action shares[{index}]: action {action:?} is already listed at index {first}"
+            )));
+        }
+    }
+
+    let quotas: Vec<f64> = shares
+        .iter()
+        .map(|(_, share)| n_agents as f64 * share)
+        .collect();
+    let mut counts: Vec<usize> = quotas.iter().map(|quota| quota.floor() as usize).collect();
+    let floored: usize = counts.iter().sum();
+    let remaining = n_agents.checked_sub(floored).ok_or_else(|| {
+        GameError::Config(format!(
+            "initial action shares: shares assign {floored} agents, more than {n_agents}"
+        ))
+    })?;
+    let mut order: Vec<usize> = (0..shares.len()).collect();
+    // A stable sort keeps the listed order among equal fractional parts.
+    order.sort_by(|&left, &right| {
+        let left = quotas[left] - quotas[left].floor();
+        let right = quotas[right] - quotas[right].floor();
+        right.total_cmp(&left)
+    });
+    if remaining > order.len() {
+        return Err(GameError::Config(format!(
+            "initial action shares: {remaining} agents left after rounding down, more than {} actions",
+            order.len()
+        )));
+    }
+    for &index in order.iter().take(remaining) {
+        counts[index] += 1;
+    }
+
+    let mut actions = Vec::with_capacity(n_agents);
+    for ((action, _), count) in shares.into_iter().zip(counts) {
+        actions.extend(std::iter::repeat_n(action, count));
+    }
+    let mut rng = SimRng::from_seed(derive_seed(seed, &[0, 2]));
+    actions.shuffle(&mut rng);
+    Ok(actions)
+}
+
+/// Draws independent uniform initial actions for a continuous game.
+///
+/// Every component of every agent's action is drawn uniformly from the closed
+/// interval of the corresponding bound of role 0, in agent order and, within
+/// an agent, in component order, from the random stream
+/// `derive_seed(seed, &[0, 2])`. Pass the result to
+/// [`InitialActions::PerAgent`]. The stream is the one used by
+/// [`InitialActions::Shares`], and is independent of the stream `[0]` used by
+/// [`Assignment::Shuffled`].
+///
+/// # Panics
+///
+/// Panics if the game has no role 0.
+pub fn uniform_initial_actions<G: ContinuousGame>(
+    game: &G,
+    n_agents: usize,
+    seed: u64,
+) -> Vec<Vec<f64>> {
+    let bounds = game.bounds(0);
+    let mut rng = SimRng::from_seed(derive_seed(seed, &[0, 2]));
+    (0..n_agents)
+        .map(|_| {
+            bounds
+                .iter()
+                .map(|&(lo, hi)| rng.gen_range(lo..=hi))
+                .collect()
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -437,6 +589,7 @@ where
             }
             actions
         }
+        InitialActions::Shares(shares) => resolve_shares(&game, shares, n_agents, seed)?,
     };
 
     for action in &held {
@@ -626,7 +779,7 @@ where
 #[cfg(feature = "engine")]
 #[allow(clippy::too_many_arguments)]
 fn assemble_internal<G, X, M, P, D>(
-    mut world: GameWorld<G, X>,
+    world: GameWorld<G, X>,
     matching: M,
     rules: RuleBook<G, X>,
     play: P,
@@ -634,6 +787,53 @@ fn assemble_internal<G, X, M, P, D>(
     opts: PlayOptions<G::Action>,
     seed: u64,
 ) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>
+where
+    G: StageGame,
+    X: ExperimentState,
+    M: Matching<G, X> + 'static,
+    P: PlayPath<G, X>,
+    D: PopulationDynamics<G, X>,
+{
+    let parts = assemble_parts(world, matching, rules, play, dynamics, opts, seed)?;
+    let builder = parts
+        .mechanisms
+        .into_iter()
+        .fold(
+            socsim_engine::SimulationBuilder::new(parts.world),
+            |builder, mechanism| builder.add_mechanism(mechanism),
+        )
+        .seed(parts.engine_seed);
+    Ok(builder)
+}
+
+/// The parts of an assembled game simulation, before they are handed to a
+/// [`socsim_engine::SimulationBuilder`].
+#[cfg(feature = "engine")]
+pub(crate) struct AssembledParts<G: StageGame, X: ExperimentState> {
+    /// The world, with its matching state, reports, and aggregate table set.
+    pub(crate) world: GameWorld<G, X>,
+    /// The mechanisms in registration order: `game_match`, `game_decide`, the
+    /// population dynamic (if any), then `game_play`.
+    pub(crate) mechanisms: Vec<Box<dyn socsim_core::Mechanism<GameWorld<G, X>>>>,
+    /// The engine seed, `derive_seed(seed, &[1])`.
+    pub(crate) engine_seed: u64,
+}
+
+/// Validates the configuration and builds the parts of a game simulation.
+///
+/// This is the single assembly procedure behind [`assemble_with`] and its
+/// shorthands; the public functions only wrap the parts in a builder.
+#[cfg(feature = "engine")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn assemble_parts<G, X, M, P, D>(
+    mut world: GameWorld<G, X>,
+    matching: M,
+    rules: RuleBook<G, X>,
+    play: P,
+    dynamics: D,
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+) -> Result<AssembledParts<G, X>, GameError>
 where
     G: StageGame,
     X: ExperimentState,
@@ -747,25 +947,29 @@ where
         implicit,
         aggregate,
     ));
-    let builder = socsim_engine::SimulationBuilder::new(world)
-        .seed(derive_seed(seed, &[1]))
-        .add_mechanism(Box::new(crate::mechanism::MatchMechanism::<G, X, M>::new(
+    let mut mechanisms: Vec<Box<dyn socsim_core::Mechanism<GameWorld<G, X>>>> = vec![
+        Box::new(crate::mechanism::MatchMechanism::<G, X, M>::new(
             matching,
             opts.decision_scope,
             implicit.is_some(),
-        )))
-        .add_mechanism(Box::new(crate::RuleDriver::new(
+        )),
+        Box::new(crate::RuleDriver::new(
             rules,
             opts.on_invalid_action,
             opts.decision_scope,
             opts.report_mixed,
             allows_multi_role_per_step,
-        )));
+        )),
+    ];
     // Population dynamics run in `Reward` after `game_decide`, so learning
     // always precedes imitation and selection.
-    let builder = match sealed::DynamicsBuild::into_mechanism(dynamics) {
-        Some(mechanism) => builder.add_mechanism(mechanism),
-        None => builder,
-    };
-    Ok(builder.add_mechanism(play))
+    if let Some(mechanism) = sealed::DynamicsBuild::into_mechanism(dynamics) {
+        mechanisms.push(mechanism);
+    }
+    mechanisms.push(play);
+    Ok(AssembledParts {
+        world,
+        mechanisms,
+        engine_seed: derive_seed(seed, &[1]),
+    })
 }

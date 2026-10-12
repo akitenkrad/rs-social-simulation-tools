@@ -4430,14 +4430,17 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "socsim-config",
  "socsim-core",
  "socsim-engine",
  "socsim-grid",
  "socsim-llm",
  "socsim-metrics",
  "socsim-net",
+ "socsim-runner",
  "tempfile",
  "thiserror 1.0.69",
+ "toml 0.8.23",
  "trybuild",
 ]
 

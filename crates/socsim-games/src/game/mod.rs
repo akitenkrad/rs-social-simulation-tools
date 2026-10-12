@@ -8,12 +8,14 @@ pub mod catalog;
 pub mod continuous;
 mod matrix;
 mod metric_ids;
+pub mod spec;
 
 pub use aggregate::{AggregateGame, AggregateReduce, AggregateSpec, AggregateSpecError};
 pub use continuous::check_continuous_action;
 pub(crate) use matrix::MAX_PROFILES;
 pub use matrix::{MatrixError, MatrixGame};
 pub use metric_ids::{metric_action_ids, MetricAction, MetricActionIds, MetricScheme};
+pub use spec::{ContinuousSpec, FiniteSpec};
 
 /// An invalid action supplied to a stage game.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]

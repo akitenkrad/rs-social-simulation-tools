@@ -1771,3 +1771,130 @@ fn number_parser_rejects_a_multi_dimensional_continuous_game() {
         );
     }
 }
+
+fn held_world(
+    initial: InitialActions<usize>,
+    n_agents: usize,
+    seed: u64,
+) -> Result<socsim_games::GameWorld<MatrixGame>, GameError> {
+    let rules: RuleBook<MatrixGame, ()> = RuleBook::new();
+    build_world(
+        game(),
+        n_agents,
+        (),
+        initial,
+        &rules,
+        &Assignment::Ordered(vec![AssignGroup {
+            kind: AssignKind::Held,
+            count: n_agents,
+        }]),
+        2,
+        1,
+        seed,
+    )
+}
+
+fn action_counts(world: &socsim_games::GameWorld<MatrixGame>) -> [usize; 2] {
+    let mut counts = [0; 2];
+    for &action in world.held() {
+        counts[action] += 1;
+    }
+    counts
+}
+
+#[test]
+fn initial_shares_fix_counts_by_the_largest_remainder_method() {
+    let world = held_world(InitialActions::Shares(vec![(0, 0.9), (1, 0.1)]), 100, 1).unwrap();
+    assert_eq!(action_counts(&world), [90, 10]);
+    // Equal remainders of one half: the action listed first takes the agent.
+    let world = held_world(InitialActions::Shares(vec![(0, 0.95), (1, 0.05)]), 10, 1).unwrap();
+    assert_eq!(action_counts(&world), [10, 0]);
+    let world = held_world(InitialActions::Shares(vec![(0, 0.5), (1, 0.5)]), 7, 1).unwrap();
+    assert_eq!(action_counts(&world), [4, 3]);
+    let world = held_world(InitialActions::Shares(vec![(1, 0.5), (0, 0.5)]), 7, 1).unwrap();
+    assert_eq!(action_counts(&world), [3, 4]);
+}
+
+#[test]
+fn initial_shares_equal_listed_actions_shuffled_with_stream_0_2() {
+    use rand::seq::SliceRandom;
+    use socsim_core::derive_seed;
+
+    for seed in [0, 1, 42] {
+        let shares =
+            held_world(InitialActions::Shares(vec![(1, 0.3), (0, 0.7)]), 20, seed).unwrap();
+        let mut listed = [vec![1; 6], vec![0; 14]].concat();
+        let mut rng = SimRng::from_seed(derive_seed(seed, &[0, 2]));
+        listed.shuffle(&mut rng);
+        let per_agent = held_world(InitialActions::PerAgent(listed), 20, seed).unwrap();
+        assert_eq!(
+            serde_json::to_value(&shares).unwrap(),
+            serde_json::to_value(&per_agent).unwrap()
+        );
+    }
+}
+
+#[test]
+fn initial_shares_do_not_depend_on_the_assignment_order() {
+    let mut rules = RuleBook::new();
+    rules.register("fixed", Arc::new(Fixed::new(0))).unwrap();
+    let groups = vec![
+        AssignGroup {
+            kind: AssignKind::Rule("fixed".to_owned()),
+            count: 4,
+        },
+        AssignGroup {
+            kind: AssignKind::Held,
+            count: 6,
+        },
+    ];
+    let build = |assign: Assignment| {
+        build_world(
+            game(),
+            10,
+            (),
+            InitialActions::Shares(vec![(0, 0.5), (1, 0.5)]),
+            &rules,
+            &assign,
+            2,
+            1,
+            9,
+        )
+        .unwrap()
+        .held()
+        .to_vec()
+    };
+    assert_eq!(
+        build(Assignment::Ordered(groups.clone())),
+        build(Assignment::Shuffled(groups))
+    );
+}
+
+#[test]
+fn initial_shares_reject_invalid_shares() {
+    let config_error = |shares: Vec<(usize, f64)>| {
+        matches!(
+            held_world(InitialActions::Shares(shares), 10, 1),
+            Err(GameError::Config(_))
+        )
+    };
+    assert!(config_error(vec![]));
+    assert!(config_error(vec![(0, 0.5), (0, 0.5)]));
+    assert!(config_error(vec![(0, 1.2), (1, -0.2)]));
+    assert!(config_error(vec![(0, f64::NAN), (1, 0.5)]));
+    assert!(config_error(vec![(0, f64::INFINITY)]));
+    assert!(config_error(vec![(0, 0.7), (1, 0.4)]));
+    assert!(config_error(vec![(0, 0.5), (1, 0.4)]));
+    assert!(matches!(
+        held_world(InitialActions::Shares(vec![(0, 0.5), (2, 0.5)]), 10, 1),
+        Err(GameError::Action(_))
+    ));
+    // Within the tolerance of the sum, and a zero share, are accepted.
+    assert!(held_world(
+        InitialActions::Shares(vec![(0, 0.9), (1, 0.1 + 5e-10)]),
+        10,
+        1
+    )
+    .is_ok());
+    assert!(held_world(InitialActions::Shares(vec![(0, 1.0), (1, 0.0)]), 10, 1).is_ok());
+}

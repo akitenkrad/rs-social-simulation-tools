@@ -38,6 +38,23 @@ use socsim_core::{Mechanism, Result, SocsimError, WorldState};
 /// Mechanism constructors receive a `&Params`.  Use the typed getters
 /// (`get_f64`, `get_u64`, …) with a fallback default; these return the
 /// default when the key is absent, making partial scenario files valid.
+///
+/// # Type mismatches fall back to the default
+///
+/// The typed getters do **not** report a value of the wrong TOML type: they
+/// return the default exactly as if the key were absent.  In particular:
+///
+/// - [`get_f64`](Self::get_f64) reads only TOML floats, so an integer such as
+///   `rate = 2` yields the default rather than `2.0`;
+/// - [`get_u64`](Self::get_u64) and [`get_i64`](Self::get_i64) read only TOML
+///   integers, so `count = 10.0` yields the default, and `get_u64` converts a
+///   negative integer with `as u64` (so `-1` becomes `u64::MAX`);
+/// - [`get_bool`](Self::get_bool) and [`get_str`](Self::get_str) likewise
+///   return the default for a value of another type.
+///
+/// Callers that must reject such values should inspect the raw value with
+/// [`get_value`](Self::get_value) instead.  Nested tables are read with
+/// [`get_table`](Self::get_table).
 #[derive(Debug, Clone, Default)]
 pub struct Params {
     table: toml::Table,
@@ -91,6 +108,28 @@ impl Params {
             .get(key)
             .and_then(|v| v.as_str())
             .unwrap_or(default)
+    }
+
+    /// Return the value for `key` as a nested parameter bag.
+    ///
+    /// Returns a copy of the table stored under `key`, or `None` when the
+    /// key is absent or its value is not a TOML table.  Unlike the typed
+    /// getters above, a value of another type is reported as `None` rather
+    /// than replaced by a default.
+    pub fn get_table(&self, key: &str) -> Option<Params> {
+        self.table
+            .get(key)
+            .and_then(|v| v.as_table())
+            .map(|t| Params::from(t.clone()))
+    }
+
+    /// Return the raw TOML value stored under `key`, or `None` if absent.
+    ///
+    /// This performs no type conversion, so callers can distinguish an
+    /// integer from a float, read arrays, and reject values of the wrong
+    /// type instead of silently falling back to a default.
+    pub fn get_value(&self, key: &str) -> Option<&toml::Value> {
+        self.table.get(key)
     }
 }
 
@@ -219,6 +258,62 @@ mod tests {
         let p = Params::from(table);
         assert!((p.get_f64("rate", 0.0) - 0.5).abs() < 1e-9);
         assert_eq!(p.get_u64("count", 0), 10);
+    }
+
+    #[test]
+    fn params_get_table_reads_nested_table() {
+        let table: toml::Table =
+            toml::from_str("[game]\nkind = \"matrix\"\n[game.inner]\nx = 1.5").unwrap();
+        let p = Params::from(table);
+        let game = p.get_table("game").expect("nested table");
+        assert_eq!(game.get_str("kind", ""), "matrix");
+        let inner = game.get_table("inner").expect("doubly nested table");
+        assert!((inner.get_f64("x", 0.0) - 1.5).abs() < 1e-12);
+        // The original bag is left unchanged by the copy.
+        assert_eq!(
+            p.get_value("game")
+                .and_then(|v| v.as_table())
+                .map(|t| t.len()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn params_get_table_none_for_missing_or_non_table() {
+        let table: toml::Table = toml::from_str("x = 1\nxs = [1, 2]\ns = \"t\"").unwrap();
+        let p = Params::from(table);
+        assert!(p.get_table("missing").is_none());
+        assert!(p.get_table("x").is_none());
+        assert!(p.get_table("xs").is_none());
+        assert!(p.get_table("s").is_none());
+    }
+
+    #[test]
+    fn params_get_value_reads_raw_values() {
+        let table: toml::Table =
+            toml::from_str("n = 2\nf = 2.0\nxs = [[1, 2], [3.5, 4]]\n[t]\na = true").unwrap();
+        let p = Params::from(table);
+        assert_eq!(p.get_value("n"), Some(&toml::Value::Integer(2)));
+        assert_eq!(p.get_value("f"), Some(&toml::Value::Float(2.0)));
+        let xs = p.get_value("xs").and_then(|v| v.as_array()).expect("array");
+        assert_eq!(xs.len(), 2);
+        let first = xs[0].as_array().expect("nested array");
+        assert_eq!(first[1].as_integer(), Some(2));
+        assert_eq!(xs[1].as_array().unwrap()[0].as_float(), Some(3.5));
+        assert!(p.get_value("t").map(|v| v.is_table()).unwrap_or(false));
+        assert!(p.get_value("missing").is_none());
+    }
+
+    #[test]
+    fn params_typed_getters_fall_back_on_type_mismatch() {
+        // Documented behaviour: a value of the wrong type yields the default.
+        let table: toml::Table = toml::from_str("i = 2\nf = 2.0\nneg = -1\ns = \"x\"").unwrap();
+        let p = Params::from(table);
+        assert_eq!(p.get_f64("i", 9.0), 9.0);
+        assert_eq!(p.get_u64("f", 7), 7);
+        assert_eq!(p.get_u64("neg", 0), u64::MAX);
+        assert!(p.get_bool("s", true));
+        assert_eq!(p.get_str("i", "d"), "d");
     }
 
     // Minimal WorldState for testing Registry without pulling in engine.

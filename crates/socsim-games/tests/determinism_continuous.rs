@@ -760,3 +760,14 @@ fn public_goods_moran_with_gaussian_mutation_is_deterministic() {
     let mut other = moran_public_goods_simulation(62);
     assert_ne!(run(&mut other), first_worlds);
 }
+
+#[test]
+fn uniform_initial_actions_match_the_public_goods_helper() {
+    let game = public_goods_game();
+    for seed in [0, 3, 7, 41] {
+        assert_eq!(
+            socsim_games::uniform_initial_actions(&game, 10, seed),
+            public_goods_initial(seed)
+        );
+    }
+}

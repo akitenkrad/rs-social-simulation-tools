@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+use crate::catalog::CatalogError;
 use crate::{ActionError, MatrixError, RuleError};
 
 /// An error detected while constructing a game simulation.
@@ -39,4 +40,12 @@ pub enum GameError {
     },
     #[error("LLM replay manifest mismatch: {0}")]
     ManifestMismatch(String),
+    /// A configuration value is missing, malformed, or inconsistent, for
+    /// example an initial-action share that is negative, or a scenario key of
+    /// the wrong type. The message starts with the offending key or setting.
+    #[error("invalid scenario: {0}")]
+    Config(String),
+    /// A built-in game rejected its parameters.
+    #[error(transparent)]
+    Catalog(#[from] CatalogError),
 }
