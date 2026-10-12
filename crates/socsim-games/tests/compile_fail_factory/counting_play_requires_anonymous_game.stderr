@@ -1,0 +1,28 @@
+error[E0277]: the trait bound `PrisonersDilemma: AnonymousGame` is not satisfied
+ --> tests/compile_fail_factory/counting_play_requires_anonymous_game.rs:6:10
+  |
+6 |         .counting_play();
+  |          ^^^^^^^^^^^^^ the trait `AnonymousGame` is not implemented for `PrisonersDilemma`
+  |
+help: the following other types implement trait `AnonymousGame`
+ --> src/game/catalog.rs
+  |
+  | impl AnonymousGame for HawkDove {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `HawkDove`
+...
+  | impl AnonymousGame for ElFarol {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ElFarol`
+...
+  | impl AnonymousGame for MinorityGame {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `MinorityGame`
+...
+  | impl AnonymousGame for PublicGoodsFinite {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `PublicGoodsFinite`
+note: required by a bound in `GameSimFactory::<G, X, M, Pairwise<O>, D>::counting_play`
+ --> src/factory/mod.rs
+  |
+  |     pub fn counting_play(self) -> GameSimFactory<G, X, M, Counting, D>
+  |            ------------- required by a bound in this associated function
+  |     where
+  |         G: AnonymousGame,
+  |            ^^^^^^^^^^^^^ required by this bound in `GameSimFactory::<G, X, M, Pairwise<O>, D>::counting_play`

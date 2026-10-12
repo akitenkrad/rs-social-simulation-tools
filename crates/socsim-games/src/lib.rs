@@ -41,6 +41,9 @@ pub mod view;
 #[cfg(feature = "core")]
 pub mod world;
 
+#[cfg(feature = "factory")]
+pub mod factory;
+
 #[cfg(feature = "engine")]
 pub use assemble::{
     assemble, assemble_with, assemble_with_aggregates, counting_play, Counting, NoDynamics,
@@ -53,6 +56,8 @@ pub use assemble::{
 };
 #[cfg(feature = "core")]
 pub use error::GameError;
+#[cfg(feature = "factory")]
+pub use factory::{GameSimFactory, NoMatching, SchedulerChoice};
 #[cfg(feature = "grid")]
 pub use matching::GridNeighborhood;
 #[cfg(feature = "net")]

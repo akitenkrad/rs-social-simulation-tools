@@ -1,0 +1,33 @@
+error[E0277]: the trait bound `Asymmetric: CommonActionSpace` is not satisfied
+  --> tests/compile_fail_factory/dynamics_require_common_action_space.rs:43:19
+   |
+43 |         .dynamics(FermiUpdate::new(1.0, Update::Synchronous).unwrap());
+   |          -------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |          |
+   |          required by a bound introduced by this call
+   |
+help: the trait `CommonActionSpace` is not implemented for `Asymmetric`
+  --> tests/compile_fail_factory/dynamics_require_common_action_space.rs:6:1
+   |
+ 6 | struct Asymmetric;
+   | ^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `CommonActionSpace`:
+             BattleOfSexes
+             BertrandDifferentiated
+             Cournot
+             ElFarol
+             HawkDove
+             MatchingPennies
+             MatrixGame
+             MinorityGame
+           and $N others
+   = note: required for `FermiUpdate` to implement `assemble::sealed::DynamicsBuild<Asymmetric, ()>`
+   = note: required for `FermiUpdate` to implement `PopulationDynamics<Asymmetric, ()>`
+note: required by a bound in `GameSimFactory::<G, X, M, P, D>::dynamics`
+  --> src/factory/mod.rs
+   |
+   |     pub fn dynamics<D2>(self, dynamics: D2) -> GameSimFactory<G, X, M, P, D2>
+   |            -------- required by a bound in this associated function
+   |     where
+   |         D2: PopulationDynamics<G, X> + Clone,
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `GameSimFactory::<G, X, M, P, D>::dynamics`

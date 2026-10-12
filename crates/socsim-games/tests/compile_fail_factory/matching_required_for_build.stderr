@@ -1,0 +1,13 @@
+error[E0599]: the method `build` exists for struct `GameSimFactory<HawkDove>`, but its trait bounds were not satisfied
+ --> tests/compile_fail_factory/matching_required_for_build.rs:9:21
+  |
+9 |     let _ = factory.build(7);
+  |                     ^^^^^ method cannot be called on `GameSimFactory<HawkDove>` due to unsatisfied trait bounds
+  |
+ ::: src/factory/mod.rs
+  |
+  | pub struct NoMatching;
+  | --------------------- doesn't satisfy `NoMatching: Matching<HawkDove, ()>`
+  |
+  = note: the following trait bounds were not satisfied:
+          `NoMatching: Matching<HawkDove, ()>`

@@ -1898,3 +1898,351 @@ fn initial_shares_reject_invalid_shares() {
     .is_ok());
     assert!(held_world(InitialActions::Shares(vec![(0, 1.0), (1, 0.0)]), 10, 1).is_ok());
 }
+
+/// The run-time checks of `GameSimFactory::build`. Every check is the one the
+/// assembly functions perform; the factory adds only the checks of its own
+/// settings (missing required values).
+#[cfg(feature = "factory")]
+mod factory_guards {
+    use socsim_games::catalog::{CatalogError, HawkDove, PrisonersDilemma};
+    use socsim_games::continuous::Cournot;
+    use socsim_games::{
+        AssignGroup, AssignKind, Assignment, DecisionScope, FermiUpdate, FictitiousPlay, Fitness,
+        Fixed, GameError, GameSimFactory, InitialActions, MatrixGame, MoranUpdate, PlayOptions,
+        ProportionalImitation, RandomPairs, RoundRobin, RuleError, TitForTat, Update,
+        WholePopulation,
+    };
+
+    fn assert_population_error<T>(result: Result<T, GameError>, reason: &str) {
+        match result {
+            Err(GameError::Population(message)) => assert!(
+                message.contains(reason),
+                "expected a population error about {reason:?}, got {message:?}"
+            ),
+            Err(other) => panic!("expected a population error, got {other:?}"),
+            Ok(_) => panic!("expected a population error, got Ok"),
+        }
+    }
+
+    fn assert_config_error<T>(result: Result<T, GameError>, setting: &str) {
+        match result {
+            Err(GameError::Config(message)) => assert!(
+                message.starts_with(setting),
+                "expected a message starting with {setting:?}, got {message:?}"
+            ),
+            Err(other) => panic!("expected a configuration error, got {other:?}"),
+            Ok(_) => panic!("expected a configuration error, got Ok"),
+        }
+    }
+
+    fn hawk_dove() -> HawkDove {
+        HawkDove::new(2.0, 4.0).unwrap()
+    }
+
+    fn one_tit_for_tat(n_agents: usize) -> Assignment {
+        Assignment::Ordered(vec![
+            AssignGroup {
+                kind: AssignKind::Held,
+                count: n_agents - 1,
+            },
+            AssignGroup {
+                kind: AssignKind::Rule("tit_for_tat".to_owned()),
+                count: 1,
+            },
+        ])
+    }
+
+    // (1) Population dynamics with an agent on an active rule.
+    #[test]
+    fn population_dynamics_reject_a_group_with_an_active_rule() {
+        let factory = GameSimFactory::new(hawk_dove())
+            .agents(10)
+            .matching(RandomPairs::new())
+            .rule("tit_for_tat", TitForTat::new(0))
+            .assign(one_tit_for_tat(10))
+            .dynamics(FermiUpdate::new(1.0, Update::Synchronous).unwrap())
+            .history_len(1)
+            .t_max(4);
+        assert_population_error(factory.build(7), "applies only to held agents");
+
+        let held = GameSimFactory::new(hawk_dove())
+            .agents(10)
+            .matching(RandomPairs::new())
+            .dynamics(FermiUpdate::new(1.0, Update::Synchronous).unwrap())
+            .history_len(1)
+            .t_max(4);
+        assert!(held.build(7).is_ok());
+    }
+
+    #[cfg(feature = "grid")]
+    #[test]
+    fn imitate_best_on_a_grid_rejects_a_tit_for_tat_group() {
+        use socsim_games::{
+            GridBoundary, GridNeighborhood, GridNeighbors, GridSpec, ImitateBest, Topology,
+        };
+        let factory = GameSimFactory::new(PrisonersDilemma::weak(1.85).unwrap())
+            .agents(9)
+            .topology(
+                Topology::grid(GridSpec {
+                    rows: 3,
+                    cols: 3,
+                    boundary: GridBoundary::Toroidal,
+                    neighborhood: GridNeighbors::Moore,
+                })
+                .unwrap(),
+            )
+            .matching(GridNeighborhood::new().include_self(true))
+            .rule("tit_for_tat", TitForTat::new(0))
+            .assign(one_tit_for_tat(9))
+            .dynamics(ImitateBest::new(Update::Synchronous))
+            .history_len(1)
+            .t_max(4);
+        assert_population_error(factory.build(1), "applies only to held agents");
+    }
+
+    // (2) Copying dynamics on a game whose roles have different action counts.
+    fn rectangular_matrix() -> MatrixGame {
+        MatrixGame::bimatrix(
+            &[vec![1.0, 0.0, 2.0], vec![0.0, 1.0, 0.0]],
+            &[vec![1.0, 0.0, 2.0], vec![0.0, 1.0, 0.0]],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn copying_dynamics_reject_roles_with_different_action_counts() {
+        let factory = GameSimFactory::new(rectangular_matrix())
+            .agents(4)
+            .matching(RandomPairs::new())
+            .dynamics(FermiUpdate::new(1.0, Update::Synchronous).unwrap())
+            .history_len(1)
+            .t_max(1);
+        assert_population_error(factory.build(7), "every role must share one action space");
+    }
+
+    #[cfg(feature = "grid")]
+    #[test]
+    fn imitate_best_on_a_grid_rejects_roles_with_different_action_counts() {
+        use socsim_games::{
+            GridBoundary, GridNeighborhood, GridNeighbors, GridSpec, ImitateBest, Topology,
+        };
+        let factory = GameSimFactory::new(rectangular_matrix())
+            .agents(9)
+            .topology(
+                Topology::grid(GridSpec {
+                    rows: 3,
+                    cols: 3,
+                    boundary: GridBoundary::Toroidal,
+                    neighborhood: GridNeighbors::Moore,
+                })
+                .unwrap(),
+            )
+            .matching(GridNeighborhood::new())
+            .dynamics(ImitateBest::new(Update::Synchronous))
+            .history_len(1)
+            .t_max(1);
+        assert_population_error(factory.build(1), "every role must share one action space");
+    }
+
+    // (3) A per-step decision with an agent that holds several roles.
+    #[test]
+    fn per_step_rejects_round_robin_with_three_agents() {
+        let factory = || {
+            GameSimFactory::new(hawk_dove())
+                .agents(3)
+                .matching(RoundRobin::new())
+                .rule("fixed", Fixed::new(0))
+                .history_len(1)
+                .t_max(1)
+        };
+        assert!(matches!(
+            factory().build(7),
+            Err(GameError::InvalidMatching(_))
+        ));
+        assert!(factory()
+            .play_options(PlayOptions::new().decision_scope(DecisionScope::PerEncounter))
+            .build(7)
+            .is_ok());
+    }
+
+    // (4) Fictitious play needs a two-role game.
+    #[test]
+    fn fictitious_play_rejects_a_three_role_game() {
+        let game = MatrixGame::new(vec![2, 2, 2], vec![vec![1.0; 8]; 3]).unwrap();
+        let factory = GameSimFactory::new(game)
+            .agents(3)
+            .matching(WholePopulation::new())
+            .rule("fictitious_play", FictitiousPlay::new())
+            .history_len(1)
+            .t_max(1);
+        assert!(matches!(
+            factory.build(7),
+            Err(GameError::Rule(RuleError::Unsupported(_)))
+        ));
+    }
+
+    // (5) Parameters that the payoff range does not allow.
+    #[test]
+    fn proportional_imitation_rejects_beta_above_the_inverse_payoff_width() {
+        // Hawk-dove with V = 2 and C = 4 has payoffs in [-1, 2]: width 3, and
+        // random pairs give every agent of an even population one encounter.
+        let factory = |beta: f64| {
+            GameSimFactory::new(hawk_dove())
+                .agents(10)
+                .matching(RandomPairs::new())
+                .dynamics(ProportionalImitation::new(beta, Update::Synchronous).unwrap())
+                .history_len(1)
+                .t_max(1)
+        };
+        assert!(factory(1.0 / 3.0).build(7).is_ok());
+        assert!(matches!(
+            factory(2.0 / 3.0).build(7),
+            Err(GameError::Population(_))
+        ));
+    }
+
+    #[test]
+    fn linear_moran_fitness_rejects_a_non_positive_fitness() {
+        // The lowest payoff is the sucker's payoff -10: 1 - w + w * (-10) =
+        // -4.5 with w = 0.5.
+        let game = PrisonersDilemma::new(5.0, 3.0, 1.0, -10.0).unwrap();
+        let factory = |w: f64| {
+            GameSimFactory::new(game.clone())
+                .agents(10)
+                .matching(RandomPairs::new())
+                .dynamics(
+                    MoranUpdate::new(Fitness::Linear { w }, 0.0, Update::Synchronous).unwrap(),
+                )
+                .history_len(1)
+                .t_max(1)
+        };
+        assert!(matches!(
+            factory(0.5).build(7),
+            Err(GameError::Population(_))
+        ));
+        assert!(factory(0.05).build(7).is_ok());
+    }
+
+    // (7) Duplicate and missing rule kinds.
+    #[test]
+    fn a_rule_kind_registered_twice_is_rejected() {
+        let factory = GameSimFactory::new(hawk_dove())
+            .agents(2)
+            .matching(RandomPairs::new())
+            .rule("fixed", Fixed::new(0))
+            .rule("fixed", Fixed::new(1))
+            .assign(Assignment::Ordered(vec![AssignGroup {
+                kind: AssignKind::Rule("fixed".to_owned()),
+                count: 2,
+            }]))
+            .history_len(1)
+            .t_max(1);
+        assert!(matches!(
+            factory.build(7),
+            Err(GameError::Rule(RuleError::DuplicateKind(kind))) if kind == "fixed"
+        ));
+    }
+
+    #[test]
+    fn a_group_of_an_unregistered_rule_kind_is_rejected() {
+        let factory = GameSimFactory::new(hawk_dove())
+            .agents(2)
+            .matching(RandomPairs::new())
+            .rule("fixed", Fixed::new(0))
+            .assign(Assignment::Ordered(vec![
+                AssignGroup {
+                    kind: AssignKind::Rule("fixed".to_owned()),
+                    count: 1,
+                },
+                AssignGroup {
+                    kind: AssignKind::Rule("ghost".to_owned()),
+                    count: 1,
+                },
+            ]))
+            .history_len(1)
+            .t_max(1);
+        assert!(matches!(
+            factory.build(7),
+            Err(GameError::Rule(RuleError::UnknownKind(kind))) if kind == "ghost"
+        ));
+    }
+
+    // (8) A built-in game checks its parameters when it is constructed.
+    #[test]
+    fn a_built_in_game_constructor_error_converts_into_a_catalog_error() {
+        fn build() -> Result<(), GameError> {
+            let factory = GameSimFactory::new(PrisonersDilemma::new(1.0, 2.0, 3.0, 4.0)?)
+                .agents(2)
+                .matching(RandomPairs::new())
+                .history_len(1)
+                .t_max(1);
+            factory.build(7).map(|_| ())
+        }
+        assert!(matches!(
+            build(),
+            Err(GameError::Catalog(CatalogError::Condition(_)))
+        ));
+    }
+
+    // The factory's own settings.
+    #[test]
+    fn missing_required_settings_are_configuration_errors() {
+        let base = || GameSimFactory::new(hawk_dove()).matching(RandomPairs::new());
+        assert_config_error(base().history_len(1).t_max(1).build(7), "agents");
+        assert_config_error(base().agents(2).t_max(1).build(7), "history_len");
+        assert_config_error(base().agents(2).history_len(1).build(7), "t_max");
+        assert_config_error(
+            base()
+                .agents(2)
+                .history_len(1)
+                .t_max(1)
+                .rule("hawk", Fixed::new(0))
+                .rule("dove", Fixed::new(1))
+                .build(7),
+            "assign",
+        );
+        assert!(matches!(
+            base().agents(2).history_len(0).t_max(1).build(7),
+            Err(GameError::InvalidHistoryLength)
+        ));
+    }
+
+    #[test]
+    fn a_continuous_game_requires_initial_held_actions() {
+        let factory = GameSimFactory::new(Cournot::new(2, 100.0, 1.0, 10.0, 100.0).unwrap())
+            .agents(2)
+            .matching(WholePopulation::new())
+            .history_len(1)
+            .t_max(1);
+        assert_config_error(factory.build(7), "initial_held");
+        assert!(factory
+            .initial_held(InitialActions::Same(vec![10.0]))
+            .build(7)
+            .is_ok());
+    }
+
+    #[test]
+    fn invalid_initial_shares_are_configuration_errors() {
+        let factory = |shares: Vec<(usize, f64)>| {
+            GameSimFactory::new(hawk_dove())
+                .agents(10)
+                .matching(RandomPairs::new())
+                .initial_held(InitialActions::Shares(shares))
+                .history_len(1)
+                .t_max(1)
+                .build(7)
+        };
+        assert!(matches!(
+            factory(vec![(0, 0.5), (0, 0.5)]),
+            Err(GameError::Config(_))
+        ));
+        assert!(matches!(
+            factory(vec![(0, 0.7), (1, 0.4)]),
+            Err(GameError::Config(_))
+        ));
+        assert!(matches!(
+            factory(vec![(0, 0.5), (2, 0.5)]),
+            Err(GameError::Action(_))
+        ));
+    }
+}

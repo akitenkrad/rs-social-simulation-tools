@@ -1,0 +1,20 @@
+error[E0277]: the trait bound `PrisonersDilemma: AggregateGame` is not satisfied
+ --> tests/compile_fail_factory/aggregates_require_aggregate_game.rs:6:10
+  |
+6 |         .aggregates(4);
+  |          ^^^^^^^^^^ the trait `AggregateGame` is not implemented for `PrisonersDilemma`
+  |
+  = help: the following other types implement trait `AggregateGame`:
+            BertrandDifferentiated
+            Cournot
+            ElFarol
+            MinorityGame
+            PublicGoodsContinuous
+note: required by a bound in `GameSimFactory::<G, X, M, Pairwise<O>, D>::aggregates`
+ --> src/factory/mod.rs
+  |
+  |     pub fn aggregates(
+  |            ---------- required by a bound in this associated function
+...
+  |         G: AggregateGame,
+  |            ^^^^^^^^^^^^^ required by this bound in `GameSimFactory::<G, X, M, Pairwise<O>, D>::aggregates`

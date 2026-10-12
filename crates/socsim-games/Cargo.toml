@@ -225,6 +225,11 @@ name = "snapshot_resume_continuous"
 path = "tests/snapshot_resume_continuous.rs"
 required-features = ["core", "engine"]
 
+[[test]]
+name = "factory_typestate"
+path = "tests/factory_typestate.rs"
+required-features = ["factory", "grid"]
+
 [[example]]
 name = "ipd_pair"
 path = "examples/ipd_pair.rs"

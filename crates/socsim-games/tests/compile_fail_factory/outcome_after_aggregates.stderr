@@ -1,0 +1,31 @@
+error[E0599]: no method named `outcome` found for struct `GameSimFactory<MinorityGame, (), socsim_games::WholePopulation, WithAggregates<Pairwise<NormalFormOutcome>>>` in the current scope
+  --> tests/compile_fail_factory/outcome_after_aggregates.rs:10:10
+   |
+ 7 |       let _ = GameSimFactory::new(MinorityGame::new(5).unwrap())
+   |  _____________-
+ 8 | |         .matching(WholePopulation::new())
+ 9 | |         .aggregates(4)
+10 | |         .outcome(NormalFormOutcome);
+   | |         -^^^^^^^ method not found in `GameSimFactory<MinorityGame, (), socsim_games::WholePopulation, WithAggregates<Pairwise<NormalFormOutcome>>>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `GameSimFactory<G, X, M, Counting, D>`
+           - `GameSimFactory<G, X, M, Pairwise<O>, D>`
+
+error[E0599]: no method named `counting_play` found for struct `GameSimFactory<MinorityGame, (), socsim_games::WholePopulation, WithAggregates<Pairwise<NormalFormOutcome>>>` in the current scope
+  --> tests/compile_fail_factory/outcome_after_aggregates.rs:14:10
+   |
+11 |       let _ = GameSimFactory::new(MinorityGame::new(5).unwrap())
+   |  _____________-
+12 | |         .matching(WholePopulation::new())
+13 | |         .aggregates(4)
+14 | |         .counting_play();
+   | |         -^^^^^^^^^^^^^ method not found in `GameSimFactory<MinorityGame, (), socsim_games::WholePopulation, WithAggregates<Pairwise<NormalFormOutcome>>>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `GameSimFactory<G, X, M, Counting, D>`
+           - `GameSimFactory<G, X, M, Pairwise<O>, D>`
