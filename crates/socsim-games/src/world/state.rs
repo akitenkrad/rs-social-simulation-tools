@@ -33,6 +33,17 @@ pub struct TftState {
     pub last_opponent: Option<usize>,
 }
 
+/// State of the continuous-game rules: the action this agent last played.
+///
+/// `last` is written after each step from the agent's recorded action, so an
+/// action replaced by a fallback is the one remembered. It is `None` until the
+/// agent has played once.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ContinuousState {
+    /// The action this agent played in its last played step, or `None`.
+    pub last: Option<Vec<f64>>,
+}
+
 /// Fictitious-play beliefs shared across decisions or separated by opponent.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BeliefState {
@@ -148,6 +159,8 @@ pub enum BuiltinPolicyState {
     Automaton(AutomatonPolicyState),
     #[cfg(feature = "llm")]
     Llm(crate::llm::LlmConversation),
+    /// State of `DampedBestResponse` and `GradientAscent`.
+    Continuous(ContinuousState),
 }
 
 pub trait Slot<T> {
@@ -164,7 +177,8 @@ impl Slot<Stateless> for BuiltinPolicyState {
             | Self::Belief(_)
             | Self::Propensity(_)
             | Self::Estimate(_)
-            | Self::Automaton(_) => None,
+            | Self::Automaton(_)
+            | Self::Continuous(_) => None,
             #[cfg(feature = "llm")]
             Self::Llm(_) => None,
         }
@@ -177,7 +191,8 @@ impl Slot<Stateless> for BuiltinPolicyState {
             | Self::Belief(_)
             | Self::Propensity(_)
             | Self::Estimate(_)
-            | Self::Automaton(_) => None,
+            | Self::Automaton(_)
+            | Self::Continuous(_) => None,
             #[cfg(feature = "llm")]
             Self::Llm(_) => None,
         }
@@ -196,7 +211,8 @@ impl Slot<TftState> for BuiltinPolicyState {
             | Self::Belief(_)
             | Self::Propensity(_)
             | Self::Estimate(_)
-            | Self::Automaton(_) => None,
+            | Self::Automaton(_)
+            | Self::Continuous(_) => None,
             #[cfg(feature = "llm")]
             Self::Llm(_) => None,
         }
@@ -209,7 +225,8 @@ impl Slot<TftState> for BuiltinPolicyState {
             | Self::Belief(_)
             | Self::Propensity(_)
             | Self::Estimate(_)
-            | Self::Automaton(_) => None,
+            | Self::Automaton(_)
+            | Self::Continuous(_) => None,
             #[cfg(feature = "llm")]
             Self::Llm(_) => None,
         }
@@ -315,7 +332,8 @@ impl Slot<crate::llm::LlmConversation> for BuiltinPolicyState {
             | Self::Belief(_)
             | Self::Propensity(_)
             | Self::Estimate(_)
-            | Self::Automaton(_) => None,
+            | Self::Automaton(_)
+            | Self::Continuous(_) => None,
         }
     }
 
@@ -327,11 +345,33 @@ impl Slot<crate::llm::LlmConversation> for BuiltinPolicyState {
             | Self::Belief(_)
             | Self::Propensity(_)
             | Self::Estimate(_)
-            | Self::Automaton(_) => None,
+            | Self::Automaton(_)
+            | Self::Continuous(_) => None,
         }
     }
 
     fn from_slot(value: crate::llm::LlmConversation) -> Self {
         Self::Llm(value)
+    }
+}
+
+#[diagnostic::do_not_recommend]
+impl Slot<ContinuousState> for BuiltinPolicyState {
+    fn slot(&self) -> Option<&ContinuousState> {
+        match self {
+            Self::Continuous(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    fn slot_mut(&mut self) -> Option<&mut ContinuousState> {
+        match self {
+            Self::Continuous(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    fn from_slot(value: ContinuousState) -> Self {
+        Self::Continuous(value)
     }
 }

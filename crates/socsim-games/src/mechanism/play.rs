@@ -225,8 +225,10 @@ where
     ) -> socsim_core::Result<()> {
         let world = &mut *step.world;
         if self.implicit.is_some() {
-            world.played_counts =
-                Some(crate::InternalPlayedActionCounts::new(world.game.n_roles()));
+            world.played_counts = Some(crate::InternalPlayedActionCounts::new(
+                world.game.n_roles(),
+                self.implicit,
+            ));
         }
         let context = OutcomeContext {
             t: world.clock.t(),

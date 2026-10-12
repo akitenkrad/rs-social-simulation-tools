@@ -8,7 +8,8 @@ use socsim_llm::{
 };
 
 use super::{Violation, ViolationKind};
-use crate::{FiniteGame, RuleError, StageGame};
+use crate::game::continuous::check_bounds;
+use crate::{ContinuousGame, FiniteGame, RuleError, StageGame};
 
 pub trait ActionParser<G: StageGame>: Send + Sync {
     fn parse(&self, raw: &str, game: &G, role: Option<usize>) -> ParseOutcome<G::Action>;
@@ -226,6 +227,12 @@ impl NumberParser {
     }
 
     pub fn parse_number(&self, raw: &str) -> ParseOutcome<f64> {
+        self.parse_number_within(raw, self.bounds)
+    }
+
+    /// Parses the numeric field and checks it against `bounds` instead of the
+    /// parser's own bounds.
+    fn parse_number_within(&self, raw: &str, bounds: Option<(f64, f64)>) -> ParseOutcome<f64> {
         let payload = match parse_json_object(raw) {
             Ok(payload) => payload,
             Err(error) => return format_violation(error.to_string()),
@@ -238,11 +245,16 @@ impl NumberParser {
             text
         } else if value.is_number() {
             // serde_json owns the numeric spelling, so keep it alive through parsing.
-            return self.parse_lexical(&value.to_string(), payload.fenced, value_was_string);
+            return self.parse_lexical(
+                &value.to_string(),
+                payload.fenced,
+                value_was_string,
+                bounds,
+            );
         } else {
             return format_violation(format!("field {:?} must be a number or string", self.field));
         };
-        self.parse_lexical(lexical, payload.fenced, value_was_string)
+        self.parse_lexical(lexical, payload.fenced, value_was_string, bounds)
     }
 
     fn parse_lexical(
@@ -250,6 +262,7 @@ impl NumberParser {
         lexical: &str,
         fenced: bool,
         value_was_string: bool,
+        bounds: Option<(f64, f64)>,
     ) -> ParseOutcome<f64> {
         let trimmed = lexical.trim();
         let Ok(mut action) = trimmed.parse::<f64>() else {
@@ -260,7 +273,7 @@ impl NumberParser {
         }
 
         let mut clamped = false;
-        if let Some((lo, hi)) = self.bounds {
+        if let Some((lo, hi)) = bounds {
             if action < lo || action > hi {
                 match self.out_of_range {
                     OutOfRange::Clamp => {
@@ -289,6 +302,76 @@ impl NumberParser {
                 lenient_match: false,
             },
         }
+    }
+}
+
+impl NumberParser {
+    /// The bounds a continuous game's `role` is parsed against: the parser's
+    /// own bounds when set, otherwise the game's bounds of the only component.
+    fn effective_bounds<G: ContinuousGame>(&self, game: &G, role: usize) -> Option<(f64, f64)> {
+        self.bounds.or_else(|| game.bounds(role).first().copied())
+    }
+}
+
+/// Parses one number into the one-dimensional action of a continuous game.
+///
+/// The game's bounds are authoritative: [`ActionParser::validate`] rejects
+/// games with an action of more than one component, and parser bounds that
+/// do not lie inside the game's bounds. A value is checked against the
+/// parser's own bounds when set, otherwise against the game's bounds.
+impl<G: ContinuousGame> ActionParser<G> for NumberParser {
+    fn parse(&self, raw: &str, game: &G, role: Option<usize>) -> ParseOutcome<Vec<f64>> {
+        let role = role.unwrap_or(0);
+        if role >= game.n_roles() {
+            return ParseOutcome::Violation(Violation {
+                kind: ViolationKind::Range,
+                message: format!("role {role} is out of range"),
+            });
+        }
+        let dims = game.bounds(role).len();
+        if dims != 1 {
+            return ParseOutcome::Violation(Violation {
+                kind: ViolationKind::InvalidAction,
+                message: format!("a single number cannot encode an action with {dims} components"),
+            });
+        }
+        match self.parse_number_within(raw, self.effective_bounds(game, role)) {
+            ParseOutcome::Ok { action, flags } => ParseOutcome::Ok {
+                action: vec![action],
+                flags,
+            },
+            ParseOutcome::Violation(violation) => ParseOutcome::Violation(violation),
+        }
+    }
+
+    fn sample_uniform(&self, game: &G, role: Option<usize>, rng: &mut SimRng) -> Vec<f64> {
+        let role = role.unwrap_or(0);
+        let (lo, hi) = self
+            .effective_bounds(game, role)
+            .expect("validate requires a one-dimensional action");
+        vec![rng.gen_range(lo..=hi)]
+    }
+
+    fn validate(&self, game: &G) -> Result<(), RuleError> {
+        check_bounds(game).map_err(|error| RuleError::Unsupported(error.to_string()))?;
+        for role in 0..game.n_roles() {
+            let bounds = game.bounds(role);
+            if bounds.len() != 1 {
+                return Err(RuleError::Unsupported(format!(
+                    "NumberParser supports only one-dimensional actions; role {role} has {} components",
+                    bounds.len()
+                )));
+            }
+            if let Some((own_lo, own_hi)) = self.bounds {
+                let (lo, hi) = bounds[0];
+                if !(own_lo <= own_hi && own_lo >= lo && own_hi <= hi) {
+                    return Err(RuleError::Unsupported(format!(
+                        "NumberParser bounds [{own_lo}, {own_hi}] must lie inside the bounds [{lo}, {hi}] of role {role}"
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 }
 

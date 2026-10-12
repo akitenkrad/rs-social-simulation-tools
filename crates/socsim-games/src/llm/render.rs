@@ -1,16 +1,14 @@
 use std::fmt::Write;
 
 use super::{ActionCounts, OwnHistory, Violation};
-use crate::{FiniteGame, StageGame};
+use crate::{ContinuousGame, FiniteGame, StageGame};
+
+pub use crate::game::DescribeGame;
 
 pub trait GameRenderer<G: StageGame, Obs>: Send + Sync {
     fn rules(&self, game: &G, role: Option<usize>) -> String;
     fn turn(&self, obs: &Obs, game: &G) -> String;
     fn feedback(&self, violation: &Violation) -> String;
-}
-
-pub trait DescribeGame {
-    fn describe(&self, role: Option<usize>) -> String;
 }
 
 #[derive(Clone, Debug)]
@@ -128,6 +126,126 @@ impl<G: FiniteGame> GameRenderer<G, ActionCounts> for CountsRenderer {
             "Previous response violated {:?}: {}. Return valid JSON using an available action label.",
             violation.kind, violation.message
         )
+    }
+}
+
+/// Renders a continuous game from its [`DescribeGame`] text and its bounds,
+/// and the agent's own history of real-valued actions.
+///
+/// `field` is the JSON field the model is asked to reply with; it should be
+/// the field the paired parser reads.
+#[derive(Clone, Debug)]
+pub struct DescribedRenderer {
+    heading: String,
+    field: String,
+}
+
+impl DescribedRenderer {
+    /// Constructs a renderer that asks for the reply field `field`, under the
+    /// heading `"Game rules"`.
+    ///
+    /// For an action of one component the system prompt asks for a single
+    /// number in the role's bounds. The wording for actions of several
+    /// components is provisional: no built-in parser reads such replies yet.
+    pub fn new(field: &str) -> Self {
+        Self {
+            heading: "Game rules".to_owned(),
+            field: field.to_owned(),
+        }
+    }
+
+    /// Replaces the heading of the system prompt.
+    pub fn with_heading(mut self, heading: &str) -> Self {
+        self.heading = heading.to_owned();
+        self
+    }
+}
+
+impl<G: ContinuousGame + DescribeGame> GameRenderer<G, OwnHistory<Vec<f64>>> for DescribedRenderer {
+    fn rules(&self, game: &G, role: Option<usize>) -> String {
+        let mut rendered = format!("# {}\n\n", self.heading);
+        if let Some(role) = role {
+            let _ = writeln!(rendered, "You are role {role}.\n");
+        }
+        let _ = writeln!(rendered, "{}\n", game.describe(role));
+        let bounds = game.bounds(role.unwrap_or(0));
+        let value = if let [(lo, hi)] = bounds {
+            let _ = writeln!(
+                rendered,
+                "Your action is a single number between {} and {} (inclusive).",
+                format_number(*lo),
+                format_number(*hi)
+            );
+            "<number>".to_owned()
+        } else {
+            let _ = writeln!(
+                rendered,
+                "Your action is a list of {} numbers:",
+                bounds.len()
+            );
+            for (dim, (lo, hi)) in bounds.iter().enumerate() {
+                let _ = writeln!(
+                    rendered,
+                    "- component {dim}: between {} and {} (inclusive)",
+                    format_number(*lo),
+                    format_number(*hi)
+                );
+            }
+            format!("[{}]", vec!["<number>"; bounds.len()].join(", "))
+        };
+        let _ = write!(
+            rendered,
+            "\nReply with JSON: {{\"{}\": {value}, \"reason\": \"<reason>\"}}.",
+            self.field
+        );
+        rendered
+    }
+
+    fn turn(&self, obs: &OwnHistory<Vec<f64>>, _game: &G) -> String {
+        let mut rendered = format!("t={}\n", obs.t);
+        rendered.push_str("my history (oldest first):\n");
+        if obs.mine.is_empty() {
+            rendered.push_str("- none\n");
+        }
+        for record in &obs.mine {
+            let action = render_vector(record.action.as_deref());
+            let _ = writeln!(
+                rendered,
+                "- action: {action}; payoff: {}; encounters: {}",
+                format_number(record.payoff),
+                record.n_played
+            );
+        }
+        rendered.push_str("opponents' last actions: ");
+        if obs.opponents_last.is_empty() {
+            rendered.push_str("none");
+        } else {
+            let values: Vec<_> = obs
+                .opponents_last
+                .iter()
+                .map(|action| render_vector(action.as_deref()))
+                .collect();
+            rendered.push_str(&values.join(", "));
+        }
+        rendered
+    }
+
+    fn feedback(&self, violation: &Violation) -> String {
+        format!(
+            "Previous response violated {:?}: {}. Return valid JSON with a number in the {:?} field within the allowed range.",
+            violation.kind, violation.message, self.field
+        )
+    }
+}
+
+fn render_vector(action: Option<&[f64]>) -> String {
+    match action {
+        Some([value]) => format_number(*value),
+        Some(values) => {
+            let values: Vec<_> = values.iter().copied().map(format_number).collect();
+            format!("[{}]", values.join(", "))
+        }
+        None => "none".to_owned(),
     }
 }
 

@@ -4,20 +4,24 @@ pub mod mixed;
 pub mod solve;
 
 pub use game::catalog;
+pub use game::continuous;
 pub use mixed::MixedStrategy;
 
 #[cfg(feature = "llm")]
 pub mod llm;
 
 pub use game::{
-    metric_action_ids, ActionError, AggregateGame, AggregateReduce, AggregateSpec,
-    AggregateSpecError, AnonymousGame, CommonActionSpace, FiniteGame, MatrixError, MatrixGame,
-    MetricAction, MetricActionIds, MetricScheme, NormalFormGame, StageGame,
+    check_continuous_action, metric_action_ids, ActionError, AggregateGame, AggregateReduce,
+    AggregateSpec, AggregateSpecError, AnonymousGame, CommonActionSpace, ContinuousGame,
+    DescribeGame, FiniteGame, MatrixError, MatrixGame, MetricAction, MetricActionIds, MetricScheme,
+    NormalFormGame, NumericBr, StageGame,
 };
 pub use learn::{automaton::AutomatonKind, logit::EstimateMode, TieBreak};
 pub use solve::{
-    ess_verdict, pure_nash_counts, replicator_fixed_points, replicator_integrate, AffineComponent,
-    CountProfile, EssVerdict, FixedPoint, FixedPointSet, ReplicatorOptions, ReplicatorRun,
+    best_response_iteration, best_response_step, ess_verdict, golden_section_best_response,
+    pure_nash_counts, replicator_fixed_points, replicator_integrate, AffineComponent,
+    BestResponseOracle, BrIteration, BrIterationOptions, BrResult, BrStatus, CountProfile,
+    EssVerdict, FixedPoint, FixedPointSet, GoldenSectionOptions, ReplicatorOptions, ReplicatorRun,
 };
 
 #[cfg(feature = "core")]
@@ -60,15 +64,17 @@ pub use matching::{
 };
 #[cfg(feature = "core")]
 pub use mechanism::{
-    EquilibriumTarget, FermiUpdate, Fitness, GameMetrics, ImitateBest, ImitationTie,
-    MetricsOptions, MixedSource, MoranUpdate, ProportionalImitation, RuleDriver, Update,
+    ContinuousEquilibrium, ContinuousMetrics, ContinuousMetricsOptions, EquilibriumTarget,
+    FermiUpdate, Fitness, GameMetrics, ImitateBest, ImitationTie, MetricsOptions, MixedSource,
+    MoranUpdate, ProportionalImitation, RuleDriver, Update,
 };
 #[cfg(feature = "core")]
 pub use outcome::{NormalFormOutcome, OutcomeContext, OutcomeRule};
 #[cfg(feature = "core")]
 pub use rule::{
-    Automaton, DecisionRule, FictitiousPlay, Fixed, KindCatalog, LogitChoice, Mixed,
-    MyopicBestResponse, RothErev, RuleBook, RuleError, RuleInitContext, TitForTat, UniformRandom,
+    Automaton, DampedBestResponse, DecisionRule, FictitiousPlay, Fixed, GradientAscent,
+    KindCatalog, LogitChoice, Mixed, MyopicBestResponse, RothErev, RuleBook, RuleError,
+    RuleInitContext, TitForTat, UniformRandom,
 };
 #[cfg(feature = "core")]
 pub use view::{
@@ -79,10 +85,10 @@ pub use view::{
 pub use world::NetworkTopology;
 #[cfg(feature = "core")]
 pub use world::{
-    ArenaWriter, AutomatonPolicyState, BeliefState, BuiltinPolicyState, Credit, EncounterId,
-    EncounterRef, EstimateState, ExperimentState, GameWorld, HistoryView, PairView, PeerHistory,
-    PlayArena, PolicyTable, PropensityState, RuleKindId, Slot, Stateless, StepRecord, TftState,
-    Topology,
+    ArenaWriter, AutomatonPolicyState, BeliefState, BuiltinPolicyState, ContinuousState, Credit,
+    EncounterId, EncounterRef, EstimateState, ExperimentState, GameWorld, HistoryView, PairView,
+    PeerHistory, PlayArena, PolicyTable, PropensityState, RuleKindId, Slot, Stateless, StepRecord,
+    TftState, Topology,
 };
 #[cfg(feature = "grid")]
 pub use world::{GridBoundary, GridNeighbors, GridSpec, GridTopology};

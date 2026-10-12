@@ -981,3 +981,793 @@ fn moran_update_rejects_a_world_with_topology() {
         211,
     )));
 }
+
+// Continuous built-in games.
+
+use socsim_games::catalog::CatalogError;
+use socsim_games::continuous::{BertrandDifferentiated, Cournot, PublicGoodsContinuous};
+
+fn is_condition<T: std::fmt::Debug>(result: Result<T, CatalogError>) -> bool {
+    matches!(result, Err(CatalogError::Condition(_)))
+}
+
+fn is_non_finite<T: std::fmt::Debug>(result: Result<T, CatalogError>) -> bool {
+    matches!(result, Err(CatalogError::NonFinite))
+}
+
+#[test]
+fn cournot_constructor_rejects_invalid_parameters() {
+    assert!(Cournot::new(2, 100.0, 1.0, 10.0, 100.0).is_ok());
+    assert!(Cournot::new(2, 100.0, 1.0, 0.0, 100.0).is_ok());
+    assert!(is_condition(Cournot::new(2, 100.0, 0.0, 10.0, 100.0)));
+    assert!(is_condition(Cournot::new(2, 100.0, -1.0, 10.0, 100.0)));
+    assert!(is_condition(Cournot::new(2, 10.0, 1.0, 10.0, 100.0)));
+    assert!(is_condition(Cournot::new(2, 5.0, 1.0, 10.0, 100.0)));
+    assert!(is_condition(Cournot::new(2, 100.0, 1.0, -1.0, 100.0)));
+    assert!(is_condition(Cournot::new(2, 100.0, 1.0, 10.0, 0.0)));
+    assert!(is_condition(Cournot::new(2, 100.0, 1.0, 10.0, -1.0)));
+    assert!(is_condition(Cournot::new(1, 100.0, 1.0, 10.0, 100.0)));
+    assert!(is_condition(Cournot::new(0, 100.0, 1.0, 10.0, 100.0)));
+    assert!(is_non_finite(Cournot::new(2, f64::NAN, 1.0, 10.0, 100.0)));
+    assert!(is_non_finite(Cournot::new(
+        2,
+        100.0,
+        f64::INFINITY,
+        10.0,
+        100.0
+    )));
+    assert!(is_non_finite(Cournot::new(2, 100.0, 1.0, f64::NAN, 100.0)));
+    assert!(is_non_finite(Cournot::new(
+        2,
+        100.0,
+        1.0,
+        10.0,
+        f64::INFINITY
+    )));
+}
+
+#[test]
+fn bertrand_constructor_rejects_invalid_parameters() {
+    assert!(BertrandDifferentiated::new(3, 10.0, 2.0, 1.0, 1.0, 100.0).is_ok());
+    assert!(BertrandDifferentiated::new(3, 10.0, 2.0, 0.0, 0.0, 100.0).is_ok());
+    assert!(is_condition(BertrandDifferentiated::new(
+        3, 10.0, 0.0, 1.0, 1.0, 100.0
+    )));
+    assert!(is_condition(BertrandDifferentiated::new(
+        3, 10.0, -2.0, 1.0, 1.0, 100.0
+    )));
+    assert!(is_condition(BertrandDifferentiated::new(
+        3, 10.0, 2.0, -0.5, 1.0, 100.0
+    )));
+    // 2b = (n - 1) d is rejected; 2b > (n - 1) d is required.
+    assert!(is_condition(BertrandDifferentiated::new(
+        3, 10.0, 2.0, 2.0, 1.0, 100.0
+    )));
+    assert!(is_condition(BertrandDifferentiated::new(
+        5, 10.0, 2.0, 1.5, 1.0, 100.0
+    )));
+    assert!(is_condition(BertrandDifferentiated::new(
+        3, 10.0, 2.0, 1.0, -1.0, 100.0
+    )));
+    assert!(is_condition(BertrandDifferentiated::new(
+        3, 10.0, 2.0, 1.0, 1.0, 0.0
+    )));
+    assert!(is_condition(BertrandDifferentiated::new(
+        1, 10.0, 2.0, 1.0, 1.0, 100.0
+    )));
+    assert!(is_non_finite(BertrandDifferentiated::new(
+        3,
+        f64::NAN,
+        2.0,
+        1.0,
+        1.0,
+        100.0
+    )));
+    assert!(is_non_finite(BertrandDifferentiated::new(
+        3,
+        10.0,
+        2.0,
+        f64::INFINITY,
+        1.0,
+        100.0
+    )));
+    assert!(is_non_finite(BertrandDifferentiated::new(
+        3,
+        10.0,
+        2.0,
+        1.0,
+        1.0,
+        f64::NEG_INFINITY
+    )));
+}
+
+#[test]
+fn public_goods_constructors_reject_invalid_parameters() {
+    assert!(PublicGoodsContinuous::new(4, 10.0, 0.0).is_ok());
+    assert!(PublicGoodsContinuous::new(4, 10.0, 6.0).is_ok());
+    assert!(is_condition(PublicGoodsContinuous::new(1, 10.0, 2.0)));
+    assert!(is_condition(PublicGoodsContinuous::new(4, 0.0, 2.0)));
+    assert!(is_condition(PublicGoodsContinuous::new(4, -1.0, 2.0)));
+    assert!(is_condition(PublicGoodsContinuous::new(4, 10.0, -0.5)));
+    assert!(is_non_finite(PublicGoodsContinuous::new(4, f64::NAN, 2.0)));
+    assert!(is_non_finite(PublicGoodsContinuous::new(
+        4,
+        10.0,
+        f64::INFINITY
+    )));
+
+    assert!(PublicGoodsContinuous::social_dilemma(4, 10.0, 2.0).is_ok());
+    for r in [0.5, 1.0, 4.0, 6.0] {
+        assert!(
+            is_condition(PublicGoodsContinuous::social_dilemma(4, 10.0, r)),
+            "r = {r}"
+        );
+    }
+    assert!(is_condition(PublicGoodsContinuous::social_dilemma(
+        1, 10.0, 2.0
+    )));
+}
+
+#[test]
+fn deserialization_cannot_bypass_the_continuous_game_checks() {
+    let game = Cournot::new(3, 100.0, 1.1, 10.0, 100.0).unwrap();
+    let json = serde_json::to_string(&game).unwrap();
+    assert_eq!(serde_json::from_str::<Cournot>(&json).unwrap(), game);
+    assert!(serde_json::from_str::<Cournot>(
+        r#"{"n": 3, "a": 100.0, "b": -1.0, "c": 10.0, "q_max": 100.0}"#
+    )
+    .is_err());
+    assert!(serde_json::from_str::<Cournot>(
+        r#"{"n": 1, "a": 100.0, "b": 1.0, "c": 10.0, "q_max": 100.0}"#
+    )
+    .is_err());
+
+    let game = BertrandDifferentiated::new(3, 10.0, 2.0, 1.0, 1.0, 100.0).unwrap();
+    let json = serde_json::to_string(&game).unwrap();
+    assert_eq!(
+        serde_json::from_str::<BertrandDifferentiated>(&json).unwrap(),
+        game
+    );
+    assert!(serde_json::from_str::<BertrandDifferentiated>(
+        r#"{"n": 3, "a": 10.0, "b": 2.0, "d": 2.0, "c": 1.0, "p_max": 100.0}"#
+    )
+    .is_err());
+
+    let game = PublicGoodsContinuous::new(4, 10.0, 2.5).unwrap();
+    let json = serde_json::to_string(&game).unwrap();
+    assert_eq!(
+        serde_json::from_str::<PublicGoodsContinuous>(&json).unwrap(),
+        game
+    );
+    assert!(serde_json::from_str::<PublicGoodsContinuous>(
+        r#"{"k": 4, "endowment": 0.0, "r": 2.0}"#
+    )
+    .is_err());
+    assert!(serde_json::from_str::<PublicGoodsContinuous>(
+        r#"{"k": 1, "endowment": 10.0, "r": 2.0}"#
+    )
+    .is_err());
+}
+
+// Continuous-game rules.
+
+use socsim_games::{
+    check_continuous_action, ActionError, BestResponseOracle, BrResult, BrStatus, ContinuousGame,
+    DampedBestResponse, GradientAscent, NormalFormGame, NumericBr, StageGame,
+};
+
+#[test]
+fn continuous_rule_constructors_reject_invalid_parameters() {
+    assert!(DampedBestResponse::<Cournot>::new(1.0).is_ok());
+    assert!(DampedBestResponse::<Cournot>::new(0.5).is_ok());
+    for alpha in [0.0, -0.5, 1.5, f64::NAN, f64::INFINITY] {
+        assert!(
+            matches!(
+                DampedBestResponse::<Cournot>::new(alpha),
+                Err(RuleError::Unsupported(_))
+            ),
+            "alpha = {alpha}"
+        );
+    }
+    assert!(GradientAscent::new(0.3).is_ok());
+    for step in [0.0, -0.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(
+            matches!(GradientAscent::new(step), Err(RuleError::Unsupported(_))),
+            "step = {step}"
+        );
+    }
+}
+
+/// A continuous game with configurable dimension, bounds, and numeric
+/// best-response declaration, and no analytic best response.
+struct NoBestResponse {
+    bounds: Vec<(f64, f64)>,
+    numeric: NumericBr,
+}
+
+impl StageGame for NoBestResponse {
+    type Action = Vec<f64>;
+
+    fn n_roles(&self) -> usize {
+        2
+    }
+
+    fn check_action(&self, role: usize, action: &Vec<f64>) -> Result<(), ActionError> {
+        check_continuous_action(self, role, action)
+    }
+}
+
+impl NormalFormGame for NoBestResponse {
+    fn payoff(&self, role: usize, profile: &[Vec<f64>]) -> f64 {
+        -profile[role].iter().map(|x| x * x).sum::<f64>()
+    }
+}
+
+impl ContinuousGame for NoBestResponse {
+    fn bounds(&self, _role: usize) -> &[(f64, f64)] {
+        &self.bounds
+    }
+
+    fn numeric_br(&self) -> NumericBr {
+        self.numeric
+    }
+}
+
+struct ZeroOracle;
+
+impl BestResponseOracle<NoBestResponse> for ZeroOracle {
+    fn best_response(&self, game: &NoBestResponse, role: usize, _profile: &[Vec<f64>]) -> BrResult {
+        BrResult {
+            action: vec![0.0; game.bounds(role).len()],
+            residual: 0.0,
+            status: BrStatus::Converged,
+        }
+    }
+}
+
+fn build_continuous<G: ContinuousGame>(
+    game: G,
+    rule: Arc<dyn socsim_games::DecisionRule<G, ()>>,
+    initial: Vec<f64>,
+) -> Result<socsim_games::GameWorld<G>, GameError> {
+    let mut rules = RuleBook::new();
+    rules.register("rule", rule).unwrap();
+    build_world(
+        game,
+        2,
+        (),
+        InitialActions::Same(initial),
+        &rules,
+        &Assignment::Ordered(vec![AssignGroup {
+            kind: AssignKind::Rule("rule".to_owned()),
+            count: 2,
+        }]),
+        2,
+        1,
+        7,
+    )
+}
+
+#[test]
+fn damped_best_response_without_a_best_response_path_is_rejected_at_build_time() {
+    let cases = [
+        // No analytic best response and no numerical search.
+        (vec![(0.0, 1.0)], NumericBr::Unavailable),
+        // The numerical search is one-dimensional only.
+        (vec![(0.0, 1.0), (0.0, 1.0)], NumericBr::Unimodal1D),
+    ];
+    for (bounds, numeric) in cases {
+        let initial = vec![0.5; bounds.len()];
+        let game = NoBestResponse {
+            bounds: bounds.clone(),
+            numeric,
+        };
+        let rule = Arc::new(DampedBestResponse::<NoBestResponse>::new(0.5).unwrap());
+        assert!(
+            matches!(
+                build_continuous(game, rule, initial.clone()),
+                Err(GameError::Rule(RuleError::Unsupported(_)))
+            ),
+            "{bounds:?} {numeric:?}"
+        );
+
+        // An oracle supplies the missing path.
+        let game = NoBestResponse { bounds, numeric };
+        let rule = Arc::new(
+            DampedBestResponse::<NoBestResponse>::new(0.5)
+                .unwrap()
+                .with_oracle(Arc::new(ZeroOracle)),
+        );
+        assert!(build_continuous(game, rule, initial).is_ok());
+    }
+
+    // A one-dimensional game declared unimodal can use the numerical search.
+    let game = NoBestResponse {
+        bounds: vec![(0.0, 1.0)],
+        numeric: NumericBr::Unimodal1D,
+    };
+    let rule = Arc::new(DampedBestResponse::<NoBestResponse>::new(0.5).unwrap());
+    assert!(build_continuous(game, rule, vec![0.5]).is_ok());
+}
+
+#[test]
+fn continuous_rules_reject_invalid_bounds_at_build_time() {
+    for bounds in [vec![(0.0, f64::NAN)], vec![(1.0, 1.0)], vec![(1.0, 0.0)]] {
+        let game = NoBestResponse {
+            bounds: bounds.clone(),
+            numeric: NumericBr::Unavailable,
+        };
+        let initial = socsim_games::RuleInitContext {
+            agent: AgentId(0),
+            kind: socsim_games::RuleKindId(0),
+            generation: 0,
+            init_seed: 0,
+        };
+        let rule = GradientAscent::new(0.1).unwrap();
+        assert!(
+            matches!(
+                <GradientAscent as socsim_games::DecisionRule<NoBestResponse, ()>>::init_state(
+                    &rule, &initial, &game
+                ),
+                Err(RuleError::Unsupported(_))
+            ),
+            "{bounds:?}"
+        );
+        let rule = DampedBestResponse::<NoBestResponse>::new(0.5)
+            .unwrap()
+            .with_oracle(Arc::new(ZeroOracle));
+        assert!(
+            matches!(
+                <DampedBestResponse<NoBestResponse> as socsim_games::DecisionRule<
+                    NoBestResponse,
+                    (),
+                >>::init_state(&rule, &initial, &game),
+                Err(RuleError::Unsupported(_))
+            ),
+            "{bounds:?}"
+        );
+    }
+}
+
+// Continuous metrics.
+
+#[test]
+fn continuous_metrics_rejects_invalid_stop_options() {
+    use socsim_games::{ContinuousMetrics, ContinuousMetricsOptions};
+
+    let game = Cournot::new(3, 100.0, 1.0, 10.0, 100.0).unwrap();
+    assert!(
+        ContinuousMetrics::new(&game, ContinuousMetricsOptions::new().stop(1.0e-9, 10)).is_ok()
+    );
+    for (tol, window) in [
+        (0.0, 1),
+        (-1.0e-9, 1),
+        (f64::NAN, 1),
+        (f64::INFINITY, 1),
+        (1.0e-9, 0),
+    ] {
+        assert!(
+            matches!(
+                ContinuousMetrics::new(&game, ContinuousMetricsOptions::new().stop(tol, window)),
+                Err(GameError::Metrics(_))
+            ),
+            "{tol} {window}"
+        );
+    }
+}
+
+/// Matching pennies on [0, 1] with discontinuous best responses: role 0 wants
+/// to match role 1's side of 1/2 and role 1 wants to mismatch, so damped
+/// best-response iteration circles the midpoint without converging.
+struct ContinuousPennies;
+
+const PENNIES_BOUNDS: [(f64, f64); 1] = [(0.0, 1.0)];
+
+impl StageGame for ContinuousPennies {
+    type Action = Vec<f64>;
+
+    fn n_roles(&self) -> usize {
+        2
+    }
+
+    fn check_action(&self, role: usize, action: &Vec<f64>) -> Result<(), ActionError> {
+        check_continuous_action(self, role, action)
+    }
+}
+
+impl NormalFormGame for ContinuousPennies {
+    fn payoff(&self, role: usize, profile: &[Vec<f64>]) -> f64 {
+        let target = self.best_response(role, profile).unwrap()[0];
+        -(profile[role][0] - target).abs()
+    }
+}
+
+impl ContinuousGame for ContinuousPennies {
+    fn bounds(&self, _role: usize) -> &[(f64, f64)] {
+        &PENNIES_BOUNDS
+    }
+
+    fn best_response(&self, role: usize, profile: &[Vec<f64>]) -> Option<Vec<f64>> {
+        let other_high = profile[1 - role][0] >= 0.5;
+        let high = if role == 0 { other_high } else { !other_high };
+        Some(vec![if high { 1.0 } else { 0.0 }])
+    }
+}
+
+#[test]
+fn continuous_metrics_rejects_an_equilibrium_that_does_not_converge() {
+    use socsim_games::{ContinuousEquilibrium, ContinuousMetrics, ContinuousMetricsOptions};
+
+    let solve = || ContinuousMetricsOptions::new().equilibrium(ContinuousEquilibrium::Solve);
+    let game = Cournot::new(3, 100.0, 1.0, 10.0, 100.0).unwrap();
+    assert!(ContinuousMetrics::new(&game, solve()).is_ok());
+
+    // The iteration runs but never reaches the tolerance.
+    assert!(matches!(
+        ContinuousMetrics::new(&ContinuousPennies, solve()),
+        Err(GameError::Metrics(_))
+    ));
+
+    // No analytic, oracle, or numerical best response is available.
+    let game = NoBestResponse {
+        bounds: vec![(0.0, 1.0)],
+        numeric: NumericBr::Unavailable,
+    };
+    assert!(matches!(
+        ContinuousMetrics::new(&game, solve()),
+        Err(GameError::Metrics(_))
+    ));
+}
+
+// Population dynamics on continuous games.
+
+fn held_cournot_world(n_agents: usize) -> socsim_games::GameWorld<Cournot> {
+    build_world(
+        Cournot::new(2, 100.0, 1.0, 10.0, 100.0).unwrap(),
+        n_agents,
+        (),
+        InitialActions::Same(vec![20.0]),
+        &RuleBook::new(),
+        &all_held(n_agents),
+        1,
+        4,
+        223,
+    )
+    .unwrap()
+}
+
+fn assemble_cournot<D>(
+    dynamics: D,
+) -> Result<socsim_engine::SimulationBuilder<socsim_games::GameWorld<Cournot>>, GameError>
+where
+    D: socsim_games::PopulationDynamics<Cournot, ()>,
+{
+    assemble_with(
+        held_cournot_world(6),
+        socsim_games::RandomPairs::new(),
+        RuleBook::new(),
+        Pairwise::new(NormalFormOutcome),
+        dynamics,
+        PlayOptions::new(),
+        223,
+    )
+}
+
+#[test]
+fn gaussian_mutation_requires_a_finite_positive_standard_deviation() {
+    let update = socsim_games::Update::Synchronous;
+    let moran = || {
+        socsim_games::MoranUpdate::new(socsim_games::Fitness::Exponential { w: 0.1 }, 0.2, update)
+            .unwrap()
+    };
+    for sd in [0.0, -0.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(
+            matches!(moran().gaussian_mutation(sd), Err(GameError::Population(_))),
+            "{sd}"
+        );
+    }
+    assert_eq!(
+        moran().gaussian_mutation(0.5).unwrap().gaussian_sd(),
+        Some(0.5)
+    );
+    assert_eq!(moran().gaussian_sd(), None);
+}
+
+#[test]
+fn continuous_moran_requires_a_standard_deviation_when_it_mutates() {
+    let update = socsim_games::Update::Synchronous;
+    let exponential = socsim_games::Fitness::Exponential { w: 0.1 };
+    // A positive mutation probability without a standard deviation.
+    assert!(is_population_error(assemble_cournot(
+        socsim_games::MoranUpdate::new(exponential, 0.2, update).unwrap()
+    )));
+    // With a standard deviation, or without mutation, assembly succeeds.
+    assert!(assemble_cournot(
+        socsim_games::MoranUpdate::new(exponential, 0.2, update)
+            .unwrap()
+            .gaussian_mutation(0.5)
+            .unwrap()
+    )
+    .is_ok());
+    assert!(
+        assemble_cournot(socsim_games::MoranUpdate::new(exponential, 0.0, update).unwrap()).is_ok()
+    );
+    assert!(assemble_cournot(
+        socsim_games::MoranUpdate::new(exponential, 0.0, update)
+            .unwrap()
+            .gaussian_mutation(0.5)
+            .unwrap()
+    )
+    .is_ok());
+}
+
+#[test]
+fn finite_moran_rejects_a_gaussian_standard_deviation() {
+    let update = socsim_games::Update::Synchronous;
+    for mutation in [0.0, 0.2] {
+        assert!(is_population_error(assemble_hawk_dove(
+            socsim_games::MoranUpdate::new(
+                socsim_games::Fitness::Exponential { w: 0.1 },
+                mutation,
+                update
+            )
+            .unwrap()
+            .gaussian_mutation(0.5)
+            .unwrap(),
+            PlayOptions::new()
+        )));
+    }
+}
+
+#[test]
+fn continuous_moran_rejects_linear_fitness_and_accepts_exponential_fitness() {
+    let update = socsim_games::Update::Synchronous;
+    for w in [0.0, 0.1, 1.0] {
+        assert!(
+            is_population_error(assemble_cournot(
+                socsim_games::MoranUpdate::new(socsim_games::Fitness::Linear { w }, 0.0, update)
+                    .unwrap()
+            )),
+            "{w}"
+        );
+    }
+    assert!(assemble_cournot(
+        socsim_games::MoranUpdate::new(socsim_games::Fitness::Exponential { w: 0.1 }, 0.0, update)
+            .unwrap()
+    )
+    .is_ok());
+    // Fermi updating needs no payoff range.
+    assert!(assemble_cournot(socsim_games::FermiUpdate::new(1.0, update).unwrap()).is_ok());
+}
+
+/// A two-role continuous game whose roles may have different bounds. It
+/// declares a common action space, which assembly checks at run time, and it
+/// accepts every action so that the world can be built.
+struct RoleBounds {
+    role0: Vec<(f64, f64)>,
+    role1: Vec<(f64, f64)>,
+}
+
+impl StageGame for RoleBounds {
+    type Action = Vec<f64>;
+
+    fn n_roles(&self) -> usize {
+        2
+    }
+
+    fn check_action(&self, _role: usize, _action: &Vec<f64>) -> Result<(), ActionError> {
+        Ok(())
+    }
+}
+
+impl NormalFormGame for RoleBounds {
+    fn payoff(&self, role: usize, profile: &[Vec<f64>]) -> f64 {
+        profile[role].iter().sum()
+    }
+}
+
+impl ContinuousGame for RoleBounds {
+    fn bounds(&self, role: usize) -> &[(f64, f64)] {
+        if role == 0 {
+            &self.role0
+        } else {
+            &self.role1
+        }
+    }
+}
+
+impl socsim_games::CommonActionSpace for RoleBounds {}
+
+fn role_bounds_world(game: RoleBounds) -> socsim_games::GameWorld<RoleBounds> {
+    build_world(
+        game,
+        4,
+        (),
+        InitialActions::Same(vec![0.5]),
+        &RuleBook::new(),
+        &all_held(4),
+        1,
+        4,
+        227,
+    )
+    .unwrap()
+}
+
+#[test]
+fn copy_dynamics_reject_continuous_games_whose_roles_have_different_bounds() {
+    let update = socsim_games::Update::Synchronous;
+    let cases = [
+        // Different dimensions.
+        (vec![(0.0, 1.0)], vec![(0.0, 1.0), (0.0, 1.0)]),
+        // Different lower end point.
+        (vec![(0.0, 1.0)], vec![(0.25, 1.0)]),
+        // Different upper end point.
+        (vec![(0.0, 1.0)], vec![(0.0, 2.0)]),
+    ];
+    for (role0, role1) in cases {
+        let game = || RoleBounds {
+            role0: role0.clone(),
+            role1: role1.clone(),
+        };
+        let fermi = assemble_with(
+            role_bounds_world(game()),
+            socsim_games::RandomPairs::new(),
+            RuleBook::new(),
+            Pairwise::new(NormalFormOutcome),
+            socsim_games::FermiUpdate::new(1.0, update).unwrap(),
+            PlayOptions::new(),
+            227,
+        );
+        assert!(is_population_error(fermi), "{role0:?} {role1:?}");
+        let moran = assemble_with(
+            role_bounds_world(game()),
+            socsim_games::RandomPairs::new(),
+            RuleBook::new(),
+            Pairwise::new(NormalFormOutcome),
+            socsim_games::MoranUpdate::new(
+                socsim_games::Fitness::Exponential { w: 0.1 },
+                0.0,
+                update,
+            )
+            .unwrap(),
+            PlayOptions::new(),
+            227,
+        );
+        assert!(is_population_error(moran), "{role0:?} {role1:?}");
+    }
+
+    // Identical bounds pass the check.
+    let same = RoleBounds {
+        role0: vec![(0.0, 1.0)],
+        role1: vec![(0.0, 1.0)],
+    };
+    assert!(assemble_with(
+        role_bounds_world(same),
+        socsim_games::RandomPairs::new(),
+        RuleBook::new(),
+        Pairwise::new(NormalFormOutcome),
+        socsim_games::FermiUpdate::new(1.0, update).unwrap(),
+        PlayOptions::new(),
+        227,
+    )
+    .is_ok());
+
+    // Invalid bounds are rejected before they are compared.
+    let invalid = RoleBounds {
+        role0: vec![(1.0, 1.0)],
+        role1: vec![(1.0, 1.0)],
+    };
+    assert!(is_population_error(assemble_with(
+        role_bounds_world(invalid),
+        socsim_games::RandomPairs::new(),
+        RuleBook::new(),
+        Pairwise::new(NormalFormOutcome),
+        socsim_games::FermiUpdate::new(1.0, update).unwrap(),
+        PlayOptions::new(),
+        227,
+    )));
+}
+
+#[cfg(feature = "grid")]
+#[test]
+fn imitate_best_accepts_a_continuous_game_on_a_grid_and_checks_its_bounds() {
+    let update = socsim_games::Update::Synchronous;
+    let grid = || {
+        socsim_games::Topology::grid(socsim_games::GridSpec {
+            rows: 3,
+            cols: 3,
+            boundary: socsim_games::GridBoundary::Toroidal,
+            neighborhood: socsim_games::GridNeighbors::Moore,
+        })
+        .unwrap()
+    };
+    let world = build_world(
+        PublicGoodsContinuous::new(2, 10.0, 1.5).unwrap(),
+        9,
+        (),
+        InitialActions::Same(vec![5.0]),
+        &RuleBook::new(),
+        &all_held(9),
+        1,
+        4,
+        229,
+    )
+    .unwrap()
+    .with_topology(grid())
+    .unwrap();
+    assert!(assemble_with(
+        world,
+        socsim_games::GridNeighborhood::new(),
+        RuleBook::new(),
+        Pairwise::new(NormalFormOutcome),
+        socsim_games::ImitateBest::new(update),
+        PlayOptions::new(),
+        229,
+    )
+    .is_ok());
+
+    let world = build_world(
+        RoleBounds {
+            role0: vec![(0.0, 1.0)],
+            role1: vec![(0.0, 2.0)],
+        },
+        9,
+        (),
+        InitialActions::Same(vec![0.5]),
+        &RuleBook::new(),
+        &all_held(9),
+        1,
+        4,
+        229,
+    )
+    .unwrap()
+    .with_topology(grid())
+    .unwrap();
+    assert!(is_population_error(assemble_with(
+        world,
+        socsim_games::GridNeighborhood::new(),
+        RuleBook::new(),
+        Pairwise::new(NormalFormOutcome),
+        socsim_games::ImitateBest::new(update),
+        PlayOptions::new(),
+        229,
+    )));
+}
+
+#[cfg(feature = "llm")]
+#[test]
+fn number_parser_rejects_a_multi_dimensional_continuous_game() {
+    use socsim_games::llm::{ActionParser, NumberParser};
+
+    let validate = |game: &NoBestResponse, parser: &NumberParser| {
+        <NumberParser as ActionParser<NoBestResponse>>::validate(parser, game)
+    };
+    let plane = NoBestResponse {
+        bounds: vec![(0.0, 1.0), (0.0, 1.0)],
+        numeric: NumericBr::Unavailable,
+    };
+    assert!(matches!(
+        validate(&plane, &NumberParser::new("x")),
+        Err(RuleError::Unsupported(_))
+    ));
+    assert!(matches!(
+        validate(&plane, &NumberParser::new("x").bounds(0.0, 1.0)),
+        Err(RuleError::Unsupported(_))
+    ));
+
+    let line = NoBestResponse {
+        bounds: vec![(0.0, 1.0)],
+        numeric: NumericBr::Unavailable,
+    };
+    assert!(validate(&line, &NumberParser::new("x")).is_ok());
+    assert!(validate(&line, &NumberParser::new("x").bounds(0.25, 0.75)).is_ok());
+    for (lo, hi) in [(-0.5, 0.5), (0.5, 1.5), (0.75, 0.25), (f64::NAN, 0.5)] {
+        assert!(
+            matches!(
+                validate(&line, &NumberParser::new("x").bounds(lo, hi)),
+                Err(RuleError::Unsupported(_))
+            ),
+            "[{lo}, {hi}]"
+        );
+    }
+}

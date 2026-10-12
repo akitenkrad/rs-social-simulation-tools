@@ -27,11 +27,11 @@ socsim-llm = { path = "../socsim-llm", optional = true }
 socsim-metrics = { path = "../socsim-metrics", optional = true, default-features = false }
 socsim-net = { path = "../socsim-net", optional = true }
 socsim-grid = { path = "../socsim-grid", optional = true }
-serde_json = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true, features = ["float_roundtrip"] }
 sha2 = { workspace = true, optional = true }
 
 [dev-dependencies]
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 tempfile.workspace = true
 trybuild = "1"
 
@@ -151,6 +151,11 @@ path = "tests/llm_driver_partition.rs"
 required-features = ["llm", "engine"]
 
 [[test]]
+name = "llm_continuous"
+path = "tests/llm_continuous.rs"
+required-features = ["llm", "engine"]
+
+[[test]]
 name = "matching_semantics"
 path = "tests/matching_semantics.rs"
 required-features = ["core", "engine"]
@@ -200,6 +205,21 @@ name = "hawk_dove_abm"
 path = "tests/hawk_dove_abm.rs"
 required-features = ["core", "engine"]
 
+[[test]]
+name = "continuous_rules"
+path = "tests/continuous_rules.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "determinism_continuous"
+path = "tests/determinism_continuous.rs"
+required-features = ["core", "engine"]
+
+[[test]]
+name = "snapshot_resume_continuous"
+path = "tests/snapshot_resume_continuous.rs"
+required-features = ["core", "engine"]
+
 [[example]]
 name = "ipd_pair"
 path = "examples/ipd_pair.rs"
@@ -218,4 +238,9 @@ required-features = ["core", "engine", "grid"]
 [[example]]
 name = "hawk_dove_large"
 path = "examples/hawk_dove_large.rs"
+required-features = ["core", "engine"]
+
+[[example]]
+name = "cournot"
+path = "examples/cournot.rs"
 required-features = ["core", "engine"]

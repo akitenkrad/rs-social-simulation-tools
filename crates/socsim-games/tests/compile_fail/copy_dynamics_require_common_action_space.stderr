@@ -14,13 +14,13 @@ help: the trait `CommonActionSpace` is not implemented for `Asymmetric`
    | ^^^^^^^^^^^^^^^^^
    = help: the following other types implement trait `CommonActionSpace`:
              BattleOfSexes
+             BertrandDifferentiated
+             Cournot
              ElFarol
              HawkDove
              MatchingPennies
              MatrixGame
              MinorityGame
-             PrisonersDilemma
-             PublicGoodsFinite
            and $N others
    = note: required for `FermiUpdate` to implement `assemble::sealed::DynamicsBuild<Asymmetric, ()>`
    = note: required for `FermiUpdate` to implement `PopulationDynamics<Asymmetric, ()>`

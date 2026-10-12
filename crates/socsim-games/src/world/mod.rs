@@ -13,8 +13,8 @@ pub use history::{HistoryView, PeerHistory, StepRecord};
 pub use pair_history::PairView;
 pub use policy::{PolicyTable, RuleKindId};
 pub use state::{
-    AutomatonPolicyState, BeliefState, BuiltinPolicyState, EstimateState, ExperimentState,
-    PropensityState, Slot, Stateless, TftState,
+    AutomatonPolicyState, BeliefState, BuiltinPolicyState, ContinuousState, EstimateState,
+    ExperimentState, PropensityState, Slot, Stateless, TftState,
 };
 #[cfg(feature = "net")]
 pub use topology::NetworkTopology;
@@ -73,14 +73,21 @@ pub struct GameWorld<G: StageGame, X: ExperimentState = ()> {
 pub(crate) struct PlayedActionCounts {
     by_role: Vec<Vec<usize>>,
     total: usize,
+    pattern: Option<crate::ImplicitPattern>,
 }
 
 impl PlayedActionCounts {
-    pub(crate) fn new(n_roles: usize) -> Self {
+    pub(crate) fn new(n_roles: usize, pattern: Option<crate::ImplicitPattern>) -> Self {
         Self {
             by_role: vec![Vec::new(); n_roles],
             total: 0,
+            pattern,
         }
+    }
+
+    /// The implicit pattern that the play step of this step traversed.
+    pub(crate) fn pattern(&self) -> Option<crate::ImplicitPattern> {
+        self.pattern
     }
 
     pub(crate) fn increment(&mut self, role: usize, action: usize) -> socsim_core::Result<()> {

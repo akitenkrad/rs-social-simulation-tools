@@ -3,6 +3,12 @@ error[E0599]: no method named `held` found for reference `&DecisionContext<'_, M
   |
 5 |     let _ = ctx.held(AgentId(0));
   |                 ^^^^ private field, not a method
+  |
+help: there is a method `my_held` with a similar name, but with different arguments
+ --> src/view.rs
+  |
+  |     pub fn my_held(&self) -> &'a G::Action {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[E0599]: no method named `x` found for reference `&DecisionContext<'_, MatrixGame, ()>` in the current scope
  --> tests/compile_fail/decision_context_hides_world_state.rs:6:17

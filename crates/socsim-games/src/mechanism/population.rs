@@ -12,9 +12,10 @@ use std::marker::PhantomData;
 use rand::Rng;
 use socsim_core::{Mechanism, Phase, SimRng, SocsimError, StepContext};
 
+use crate::game::continuous::check_bounds;
 use crate::{
-    ExperimentState, FiniteGame, GameError, GameWorld, NormalFormGame, PolicyTable, StageGame,
-    Topology,
+    ContinuousGame, ExperimentState, FiniteGame, GameError, GameWorld, NormalFormGame, PolicyTable,
+    StageGame, Topology,
 };
 
 /// Update schedule of a population dynamic.
@@ -48,6 +49,9 @@ pub enum ImitationTie {
 /// its topology neighbors. Ties are broken by action index, never by neighbor
 /// position, so the rule commutes with lattice symmetries. It consumes no
 /// randomness and requires a grid or network topology.
+///
+/// In a continuous game, "the lowest action" is the lexicographically smallest
+/// action vector, comparing components with [`f64::total_cmp`].
 #[derive(Clone, Copy, Debug)]
 pub struct ImitateBest {
     update: Update,
@@ -177,11 +181,25 @@ impl Fitness {
 /// all agents with probability proportional to fitness, the agent that dies
 /// is drawn uniformly from all agents (the parent included), and the dying
 /// agent's held action becomes the parent's action, or with probability
-/// `mutation` a uniformly drawn action. It requires a world without topology.
+/// `mutation` a mutant. It requires a world without topology.
+///
+/// In a finite game the mutant is an action drawn uniformly from the common
+/// action set. In a continuous game the mutant is the parent's action plus
+/// independent `N(0, sd^2)` noise on every component, clamped to the bounds;
+/// the standard deviation is set with [`MoranUpdate::gaussian_mutation`] and
+/// is required whenever `mutation > 0`. [`Fitness::Linear`] is rejected for
+/// continuous games because their payoff range cannot be enumerated; use
+/// [`Fitness::Exponential`] instead.
+///
+/// Every step draws the same number of random values whatever the outcome:
+/// the parent, the dying agent, the mutation decision, and the mutant (one
+/// uniform action in a finite game; two uniforms per component, used by the
+/// Box-Muller transform, in a continuous game), even when no mutation occurs.
 #[derive(Clone, Copy, Debug)]
 pub struct MoranUpdate {
     fitness: Fitness,
     mutation: f64,
+    gaussian_sd: Option<f64>,
     update: Update,
 }
 
@@ -212,8 +230,30 @@ impl MoranUpdate {
         Ok(Self {
             fitness,
             mutation,
+            gaussian_sd: None,
             update,
         })
+    }
+
+    /// Sets the standard deviation of the Gaussian mutation used by continuous
+    /// games. The same `sd` applies to every component and must be finite and
+    /// positive.
+    ///
+    /// Assembly rejects a standard deviation for a finite game, and a
+    /// continuous game with `mutation > 0` that has none.
+    pub fn gaussian_mutation(mut self, sd: f64) -> Result<Self, GameError> {
+        if !(sd.is_finite() && sd > 0.0) {
+            return Err(GameError::Population(format!(
+                "gaussian_mutation requires a finite standard deviation greater than zero, got {sd}"
+            )));
+        }
+        self.gaussian_sd = Some(sd);
+        Ok(self)
+    }
+
+    /// Returns the standard deviation of the Gaussian mutation, if set.
+    pub fn gaussian_sd(&self) -> Option<f64> {
+        self.gaussian_sd
     }
 
     /// Returns the fitness map.
@@ -238,7 +278,8 @@ pub(crate) mod sealed {
 
     /// Action-type dispatch for dynamics that copy actions between agents.
     ///
-    /// Implemented only inside this crate. Finite games use `usize`.
+    /// Implemented only inside this crate: finite games use `usize` and
+    /// continuous games use `Vec<f64>`.
     pub trait ActionSpace<G: StageGame<Action = Self>>: Sized + Clone {
         /// Checks that every role shares the same action space.
         fn check_common_space(game: &G) -> Result<(), GameError>;
@@ -246,11 +287,19 @@ pub(crate) mod sealed {
         /// Draws an action uniformly from the common action space.
         fn uniform(game: &G, rng: &mut SimRng) -> Self;
 
-        /// Returns a mutant of `parent`.
-        fn mutate(game: &G, parent: &Self, rng: &mut SimRng) -> Self;
+        /// Checks the mutation settings of the Moran process against the
+        /// action type.
+        fn check_mutation(mutation: f64, gaussian_sd: Option<f64>) -> Result<(), GameError>;
+
+        /// Returns a mutant of `parent`. The number of random values drawn
+        /// depends only on the game, never on the values drawn.
+        fn mutate(game: &G, parent: &Self, gaussian_sd: Option<f64>, rng: &mut SimRng) -> Self;
 
         /// Returns the payoff range over every role and action profile.
         fn payoff_range(game: &G) -> Result<(f64, f64), GameError>;
+
+        /// Whether [`Fitness::Linear`] can be checked for positivity.
+        fn supports_linear_fitness() -> bool;
 
         /// Orders actions for deterministic tie-breaking.
         fn tie_cmp(left: &Self, right: &Self) -> Ordering;
@@ -265,7 +314,16 @@ pub(crate) mod sealed {
             rng.gen_range(0..game.n_actions(0))
         }
 
-        fn mutate(game: &G, _parent: &Self, rng: &mut SimRng) -> Self {
+        fn check_mutation(_mutation: f64, gaussian_sd: Option<f64>) -> Result<(), GameError> {
+            if gaussian_sd.is_some() {
+                return Err(GameError::Population(
+                    "gaussian_mutation applies only to continuous games; finite games mutate to a uniformly drawn action".to_owned(),
+                ));
+            }
+            Ok(())
+        }
+
+        fn mutate(game: &G, _parent: &Self, _gaussian_sd: Option<f64>, rng: &mut SimRng) -> Self {
             Self::uniform(game, rng)
         }
 
@@ -273,10 +331,101 @@ pub(crate) mod sealed {
             finite_payoff_range(game)
         }
 
+        fn supports_linear_fitness() -> bool {
+            true
+        }
+
         fn tie_cmp(left: &Self, right: &Self) -> Ordering {
             left.cmp(right)
         }
     }
+
+    impl<G: ContinuousGame> ActionSpace<G> for Vec<f64> {
+        fn check_common_space(game: &G) -> Result<(), GameError> {
+            check_bounds(game).map_err(|violation| GameError::Population(violation.to_string()))?;
+            let first = game.bounds(0);
+            for role in 1..game.n_roles() {
+                let bounds = game.bounds(role);
+                if bounds.len() != first.len() {
+                    return Err(GameError::Population(format!(
+                        "copying dynamics require a common action space, but role {role} has {} dimensions and role 0 has {}",
+                        bounds.len(),
+                        first.len()
+                    )));
+                }
+                for (dim, (&(lo, hi), &(lo0, hi0))) in bounds.iter().zip(first).enumerate() {
+                    if lo != lo0 || hi != hi0 {
+                        return Err(GameError::Population(format!(
+                            "copying dynamics require a common action space, but dimension {dim} of role {role} has bounds [{lo}, {hi}] and role 0 has [{lo0}, {hi0}]"
+                        )));
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        fn uniform(game: &G, rng: &mut SimRng) -> Self {
+            game.bounds(0)
+                .iter()
+                .map(|&(lo, hi)| (lo + (hi - lo) * rng.gen::<f64>()).clamp(lo, hi))
+                .collect()
+        }
+
+        fn check_mutation(mutation: f64, gaussian_sd: Option<f64>) -> Result<(), GameError> {
+            if mutation > 0.0 && gaussian_sd.is_none() {
+                return Err(GameError::Population(format!(
+                    "moran_update with mutation {mutation} in a continuous game requires gaussian_mutation(sd)"
+                )));
+            }
+            Ok(())
+        }
+
+        fn mutate(game: &G, parent: &Self, gaussian_sd: Option<f64>, rng: &mut SimRng) -> Self {
+            // Without a standard deviation the mutation probability is zero,
+            // so the mutant is never used; the draws are still made so that
+            // every step consumes the same number of random values.
+            let sd = gaussian_sd.unwrap_or(0.0);
+            parent
+                .iter()
+                .zip(game.bounds(0))
+                .map(|(&value, &(lo, hi))| (value + sd * standard_normal(rng)).clamp(lo, hi))
+                .collect()
+        }
+
+        fn payoff_range(_game: &G) -> Result<(f64, f64), GameError> {
+            Err(continuous_linear_fitness_error())
+        }
+
+        fn supports_linear_fitness() -> bool {
+            false
+        }
+
+        fn tie_cmp(left: &Self, right: &Self) -> Ordering {
+            for (a, b) in left.iter().zip(right) {
+                match a.total_cmp(b) {
+                    Ordering::Equal => {}
+                    other => return other,
+                }
+            }
+            left.len().cmp(&right.len())
+        }
+    }
+}
+
+/// Draws one standard normal value with the Box-Muller transform.
+///
+/// Exactly two uniform values are drawn. The first is mapped to `(0, 1]` so
+/// that its logarithm is finite.
+fn standard_normal(rng: &mut SimRng) -> f64 {
+    let u1 = 1.0 - rng.gen::<f64>();
+    let u2 = rng.gen::<f64>();
+    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+}
+
+fn continuous_linear_fitness_error() -> GameError {
+    GameError::Population(
+        "linear fitness requires a payoff range, which cannot be enumerated for a continuous game; use Fitness::Exponential".to_owned(),
+    )
 }
 
 pub(crate) use sealed::ActionSpace;
@@ -720,6 +869,7 @@ where
 pub(crate) struct MoranMechanism<G, X> {
     fitness: Fitness,
     mutation: f64,
+    gaussian_sd: Option<f64>,
     weights: Vec<f64>,
     marker: PhantomData<fn() -> (G, X)>,
 }
@@ -783,8 +933,12 @@ where
         let parent = parent.unwrap_or(last_positive);
         let death = step.rng.gen_range(0..n_agents);
         let mutate = step.rng.gen::<f64>() < self.mutation;
-        let mutant =
-            <G::Action as ActionSpace<G>>::mutate(&world.game, &world.held[parent], step.rng);
+        let mutant = <G::Action as ActionSpace<G>>::mutate(
+            &world.game,
+            &world.held[parent],
+            self.gaussian_sd,
+            step.rng,
+        );
         world.held[death] = if mutate {
             mutant
         } else {
@@ -921,7 +1075,11 @@ mod build {
                     "moran_update requires a world without topology".to_owned(),
                 ));
             }
+            <G::Action as ActionSpace<G>>::check_mutation(self.mutation, self.gaussian_sd)?;
             if let Fitness::Linear { w } = self.fitness {
+                if !<G::Action as ActionSpace<G>>::supports_linear_fitness() {
+                    return Err(continuous_linear_fitness_error());
+                }
                 let single = single_range(
                     check,
                     "moran_update",
@@ -943,6 +1101,7 @@ mod build {
             Some(Box::new(MoranMechanism::<G, X> {
                 fitness: self.fitness,
                 mutation: self.mutation,
+                gaussian_sd: self.gaussian_sd,
                 weights: Vec::new(),
                 marker: PhantomData,
             }))

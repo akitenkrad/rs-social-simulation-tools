@@ -603,11 +603,6 @@ where
             RuleError::Unsupported("LLM rules support only per-step decisions".to_owned()).into(),
         );
     }
-    if world.game.n_roles() != 2 {
-        return Err(GameError::UnsupportedRoles {
-            n_roles: world.game.n_roles(),
-        });
-    }
     if !matching.supports_roles(world.game.n_roles()) {
         return Err(GameError::UnsupportedRoles {
             n_roles: world.game.n_roles(),

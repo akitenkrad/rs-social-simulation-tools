@@ -87,6 +87,14 @@ impl<'a, G: StageGame, X: ExperimentState> DecisionContext<'a, G, X> {
             .map(PeerHistory::new)
     }
 
+    /// Returns this agent's own held action before this decision: its initial
+    /// action, or the action it last chose.
+    pub fn my_held(&self) -> &'a G::Action {
+        self.held
+            .get(self.me.0 as usize)
+            .expect("DecisionContext is constructed only for a known agent")
+    }
+
     /// Returns the held action of a peer in this decision unit.
     pub fn peer_held(&self, peer: AgentId) -> Option<&'a G::Action> {
         self.opponents

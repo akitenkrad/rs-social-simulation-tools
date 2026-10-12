@@ -5,6 +5,8 @@ use crate::{FiniteGame, MixedStrategy};
 
 /// Equilibria of anonymous games in count form.
 pub mod anonymous;
+/// Damped best-response iteration for games with continuous actions.
+pub mod continuous;
 pub mod dominance;
 /// Evolutionary stability of symmetric mixed strategies.
 pub mod ess;
@@ -18,6 +20,10 @@ pub mod replicator;
 pub mod support;
 
 pub use anonymous::{pure_nash_counts, CountProfile};
+pub use continuous::{
+    best_response_iteration, best_response_step, golden_section_best_response, BestResponseOracle,
+    BrIteration, BrIterationOptions, BrResult, BrStatus, GoldenSectionOptions,
+};
 pub use dominance::{iterated_strict_dominance, DominanceResult, Elimination};
 pub use ess::{ess_verdict, EssVerdict};
 pub use lemke_howson::{lemke_howson, LemkeHowsonOptions, LemkeHowsonResult};
@@ -78,6 +84,15 @@ pub enum SolveError {
     InvalidOptions(String),
     #[error(transparent)]
     Mixed(#[from] MixedError),
+    /// No converged best response could be obtained for `role`: the game has
+    /// no analytic best response, no oracle was given, and a numerical search
+    /// is not available, or the chosen method did not converge.
+    #[error("no converged best response is available for role {role}")]
+    NoBestResponse { role: usize },
+    /// The game violates a contract that cannot be expressed in its type, for
+    /// example invalid bounds of a continuous game.
+    #[error("invalid game: {0}")]
+    InvalidGame(String),
 }
 
 /// A verified equilibrium represented as one mixed strategy per role.

@@ -17,7 +17,9 @@ pub use manifest::{HasLlmManifest, LlmReplayManifest, WithLlm};
 pub use obs::{ActionCounts, CountsObs, ObservationProvider, OwnHistory, OwnHistoryObs};
 pub use parse::{ActionParser, LabelParser, NumberParser, OutOfRange, ParseFlags, ParseOutcome};
 pub use policy::{ConversationTurn, LlmConversation, LlmPolicy};
-pub use render::{CountsRenderer, DescribeGame, GameRenderer, MarkdownTableRenderer};
+pub use render::{
+    CountsRenderer, DescribeGame, DescribedRenderer, GameRenderer, MarkdownTableRenderer,
+};
 pub use store::{
     BackendIdentity, CacheKeyV1, MergeReport, ReplayMode, ResponseRecord, ResponseStore, StoreError,
 };

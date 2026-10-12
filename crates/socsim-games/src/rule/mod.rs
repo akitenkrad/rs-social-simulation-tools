@@ -1,11 +1,13 @@
 mod book;
 mod builtin;
 mod catalog;
+mod continuous;
 mod learning;
 
 pub use book::RuleBook;
 pub use builtin::{Fixed, TitForTat, UniformRandom};
 pub use catalog::KindCatalog;
+pub use continuous::{DampedBestResponse, GradientAscent};
 pub use learning::{Automaton, FictitiousPlay, LogitChoice, Mixed, MyopicBestResponse, RothErev};
 
 use socsim_core::{AgentId, SimRng};
@@ -32,6 +34,12 @@ pub enum RuleError {
     Backend(String),
     #[error("agent {agent} holds more than one role in a per-step decision")]
     AmbiguousRole { agent: u64 },
+    /// A component of a payoff gradient is NaN or infinite.
+    #[error("component {dim} of the payoff gradient is not finite")]
+    NonFiniteGradient { dim: usize },
+    /// No converged best response could be obtained during a decision.
+    #[error("best response unavailable: {0}")]
+    BestResponse(String),
 }
 
 pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
