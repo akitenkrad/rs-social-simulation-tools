@@ -72,7 +72,7 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`game_decide`](mechanisms/game-decide.md) | Decision, Reward | decision rules (e.g. Axelrod 1984) | rule-driven | Each seated agent's `DecisionRule` chooses a checked action once per decision unit (per step, per role or per encounter); after play, rules learn per encounter (`learn_encounter`) and per step (`learn_step`) — rule state lives in the world (library-only). |
 | [`game_llm_decide`](mechanisms/game-llm-decide.md) | Decision, Reward | LLM agents in repeated games | LLM-driven | Agents of LLM kinds render requests that are batched, deduplicated, replayed from a response store or sent to the backend, and parsed into checked actions with retries and fallbacks (feature `llm`; library-only). |
 | [`game_play`](mechanisms/game-play.md) | Interaction | normal-form payoffs | structural | `OutcomeRule` payoffs per encounter, aggregated per agent (`Sum`/`Mean`), recorded in the step history (library-only). |
-| [`game_metrics`](mechanisms/game-metrics.md) | PostStep | game-theoretic summary statistics | observation | Records per-step action shares, population shares, payoff mean/SD, cooperation rate, regret, distance to equilibrium and public aggregates; can stop the run when play settles (library-only). |
+| [`game_metrics`](mechanisms/game-metrics.md) | PostStep | game-theoretic summary statistics | observation | Records per-step action shares, population shares, payoff mean/SD, cooperation rate, regret, distance to equilibrium and public aggregates (for continuous games: mean/SD of the actions, payoffs, aggregates and distance to equilibrium); can stop the run when play settles (library-only). |
 | [`imitate_best`](mechanisms/imitate-best.md) | Reward | Nowak & May (1992) | deterministic imitation | Every held agent adopts the action of the highest-paid agent among itself and its grid or network neighbours, all at once; ties by action index (library-only). |
 | [`fermi_update`](mechanisms/fermi-update.md) | Reward | Szabó & Tőke (1998) | stochastic imitation | Every held agent copies one random partner with probability $1/(1 + e^{-(\pi_j - \pi_i)/K})$, all at once (library-only). |
 | [`replicator_update`](mechanisms/replicator-update.md) | Reward | Schlag (1998) | stochastic imitation | Proportional imitation: copy a better-paid random partner with probability $\beta[\pi_j - \pi_i]_+$, with $\beta \le 1/\Delta\pi$ checked at assembly (library-only). |
@@ -89,7 +89,8 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 The first four `game_*` rows are registered together by `socsim_games::assemble`,
 `assemble_with_aggregates` or `assemble_with` (`game_match`, `game_decide`, `game_play`) or
 `socsim_games::llm::assemble_with_llm` (all four); `game_metrics` is built with
-`GameMetrics::new` and added to the returned builder. The four population
+`GameMetrics::new` (for a continuous game, `ContinuousMetrics::new`) and added
+to the returned builder. The four population
 dynamics (`imitate_best`, `fermi_update`, `replicator_update`, `moran_update`)
 are registered by `socsim_games::assemble_with` from its `dynamics` argument,
 one at a time, for worlds of held agents. They are documented in

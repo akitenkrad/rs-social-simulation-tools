@@ -92,6 +92,10 @@ It writes nothing else: no history, no play arena, no payoff.
 - **Common action space:** the game must implement `CommonActionSpace`
   (compile time) and every role must have the same number of actions
   (`GameError::Population`).
+- **Continuous games:** a `ContinuousGame` works as well; the agent copies the
+  whole action vector, and every role must have the same intervals
+  (`GameError::Population`). See
+  [Population dynamics with continuous actions](../games.md#population-dynamics-with-continuous-actions).
 - **Downstream:** the next step's `game_decide` seats the held agents with
   their new actions; [`game_metrics`](game-metrics.md) with
   `MetricsOptions::population_share(true)` records the updated shares.
@@ -101,7 +105,7 @@ It writes nothing else: no history, no play arena, no payoff.
 | Parameter | Default | Kind | Notes |
 |---|---|---|---|
 | `update: Update` | — (required) | structural | `Update::Synchronous`, the only schedule; it has no default so that adding schedules cannot change an existing configuration. |
-| `tie_break(ImitationTie)` | `KeepOwn` | structural | `KeepOwn`: keep the own action when the own payoff is among the highest, else adopt the lowest action index among the best neighbours. `LowestAction`: adopt the lowest action index among the agent and its neighbours that share the highest payoff. |
+| `tie_break(ImitationTie)` | `KeepOwn` | structural | `KeepOwn`: keep the own action when the own payoff is among the highest, else adopt the lowest action index among the best neighbours. `LowestAction`: adopt the lowest action index among the agent and its neighbours that share the highest payoff. In a continuous game "the lowest action" is the lexicographically smallest action vector (components compared with `f64::total_cmp`, a shorter vector first). |
 
 ## 8. How to apply
 

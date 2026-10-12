@@ -80,7 +80,11 @@ topology, `NetworkEdges`), `socsim-grid` only with feature `grid` (lattice
 topology, `GridNeighborhood`), `socsim-llm` only with feature `llm`,
 `socsim-metrics` only with feature `metrics`; built-in classic and population
 games and finite-game solvers — Nash, dominance, minimax, logit QRE,
-anonymous-game equilibria, replicator dynamics, ESS — in the default build). Library-only data/IO:
+anonymous-game equilibria, replicator dynamics, ESS — in the default build;
+continuous-action games — Cournot, differentiated Bertrand, continuous public
+goods — with damped best-response iteration (default build), the rules
+`DampedBestResponse` / `GradientAscent` and the continuous form of
+`game_metrics`). Library-only data/IO:
 `socsim-results` (run dirs, CSV/JSON), `socsim-metrics` (stats/distribution/
 agreement), `socsim-survey` (config-driven recode engine), `socsim-datasets`
 (dataset schemas + registry + optional acquisition), `socsim-reproduce`

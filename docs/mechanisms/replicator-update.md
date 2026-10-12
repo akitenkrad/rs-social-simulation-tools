@@ -89,6 +89,11 @@ describes the step just played (see
   `PayoffAggregation::Mean` otherwise.
 - **Held agents only** and a **common action space**, as for every dynamic
   (`GameError::Population`).
+- **Finite games only:** `ProportionalImitation` requires a `FiniteGame`; with
+  a [continuous game](../games.md#population-dynamics-with-continuous-actions)
+  the call does not compile, because the bound $\beta \le 1/\Delta\pi$ needs
+  the payoff range over every action profile. Use `fermi_update`,
+  `imitate_best` or `moran_update` for continuous actions.
 - **Downstream:** the next step plays the new held actions;
   [`game_metrics`](game-metrics.md) with
   `MetricsOptions::population_share(true)` records the updated shares.

@@ -108,8 +108,10 @@ Registers **Decision** and **Reward**.
 - **Information structure:** observations are built from the `DecisionContext`
   only (no `omniscient()`), so the default view — opponents in the agent's own
   encounter plus `X::view_for(me)` — applies.
-- **Two roles only:** `assemble_with_llm` rejects other games with
-  `GameError::UnsupportedRoles`.
+- **Role count:** `assemble_with_llm` accepts the role counts the matching
+  supports (`Matching::supports_roles`) and rejects others with
+  `GameError::UnsupportedRoles` — two roles under `FixedPlayers`, one per
+  agent under `WholePopulation`.
 
 ## 7. Parameters
 

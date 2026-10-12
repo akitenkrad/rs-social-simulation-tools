@@ -80,6 +80,10 @@ describes the step just played (see
 - **Common action space:** the game must implement `CommonActionSpace`
   (compile time) and every role must have the same number of actions
   (`GameError::Population`).
+- **Continuous games:** a `ContinuousGame` works as well; the partner's action
+  vector is copied unchanged, and every role must have the same intervals
+  (`GameError::Population`). See
+  [Population dynamics with continuous actions](../games.md#population-dynamics-with-continuous-actions).
 - **Partners and interaction partners are separate.** The comparison partner
   is drawn from the topology, not from this step's encounters; under
   `RandomPairs` in a world without topology an agent may compare itself with an

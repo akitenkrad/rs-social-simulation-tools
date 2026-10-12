@@ -24,6 +24,17 @@
 そのステップで値が定義されない列は行から省き，NaN を記録することはありません．
 列の詳しい説明は [`docs/games.ja.md` の「指標」](../games.ja.md#指標) にあります．
 
+**連続ゲーム．** `GameMetrics` は `FiniteGame` を要求します．[連続ゲーム](../games.ja.md#連続ゲーム) では，同じ Mechanism が `ContinuousMetrics<G>`（`G: ContinuousGame`）の形をとり，`ContinuousMetrics::new(&game, ContinuousMetricsOptions)` で作ります．
+同じ名前 `game_metrics` で登録され，PostStep で動き，同じ表 `"game"` に書くので，このページで両方の形を扱います．
+連続の形は毎ステップの後に次を行います．
+
+1. そのステップの席にわたる行動の各成分の平均と母標準偏差 `game.mean_action.<d>`，`game.action_sd.<d>` を書きます（役割によって成分の数が違うときは役割ごとに `game.mean_action.r<r>-<d>`，`game.action_sd.r<r>-<d>`）．
+2. 有限の形と同じく `game.mean_payoff`，`game.payoff_sd`，`game.aggregate.<name>` を書きます．
+3. 均衡を設定していれば `game.eq_distance` を書きます．
+4. **エージェントごと** の収束のカウンターを更新し，どのエージェントの行動も `window` ステップ続けて `tol` 動かなければ実行の終了を求めます．
+
+割合，`coop_rate`，`regret`，`action_entropy`，`population_share` は書きません．
+
 ## 2. 理論と出典
 
 ステップ $t$ の席を $S_t$，席 $s$ の行動を $a_s$，その役割を $r(s)$ とすると，打たれた行動の割合は次のとおりです．
@@ -45,6 +56,15 @@ $$q_t(k) = \frac{\lvert\{i \in A : h_i = k\}\rvert}{\lvert A\rvert}$$
 
 これは $p_t$ と 2 点で違います．席ではなくエージェントを数えること，そして [集団動学](../games.ja.md#集団動学) のもとでは，
 $p_t$ がそのステップで打った行動を表すのに対し，$q_t$ はそのステップの更新**後**の行動（次のステップの行動）を表すことです．
+
+**連続の形．** 席 $s$ の行動ベクトルを $x_s$，役割 $r$ の席を $S_t^r$，設定した均衡を $x^*$ とすると，
+
+$$\bar x_{t,d} = \frac{1}{\lvert S_t\rvert} \sum_{s \in S_t} x_{s,d}, \qquad \text{action\_sd}_{t,d} = \sqrt{\frac{1}{\lvert S_t\rvert} \sum_{s \in S_t} \big(x_{s,d} - \bar x_{t,d}\big)^2}, \qquad \text{eq\_distance}_t = \sum_r \sum_d \Big\lvert \frac{1}{\lvert S_t^r\rvert} \sum_{s \in S_t^r} x_{s,d} - x^*_{r,d} \Big\rvert$$
+
+です．`eq_distance` は役割ごとの平均行動をその役割の均衡の行動と比べるので，すべての役割の席の平均が均衡に一致するときにちょうど 0 になります．
+収束による停止は，各エージェントがそのステップで出した行動を `AgentId` 順につないだベクトル $v_t$ をステップごとに比べます（対戦しなかったエージェントは前の値を保ちます）．
+$\max_k \lvert v_t(k) - v_{t-1}(k)\rvert < \texttt{tol}$ の間カウンターが増えます．
+エージェントごとの基準なので，平均が落ち着いていても個々が動いていれば実行は止まりません．
 
 ## 3. データフロー
 
@@ -71,6 +91,7 @@ Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCum
 | 集計値の表 | ✓ | | 最後の行だけ．その `t` がこのステップのときだけ． |
 | 混合戦略の報告，`PolicyTable` のスロット | ✓ | | `MixedSource::Reported` のときだけ．報告はこのステップのものでなければならない．`Held` の席は純粋戦略として数える． |
 | `MetricsState { prev, below, cumulative }` | ✓ | ✓ | `stop` か `PlayedCumulative` を設定したとき，最初のステップで作る．World のフィールド `metrics_state`（それ以外では World の JSON から省かれる）．snapshot と再開を越えて残る． |
+| ステップの履歴，`held` | ✓ | | 連続の形で `stop` のときだけ．各エージェントがそのステップで出した行動（`PerEncounter` では最初の席の行動），なければ前の値，最初のステップでは保持行動． |
 | Recorder の表 `"game"` | | ✓ | ステップごとに `record_row` を 1 回． |
 | 停止の要求 | | ✓ | 収束のカウンターが `window` に達したとき `StepContext::request_stop`． |
 
@@ -98,6 +119,15 @@ Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCum
 | `stop(tol, window)` | なし | control | 席のあるステップで割合の最大変化が `< tol` のものが `window` 回続いたら停止．`tol` は有限で `> 0`，`window ≥ 1`． |
 | `action_entropy(on)` | 有効 | observation | feature `metrics` のときだけ．共通 ID のときだけ． |
 | `population_share(on)` | 無効 | observation | `game.population_share.a<k>`（`k` を保持するエージェント ÷ 全エージェント．集団動学の後）を足す．すべての役割の行動数が等しくなければならない（`GameError::Metrics`）． |
+
+連続の形は `ContinuousMetricsOptions` を受けます．
+
+| パラメータ | 既定値 | 種別 | 備考 |
+|---|---|---|---|
+| `equilibrium(ContinuousEquilibrium)` | `None` | observation | `Solve`：`new` の中で `best_response_iteration` を 1 回，区間の中点から既定のオプションで．`Converged` でなければ拒否．見つける均衡は 1 つ．`Given(profile)`：役割ごとに長さの合った有限の行動．どちらも `game.eq_distance` を足す． |
+| `stop(tol, window)` | なし | control | どのエージェントの出した行動のどの成分も `tol` 以上変わらないステップが `window` 回続いたら停止．`tol` は有限で `> 0`，`window ≥ 1`． |
+
+区間やオプションが不正なとき，`Given` の形が合わないとき，解が収束しないときは，`ContinuousMetrics::new` が `GameError::Metrics` を返します．
 
 ## 8. 適用方法
 
@@ -129,6 +159,22 @@ sim.run()?;                               // may end before t_max via the stop r
 ```
 
 Tit-for-Tat と裏切る相手では，この実行は `t = 22` で終わります（割合は `t = 2` から変わらず，`t = 3` から 20 ステップ安定する）．
+
+連続ゲームでは次のようにします．
+
+```rust
+use socsim_games::{ContinuousEquilibrium, ContinuousMetrics, ContinuousMetricsOptions};
+
+let metrics = ContinuousMetrics::new(     // before `game` moves into build_world
+    &game,
+    ContinuousMetricsOptions::new()
+        .equilibrium(ContinuousEquilibrium::Solve)
+        .stop(1e-9, 10),
+)?;
+let mut sim = assemble(world, WholePopulation::new(), rules, NormalFormOutcome, PlayOptions::new(), seed)?
+    .add_mechanism(Box::new(metrics))
+    .build();
+```
 `describe()` はこの設定の列を並べます．runvault の宣言へ写す方法は
 [`docs/games.ja.md` の「列の説明」](../games.ja.md#列の説明describe) を参照してください．
 
@@ -145,6 +191,12 @@ $(T, R, P, S) = (5, 3, 1, 0)$ の囚人のジレンマで，Tit-for-Tat と常�
   `game.regret = 1`，`game.eq_distance = 2`．
 - `t ≥ 2`：`played_share.a1 = 1`，`coop_rate = 0`，`mean_payoff = 1`，`payoff_sd = 0`，`regret = 0`，`eq_distance = 0`．
 - 実行は `t = 5` で止まります．
+
+3 社のクールノー（$P = 100 - Q$，単位費用 10，$q^* = 22.5$）が `WholePopulation` の下で `[0, 50, 100]` から $\alpha = 0.5$ の `DampedBestResponse` で学習し，集計値つきで組み立て，`ContinuousEquilibrium::Solve`（`[[22.5], [22.5], [22.5]]` を見つける）と `stop(1e-9, 10)` を設定すると，
+
+- `t = 1`：`game.mean_action.0 = 50`，`game.action_sd.0 ≈ 40.82`，`game.mean_payoff = -3000`，`game.aggregate.total_output = 150`，`game.aggregate.price = -50`，`game.eq_distance = 127.5`（$22.5 + 27.5 + 77.5$．各役割の自分の席を 22.5 と比べる）．
+- `t = 2`：行動は `[0, 25, 60]`，`game.mean_action.0 ≈ 28.33`，`game.eq_distance = 62.5`．
+- 実行は `t = 92` で止まり，`game.mean_action.0 = 22.5`，`game.mean_payoff = 506.25`，`game.eq_distance ≈ 3.6e-10` です（`examples/cournot.rs` も同じ停止を表示します）．
 
 [`docs/games.ja.md` の「集団動学」](../games.ja.md#集団動学) のタカ・ハトの例（Held の 1 000 人，初期のタカ 300 人，`RandomPairs`，比例模倣）で `population_share(true)` にすると，
 `t = 1` には `game.played_share.a0 = 0.3`（対戦したタカ）と `game.population_share.a0 = 0.319`（最初の更新の後のタカ）が記録されます．

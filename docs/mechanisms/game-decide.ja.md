@@ -25,6 +25,9 @@
 規則のオブジェクトそのものは共有されるコードです．各エージェントの規則の状態は World の `PolicyTable` にあるので，
 この Mechanism は再開後の実行に影響する状態を持ちません．
 
+[連続ゲーム](../games.ja.md#連続ゲーム)（`G: ContinuousGame`，行動は `Vec<f64>`）では，同じ検査が，成分の数が役割の区間と違う行動，NaN や無限大の成分を持つ行動，区間の外にある行動を拒否します（`ActionError::{DimensionMismatch, NonFiniteComponent, OutOfBounds}`．組込みの連続ゲームは `check_action` を `check_continuous_action` で実装しています）．
+ほかの不正な行動と同じく，`OnInvalidAction::Stop` ではステップを止め，`Fallback` では置き換えられます．
+
 `game_decide` が動かすのは自分の `RuleBook` の種類だけです．どの Driver が種類を担当するかは `KindCatalog` で決まります．
 feature `llm` では，`LlmRuleBook` に登録した種類は [`game_llm_decide`](game-llm-decide.ja.md) の担当で，
 `game_decide` はそれらのエージェントを Decision でも Reward でも飛ばします．その席は，`assemble_with_llm` が `game_decide` のすぐ後に登録する `game_llm_decide` が埋めます．
@@ -56,6 +59,17 @@ $$s_i \leftarrow \text{learn}^{\text{step}}_{k(i)}\Big(\text{learn}^{\text{enc}}
 
 ここで $o_{i,1}^t, \dots, o_{i,m}^t$ は `EncounterId` の順に並べたエージェント $i$ の対戦の結果，
 $\text{learn}^{\text{enc}}$ は `learn_encounter`，$\text{learn}^{\text{step}}$ は `learn_step` です．
+
+連続ゲームの 2 つの規則は **同時手番** で動きます．$x_{-i}^{t-1}$ を前のステップでほかの役割が出した行動（ステップの履歴から読み，保持行動からは読まない），$x_i$ をエージェント $i$ が最後に出した行動として，
+
+$$\texttt{DampedBestResponse}:\ x_i \leftarrow \mathrm{Proj}\big((1 - \alpha)\,x_i + \alpha\,\mathrm{BR}_r(x_{-i}^{t-1})\big), \qquad \texttt{GradientAscent}:\ x_i \leftarrow \mathrm{Proj}\big(x_i + \eta\,\nabla_{x_i} u_r(x_i, x_{-i}^{t-1})\big)$$
+
+です．$\mathrm{Proj}$ は各成分を役割の区間へ切り詰めます．
+減衰 $\alpha \in (0, 1]$ があるのは，減衰の無い同時手番の最適応答が収束するとは限らないからです．線形のクールノー競争では，内点の均衡は 3 社で中立安定，4 社以上で不安定です（Theocharis, 1960）．
+前のステップを読むので，更新はエージェントの処理順に依らない Jacobi 型の反復になり，`DampedBestResponse` はソルバーの `best_response_step` とちょうど同じ更新をします．
+最初のステップ（ほかの役割がまだ出していないとき）は，自分の保持行動（`DecisionContext::my_held()`）をそのまま出します．
+最適応答はゲームの解析的な `best_response`，注入した `BestResponseOracle`，`NumericBr::Unimodal1D` を宣言した 1 次元の行動での黄金分割の探索のいずれかから，勾配はゲームの `gradient` か，刻み $h = 10^{-6} \max(1, \lvert x_d \rvert)$ の中心差分（区間の端では片側差分なので，誤差は $\lvert x \rvert$ とともに増える）から得ます．
+詳細は [`docs/games.ja.md` の連続ゲーム](../games.ja.md#決定規則dampedbestresponse-と-gradientascent) にあります．
 
 規則は `socsim_marl::Policy` とは別物です．`DecisionRule` は `G::Action` 上のゲーム層の戦略で状態を World に置くものであり，
 観測ベクトル上のニューラルな方策ではありません．
@@ -162,7 +176,7 @@ let sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules, NormalFormOutco
 ## 9. 決定論性と RNG
 
 `decide` はエンジンのステップの RNG（`ctx.rng`，`derive_seed(seed, &[1])` から）を受け取ります．
-`UniformRandom` はこれを引き，`Fixed` と `TitForTat` は引きません．
+`UniformRandom` はこれを引き，`Fixed`，`TitForTat`，`DampedBestResponse`，`GradientAscent` は引きません．
 ストリームは活性化の順に，1 人のエージェントの中では決定の単位の順に消費されます．
 `Mixed`，`LogitChoice`，`RothErev`，GTFT（相手の裏切りの後で `0 < generosity < 1` のとき）は決定ごとに一様な `f64` を 1 回引き，
 行動の番号順に累積確率をたどります．同点の乱択（`FictitiousPlay`，`MyopicBestResponse`）は同点の行動について `gen_range` を 1 回引きます．
@@ -179,6 +193,9 @@ let sim = assemble(world, FixedPlayers::pairs(&[(0, 1)]), rules, NormalFormOutco
 100 ラウンドの得点は 99 と 104 です（`examples/ipd_pair.rs`）．
 範囲外の行動を返す規則は，`Stop` ではステップを止め，`Fallback` では（発生ごとに `game.invalid_action` を 1 件記録して）差し替えられます．
 
+3 社のクールノー（$P = 100 - Q$，単位費用 10，$q \in [0, 100]$．したがって $q^* = 22.5$）が `WholePopulation` の下で `[0, 50, 100]` から $\alpha = 0.5$ の `DampedBestResponse` で学習すると，ステップ 1 は `[0, 50, 100]`，ステップ 2 は `[0, 25, 60]` を出します．
+どの生産量も 10 ステップ続けて `1e-9` 動かなくなったら `game_metrics` が止める設定では，実行は 92 ステップで終わり，どの企業も 22.5 から `2e-10` 以内にあります（`examples/cournot.rs`）．
+
 ALLC，ALLD，TFT，GRIM，WSLS のオートマトンを `PerEncounter` で 200 ラウンド総当たりさせると（`examples/ipd_tournament.rs`），
 合計は 1800，2008，1999，1999，1900 です．TFT は ALLD に最初のラウンドだけ負け（199 対 204），ほかの相手とは協力し続けます．
 
@@ -189,3 +206,4 @@ ALLC，ALLD，TFT，GRIM，WSLS のオートマトンを `PerEncounter` で 200 
 - Erev, I., & Roth, A. E. (1998). Predicting how people play games: Reinforcement learning in experimental games with unique, mixed strategy equilibria. *American Economic Review*, 88(4), 848–881.
 - Nowak, M., & Sigmund, K. (1993). A strategy of win-stay, lose-shift that outperforms tit-for-tat in the Prisoner's Dilemma game. *Nature*, 364, 56–58.
 - Shapley, L. S. (1964). Some topics in two-person games. In M. Dresher, L. S. Shapley, & A. W. Tucker (Eds.), *Advances in Game Theory* (pp. 1–28). Princeton University Press.
+- Theocharis, R. D. (1960). On the stability of the Cournot solution on the oligopoly problem. *The Review of Economic Studies*, 27(2), 133–134.

@@ -69,6 +69,7 @@ PostStep では，`world.held()` は次のステップの行動を持ち，`worl
 - **`Sum` での対戦の数：** `PayoffAggregation::Sum` では，Matching が `encounter_bounds` を報告しなければなりません
   （集団用の Matching はどれも報告し，`FixedPlayers`，`RoundRobin`，既定のままの独自の Matching は報告しません）．報告しない Matching では `PayoffAggregation::Mean` を使ってください．
 - **Held のエージェントだけ**と**共通の行動の集合**は，ほかの動学と同じです（`GameError::Population`）．
+- **有限ゲームだけ：** `ProportionalImitation` は `FiniteGame` を要求します．[連続ゲーム](../games.ja.md#連続の行動での集団動学) ではコンパイルできません．上限 $\beta \le 1/\Delta\pi$ に全行動の組にわたる利得の範囲が要るからです．連続の行動には `fermi_update`，`imitate_best`，`moran_update` を使ってください．
 - **下流：** 次のステップは新しい保持行動で対戦します．
   `MetricsOptions::population_share(true)` の [`game_metrics`](game-metrics.ja.md) が更新後の割合を記録します．
 

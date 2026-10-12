@@ -61,7 +61,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`game_decide`](mechanisms/game-decide.ja.md) | Decision, Reward | decision rules (e.g. Axelrod 1984) | rule-driven | 席に着いた各エージェントの `DecisionRule` が決定の単位（ステップ，役割，対戦）ごとに検査済みの行動を選び，対戦の後に規則が対戦ごと（`learn_encounter`）とステップごと（`learn_step`）に学習する．規則の状態は World にある（ライブラリ専用）． |
 | [`game_llm_decide`](mechanisms/game-llm-decide.ja.md) | Decision, Reward | LLM agents in repeated games | LLM-driven | LLM の種類のエージェントが要求を描画し，それをバッチにまとめ，重複を除き，応答ストアから再生するかバックエンドへ送り，再試行とフォールバックを交えて検査済みの行動にする（feature `llm`．ライブラリ専用）． |
 | [`game_play`](mechanisms/game-play.ja.md) | Interaction | normal-form payoffs | structural | 対戦ごとに `OutcomeRule` で利得を計算し，エージェントごとに集計（`Sum`/`Mean`）してステップ履歴に記録する（ライブラリ専用）． |
-| [`game_metrics`](mechanisms/game-metrics.ja.md) | PostStep | game-theoretic summary statistics | observation | ステップごとの行動の割合，集団の割合，利得の平均と標準偏差，協力率，後悔，均衡までの距離，公開集計値を記録し，対戦が落ち着いたら実行を止められる（ライブラリ専用）． |
+| [`game_metrics`](mechanisms/game-metrics.ja.md) | PostStep | game-theoretic summary statistics | observation | ステップごとの行動の割合，集団の割合，利得の平均と標準偏差，協力率，後悔，均衡までの距離，公開集計値を記録し（連続ゲームでは行動の平均と標準偏差，利得，公開集計値，均衡までの距離），対戦が落ち着いたら実行を止められる（ライブラリ専用）． |
 | [`imitate_best`](mechanisms/imitate-best.ja.md) | Reward | Nowak & May (1992) | deterministic imitation | Held の各エージェントが，自分と格子・ネットワークの近傍の中で最も稼いだエージェントの行動を一斉に採る．同点は行動の添字で破る（ライブラリ専用）． |
 | [`fermi_update`](mechanisms/fermi-update.ja.md) | Reward | Szabó & Tőke (1998) | stochastic imitation | Held の各エージェントが，無作為な相手 1 人を確率 $1/(1 + e^{-(\pi_j - \pi_i)/K})$ で一斉に写す（ライブラリ専用）． |
 | [`replicator_update`](mechanisms/replicator-update.ja.md) | Reward | Schlag (1998) | stochastic imitation | 比例模倣：より稼いだ無作為な相手を確率 $\beta[\pi_j - \pi_i]_+$ で写す．$\beta \le 1/\Delta\pi$ を組み立て時に検査する（ライブラリ専用）． |
@@ -75,7 +75,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`axelrod`](mechanisms/axelrod.ja.md) | Interaction | Axelrod (1997) | cultural dissemination | 出会いのたびに類似度に等しい確率で異なる特徴を1つコピーする（ライブラリ専用）． |
 | [`group_conformity`](mechanisms/group-conformity.ja.md) | Interaction | DeGroot (1974) | within-group averaging | 各エージェントが自グループの平均意見へ向けて割合 α だけ移動し，グループは独立に収束する（ライブラリ専用）． |
 
-`game_*` の最初の 4 行は `socsim_games::assemble`，`assemble_with_aggregates`，`assemble_with` のどれか（`game_match`，`game_decide`，`game_play`），または `socsim_games::llm::assemble_with_llm`（4 つすべて）がまとめて登録するものです．`game_metrics` は `GameMetrics::new` で作り，返されたビルダーに足します．
+`game_*` の最初の 4 行は `socsim_games::assemble`，`assemble_with_aggregates`，`assemble_with` のどれか（`game_match`，`game_decide`，`game_play`），または `socsim_games::llm::assemble_with_llm`（4 つすべて）がまとめて登録するものです．`game_metrics` は `GameMetrics::new`（連続ゲームでは `ContinuousMetrics::new`）で作り，返されたビルダーに足します．
 4 つの集団動学（`imitate_best`，`fermi_update`，`replicator_update`，`moran_update`）は，Held のエージェントからなる World について，`socsim_games::assemble_with` が引数 `dynamics` から 1 つずつ登録します．いずれも[戦略形ゲーム](games.ja.md)のページで文脈とともに説明しており，ライブラリ専用です．
 最後の8行は，汎用の（非 HR）[`socsim-mechanisms`](architecture.ja.md#クレートワークスペース)クレートの
 メンバーであり，HR ライフサイクルクレートおよび組織的沈黙クレートとは区別される再利用可能でドメイン非依存な社会ダイナミクスの構成要素

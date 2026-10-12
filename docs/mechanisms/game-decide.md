@@ -32,6 +32,15 @@ The rule objects themselves are shared code. Every agent's rule state lives in
 the world's `PolicyTable`, so the mechanism holds no state that matters for a
 resumed run.
 
+In a [continuous game](../games.md#continuous-games) (`G: ContinuousGame`,
+actions `Vec<f64>`) the same check rejects an action whose number of
+components differs from the role's bounds, which has a NaN or infinite
+component, or which lies outside its interval
+(`ActionError::{DimensionMismatch, NonFiniteComponent, OutOfBounds}`; built-in
+continuous games implement `check_action` with `check_continuous_action`). Like
+any other invalid action it stops the step under `OnInvalidAction::Stop` and is
+replaced under `Fallback`.
+
 `game_decide` drives only the kinds of its `RuleBook`. Which driver owns a kind
 is fixed by the `KindCatalog`: with the `llm` feature, kinds registered in an
 `LlmRuleBook` belong to [`game_llm_decide`](game-llm-decide.md), and
@@ -75,6 +84,29 @@ $$s_i \leftarrow \text{learn}^{\text{step}}_{k(i)}\Big(\text{learn}^{\text{enc}}
 where $o_{i,1}^t, \dots, o_{i,m}^t$ are agent $i$'s encounter outcomes in
 `EncounterId` order, $\text{learn}^{\text{enc}}$ is `learn_encounter` and
 $\text{learn}^{\text{step}}$ is `learn_step`.
+
+For continuous games two rules move **simultaneously**. With $x_{-i}^{t-1}$
+the actions the other roles played in the previous step (read from the step
+history, never from the held actions) and $x_i$ the action agent $i$ last
+played,
+
+$$\texttt{DampedBestResponse}:\ x_i \leftarrow \mathrm{Proj}\big((1 - \alpha)\,x_i + \alpha\,\mathrm{BR}_r(x_{-i}^{t-1})\big), \qquad \texttt{GradientAscent}:\ x_i \leftarrow \mathrm{Proj}\big(x_i + \eta\,\nabla_{x_i} u_r(x_i, x_{-i}^{t-1})\big)$$
+
+where $\mathrm{Proj}$ clamps every component to the role's interval. The
+damping $\alpha \in (0, 1]$ is there because undamped simultaneous best
+responses need not converge: in linear Cournot competition the interior
+equilibrium is neutrally stable for three firms and unstable for four or more
+(Theocharis, 1960). Reading the previous step makes the update a Jacobi
+iteration whose result does not depend on the activation order;
+`DampedBestResponse` reproduces exactly the steps of the solver's
+`best_response_step`. On the first step, before any other role has played, an
+agent repeats its held action (`DecisionContext::my_held()`). The best response
+comes from the game's analytic `best_response`, an injected
+`BestResponseOracle`, or a golden-section search for one-dimensional actions
+declared `NumericBr::Unimodal1D`; the gradient from the game's `gradient` or a
+central difference with $h = 10^{-6} \max(1, \lvert x_d \rvert)$ (one-sided at a
+bound, so its error grows with $\lvert x \rvert$). Details are in
+[`docs/games.md` § Continuous games](../games.md#decision-rules-dampedbestresponse-and-gradientascent).
 
 A rule is distinct from a `socsim_marl::Policy`: a
 `DecisionRule` is a game-layer strategy over `G::Action` with its state stored
@@ -208,7 +240,8 @@ runnable tournament is in
 ## 9. Determinism & RNG
 
 `decide` receives the engine step RNG (`ctx.rng`, from `derive_seed(seed, &[1])`);
-`UniformRandom` draws from it, `Fixed` and `TitForTat` do not. The stream is
+`UniformRandom` draws from it, `Fixed`, `TitForTat`, `DampedBestResponse` and
+`GradientAscent` do not. The stream is
 consumed in activation order and, within one agent, in decision-unit order.
 `Mixed`, `LogitChoice`, `RothErev` and GTFT (after an opponent's defection,
 with `0 < generosity < 1`) draw one uniform `f64` per decision and walk the
@@ -232,6 +265,13 @@ rounds the scores are 99 and 104 (`examples/ipd_pair.rs`). A rule that returns
 an out-of-range action stops the step under `Stop`, and is replaced (with one
 `game.invalid_action` event per occurrence) under `Fallback`.
 
+Three Cournot firms ($P = 100 - Q$, unit cost 10, $q \in [0, 100]$, so
+$q^* = 22.5$) that learn by `DampedBestResponse` with $\alpha = 0.5$ from
+`[0, 50, 100]` under `WholePopulation` play `[0, 50, 100]` in step 1 and
+`[0, 25, 60]` in step 2; with `game_metrics` stopping once no quantity moves by
+`1e-9` for ten steps, the run ends after 92 steps with every firm within
+`2e-10` of 22.5 (`examples/cournot.rs`).
+
 In a 200-round round-robin of ALLC, ALLD, TFT, GRIM and WSLS automata under
 `PerEncounter` (`examples/ipd_tournament.rs`), the totals are 1800, 2008, 1999,
 1999 and 1900; TFT loses only the first round against ALLD (199 to 204) and
@@ -244,3 +284,4 @@ cooperates with everyone else.
 - Erev, I., & Roth, A. E. (1998). Predicting how people play games: Reinforcement learning in experimental games with unique, mixed strategy equilibria. *American Economic Review*, 88(4), 848–881.
 - Nowak, M., & Sigmund, K. (1993). A strategy of win-stay, lose-shift that outperforms tit-for-tat in the Prisoner's Dilemma game. *Nature*, 364, 56–58.
 - Shapley, L. S. (1964). Some topics in two-person games. In M. Dresher, L. S. Shapley, & A. W. Tucker (Eds.), *Advances in Game Theory* (pp. 1–28). Princeton University Press.
+- Theocharis, R. D. (1960). On the stability of the Cournot solution on the oligopoly problem. *The Review of Economic Studies*, 27(2), 133–134.

@@ -13,6 +13,7 @@
 格子・ネットワーク・よく混ざった集団の上で模倣や繁殖をするエージェントの集団（[集団動学](#集団動学) を参照），
 ステップごとの指標を記録する Mechanism `game_metrics`（[指標](#指標) を参照）を説明します．
 シミュレーションとは別に，古典的なゲームと有限ゲームのソルバー（Nash 均衡，支配，ミニマックス，ロジット QRE，匿名ゲームの均衡，レプリケータ動学，進化的安定性）も提供します（[有限ゲームを解く](#有限ゲームを解く) を参照）．
+実数の行動を持つゲーム（クールノー競争，ベルトラン競争，連続の公共財）には，専用の組込みのゲーム，最適応答反復のソルバー，決定規則，指標があります（[連続ゲーム](#連続ゲーム) を参照）．
 
 ---
 
@@ -20,8 +21,8 @@
 
 | feature | 追加されるもの | socsim への依存 |
 |---|---|---|
-| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`，`AggregateGame`，`AnonymousGame`，`CommonActionSpace`），`MatrixGame`，組込みのゲーム（`catalog`），混合戦略（`mixed`），ソルバー（`solve`．`pure_nash_counts`，レプリケータ動学，`ess_verdict` を含む），学習則の計算（`learn`），`AggregateSpec` と指標用の行動 ID（`metric_action_ids`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
-| `core` | World（`GameWorld`，`Topology`），規則（学習則を含む），利得規則，Matching（`FixedPlayers`，`RoundRobin`，`RandomPairs`，`RandomGroups`，`WholePopulation`），ビュー，`build_world`，集団動学の設定の型（`ImitateBest`，`FermiUpdate`，`ProportionalImitation`，`MoranUpdate`），指標の Mechanism `GameMetrics` | `socsim-core` |
+| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`，`ContinuousGame`，`AggregateGame`，`AnonymousGame`，`CommonActionSpace`，`DescribeGame`），`MatrixGame`，組込みのゲーム（`catalog`，連続の行動の `continuous`），混合戦略（`mixed`），ソルバー（`solve`．`pure_nash_counts`，レプリケータ動学，`ess_verdict`，連続の `best_response_iteration` を含む），学習則の計算（`learn`），`AggregateSpec` と指標用の行動 ID（`metric_action_ids`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
+| `core` | World（`GameWorld`，`Topology`），規則（学習則と連続の規則 `DampedBestResponse` / `GradientAscent` を含む），利得規則，Matching（`FixedPlayers`，`RoundRobin`，`RandomPairs`，`RandomGroups`，`WholePopulation`），ビュー，`build_world`，集団動学の設定の型（`ImitateBest`，`FermiUpdate`，`ProportionalImitation`，`MoranUpdate`），指標の Mechanism `GameMetrics` とその連続版 `ContinuousMetrics` | `socsim-core` |
 | `engine` | `assemble`，`assemble_with_aggregates`，`assemble_with`（どれも `SimulationBuilder` を返す），対戦の評価経路（`Pairwise`，`counting_play()`），集団動学の Mechanism．`core` を含意 | `socsim-core`，`socsim-engine` |
 | `net` | `Topology::network` / `Topology::directed_network` と Matching `NetworkEdges`（[トポロジー](#トポロジーgameworldwith_topology) を参照）．`core` を含意 | `socsim-core`，`socsim-net` |
 | `grid` | `Topology::grid`（`GridSpec`）と Matching `GridNeighborhood`．`core` を含意 | `socsim-core`，`socsim-grid` |
@@ -126,8 +127,10 @@ cargo run -p socsim-games --example ipd_pair --features core,engine
 | `NormalFormGame: StageGame` | 全役割・全行動の組に対する利得 | `payoff(role, profile)`，`payoffs_into(profile, out)`（既定の実装は `payoff` を役割ごとに呼ぶ） |
 | `FiniteGame: NormalFormGame<Action = usize>` | 番号付きの有限個の行動 | `n_actions(role)`，`action_label(role, action)`（既定は `"a{action}"`），`is_symmetric()`（既定は `false`） |
 
+`FiniteGame` と並んで，`ContinuousGame: NormalFormGame<Action = Vec<f64>>` が，行動が箱（`bounds(role)`）の中の実数ベクトルであるゲームを表します（[連続ゲーム](#連続ゲーム) を参照）．
+
 規則と利得規則は，必要な段をトレイト境界として宣言します．
-`UniformRandom` と `TitForTat` は `FiniteGame` を，`NormalFormOutcome` は `NormalFormGame` を要求するので，
+`UniformRandom` と `TitForTat` は `FiniteGame` を，`DampedBestResponse` と `GradientAscent` は `ContinuousGame` を，`NormalFormOutcome` は `NormalFormGame` を要求するので，
 組み合わせの誤りは実行時ではなくコンパイル時のエラーになります．
 
 ### 匿名ゲームと `CommonActionSpace`
@@ -144,8 +147,8 @@ cargo run -p socsim-games --example ipd_pair --features core,engine
 行動の組を列挙する代わりにこれを評価します．
 `CommonActionSpace` は，エージェントの間で行動を写す動学（`imitate_best`，`fermi_update`，`replicator_update`，`moran_update`）が要求します．
 これを実装しないゲームと組み合わせるとコンパイルエラーになります．
-目印は約束にすぎないので，組み立ての時にも実行時の検査をします．`FiniteGame` ではすべての役割の行動数が等しくなければなりません（違えば `GameError::Population`）．
-`MatrixGame` と組込みのゲームはすべて `CommonActionSpace` を実装し，catalog の集団用の 4 つのゲームは `AnonymousGame` も実装します．
+目印は約束にすぎないので，組み立ての時にも実行時の検査をします．`FiniteGame` ではすべての役割の行動数が等しく，`ContinuousGame` ではすべての役割の成分の数が等しく区間も同一でなければなりません（違えば `GameError::Population`）．
+`MatrixGame` と組込みのゲームは有限・連続を問わずすべて `CommonActionSpace` を実装し，catalog の集団用の 4 つのゲームは `AnonymousGame` も実装します．
 
 ### `MatrixGame`
 
@@ -168,7 +171,7 @@ cargo run -p socsim-games --example ipd_pair --features core,engine
 `FixedPlayers`，`RoundRobin`，`RandomPairs`，`NetworkEdges`，`GridNeighborhood` は 2 役割，`RandomGroups::new(k)` は `k` 役割，
 `WholePopulation` はエージェント 1 人につき 1 役割の対戦を組みます．
 Matching が扱えない `n_roles()` のゲームは，`assemble` が `GameError::UnsupportedRoles` で拒否します．
-LLM による決定（`assemble_with_llm`）は引き続き 2 役割だけです．
+LLM による決定の `assemble_with_llm` も同じです．
 
 ### 組込みのゲーム：`catalog`
 
@@ -284,6 +287,7 @@ pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
 
 ほかの組込みの規則 — `Mixed`（固定の混合戦略），`MyopicBestResponse`，`FictitiousPlay`，`LogitChoice`，`RothErev`，
 繰り返しゲームのオートマトン `Automaton` — は [学習則と決定の粒度](#学習則と決定の粒度) で説明します．
+連続ゲームでは `Fixed::new(vec![..])` が一定の行動ベクトルを出し，`DampedBestResponse` と `GradientAscent` は [連続ゲーム](#決定規則dampedbestresponse-と-gradientascent) で説明します．
 
 規則は `RuleBook` に**種類の名前**で登録します（`register(kind, Arc<dyn DecisionRule<G, X>>)`．
 重複した種類は `RuleError::DuplicateKind`）．種類の番号は種類名の昇順で振られるので，登録の順序には依存しません．
@@ -383,7 +387,7 @@ pub trait ExperimentState: Send + Sync + 'static {
 組込みの規則は利用者の `PolicyState` の型を知りません．`Slot<T>` トレイト（`slot`，`slot_mut`，`from_slot`）を通して自分の状態に届きます．
 `Fixed`，`UniformRandom`，`Mixed`，`MyopicBestResponse` は `Slot<Stateless>` を，`TitForTat` は `Slot<TftState>` を要求し，
 学習則は `Slot<BeliefState>`（`FictitiousPlay`），`Slot<EstimateState>`（`LogitChoice`），
-`Slot<PropensityState>`（`RothErev`），`Slot<AutomatonPolicyState>`（`Automaton`）を要求します．
+`Slot<PropensityState>`（`RothErev`），`Slot<AutomatonPolicyState>`（`Automaton`）を，連続の規則 `DampedBestResponse` と `GradientAscent` は `Slot<ContinuousState>` を要求します．
 `BuiltinPolicyState`（`X = ()` の `PolicyState`）はこれらをすべて実装しています．
 組込みの規則と独自の規則を混ぜるには，これを包みます．
 
@@ -467,6 +471,7 @@ resumed.restore(snapshot);                  // continues bit-identically
 | `role()`，`encounter()` | その決定での自分の役割と対戦（`PerAgentRole` では `encounter()` は `None`） |
 | `opponents()` | **同じ対戦の**ほかのエージェント（`PerAgentRole` では，その役割で着いた対戦すべての相手） |
 | `my_history()` | 自分の過去の `StepRecord`（行動，利得，`n_played`） |
+| `my_held()` | この決定の前の自分の保持行動．初期行動か，最後に選んだ行動 |
 | `opponent_history(id)` | `id` の行動の履歴．**`id` が現在の相手でなければ `None`** |
 | `pair_history(id)` | `id` との過去の対戦．対の履歴が有効で，かつ `id` が現在の相手でなければ `None` |
 | `game()` | 段階ゲーム |
@@ -1383,7 +1388,7 @@ LlmPolicy::new(OwnHistoryObs::new(5), MarkdownTableRenderer::default(), LabelPar
 - `.require_reason(true)` は文字列の `"reason"` も要求します．理由が無ければ，緩い照合でも違反です．
 - `NumberParser::new(field).bounds(lo, hi).out_of_range(OutOfRange::Clamp)` は数値の応答のための単体の補助です（`parse_number(raw) -> ParseOutcome<f64>`）．
   JSON の数値か数字の文字列（`value_was_string`）で，有限の値だけを受け付けます．範囲外は `Violation`（既定）か切り詰め（`clamped`）です．
-  `MatrixGame` 用の `ActionParser` ではありません．
+  `MatrixGame` 用の `ActionParser` ではありませんが，1 次元の行動のすべての `ContinuousGame` 用の `ActionParser` であり，`DescribedRenderer` と組にして使います（[連続ゲームでの LLM による決定](#連続ゲームでの-llm-による決定) を参照）．
 
 受理した応答は `ParseFlags { fenced, value_was_string, clamped, lenient_match }` を，拒否した応答は
 `Violation { kind, message }`（`ViolationKind::{Format, Label, Range, InvalidAction}`）を伴います．
@@ -1682,6 +1687,7 @@ $\pi_i$ はエージェント $i$ のそのステップの利得で，`PayoffAgg
 - **Held のエージェントだけ．** 全エージェントが `AssignKind::Held` でなければなりません．決定規則を持つエージェントは Decision で `held` を上書きするので，動学は規則と混ざることを拒みます．
 - **共通の行動の集合．** ゲームが `CommonActionSpace` を実装していなければならず（実装していなければコンパイルできません），すべての役割の行動数が等しくなければなりません．
 - **トポロジー．** `imitate_best` は格子かネットワークのトポロジーを要し，`moran_update` はトポロジーの無い World を要します．`fermi_update` と `replicator_update` はどちらでも動きます．
+- **連続ゲーム．** `imitate_best`，`fermi_update`，`moran_update` は `ContinuousGame`（すべての役割の区間が同一のもの）も受け付けます．`replicator_update` は有限ゲームだけです．`moran_update` は連続ゲームでは `Fitness::Linear` を拒否し，`mutation > 0` ならガウスの突然変異の幅を要求します（[連続の行動での集団動学](#連続の行動での集団動学) を参照）．
 - **`replicator_update` の上限．** 採用の確率 $\beta\,[\pi_j - \pi_i]_+$ が 1 を超えてはならないので，$\beta \le 1/\Delta\pi$ でなければなりません．$\Delta\pi$ は，1 ステップに取りうる利得の値域の幅です．
 - **`moran_update` の線形の適応度の正値性．** `Fitness::Linear { w }` では，1 ステップに取りうる最小の利得 $\pi_{\min}$ で $1 - w + w\,\pi_{\min}$ が正でなければなりません．`Fitness::Exponential` は常に正です．
 
@@ -1901,12 +1907,13 @@ cargo run --release -p socsim-games --features core,engine --example hawk_dove_l
 
 ## 指標
 
-`GameMetrics` は読むだけの Mechanism（名前は `game_metrics`）で，ゲームのステップごとの統計 — 行動の割合，利得の平均とばらつき，
+`GameMetrics`（`FiniteGame` 用）は読むだけの Mechanism（名前は `game_metrics`）で，ゲームのステップごとの統計 — 行動の割合，利得の平均とばらつき，
 協力率，後悔，均衡までの距離，公開集計値 — を Recorder の表 `"game"` に 1 行ずつ記録します．
 `assemble` は登録しないので，ゲームから作って，返されたビルダーに足します．
 **PostStep** でゲームの全 Mechanism の後に動くので，終わったステップを見ます．
 乱数を引かず，モデルの状態を変えません．World に書くのは，収束による停止と累積の情報源のための自分の記録だけです
 （[Mechanism のページ](mechanisms/game-metrics.ja.md) を参照）．
+連続ゲームでは同じ Mechanism の連続版 `ContinuousMetrics` を使い，割合の代わりに行動の平均とばらつきを記録します（[指標：`ContinuousMetrics`](#指標continuousmetrics) を参照）．
 
 ### `game_metrics` を足す
 
@@ -2454,8 +2461,8 @@ meaning = "Public game aggregate for the completed step; present only when the s
 集団動学も同じエンジンのストリームから，Reward で学習の後に，`AgentId` の昇順にエージェントを訪れて引きます．
 `fermi_update` と `replicator_update` は，エージェントごとに相手を 1 回（`gen_range`），続いて一様な `f64` を 1 回引きます．近傍を持たないエージェントは引きません．
 `imitate_best` は何も引きません．
-`moran_update` は 1 ステップに 4 回引きます．親のための一様な `f64`，死ぬエージェントのための `gen_range`，変異するかを決める一様な `f64`，変異体のための一様な行動です．
-変異体の行動は，変異が起きないときも引きます．
+`moran_update` は 1 ステップに 4 回引きます．親のための一様な `f64`，死ぬエージェントのための `gen_range`，変異するかを決める一様な `f64`，変異体のための一様な行動です（連続ゲームでは，ガウスの変異体のために成分ごとに一様な `f64` を 2 つ）．
+変異体の行動は，変異が起きないときも引きます．`DampedBestResponse` と `GradientAscent` は何も引きません．
 `RandomPairs` と `RandomGroups` は Decision で 1 ステップに 1 回並べ替えを引き，ほかの組込みの Matching は何も引きません．
 動学は World の外に状態を持たないので，snapshot から正確に再開できます．
 
@@ -2464,7 +2471,7 @@ meaning = "Public game aggregate for the completed step; present only when the s
 ## 有限ゲームを解く
 
 シミュレーションとは別に，この crate は任意の `FiniteGame`（`MatrixGame`，[組込みのゲーム](#組込みのゲームcatalog)，自作の型）の
-均衡とそれに関連する解概念を直接計算します．混合戦略は `socsim_games::mixed` に，ソルバーは `socsim_games::solve` にあります．
+均衡とそれに関連する解概念を直接計算します．連続ゲームの均衡は [最適応答反復](#最適応答反復) で求めます．混合戦略は `socsim_games::mixed` に，ソルバーは `socsim_games::solve` にあります．
 どちらも既定のビルドに含まれ，feature も `socsim-*` crate も要りません（線形計画は純 Rust の `microlp` crate で解きます）．
 
 ### 混合戦略
@@ -2896,3 +2903,472 @@ $r = 3 < k = 5$ の公共財ゲームでは拠出しないことが支配戦略�
 タカ・ハトでは $\dot x = x(1 - x)(1 - 2x)$ で，積分は $\lvert \dot x \rvert < 10^{-12}$ になった時点で止まります．
 2 つの純粋な静止点は安定ではなく，純粋なハトは均衡ですらありません．
 $V = C$ では安定な状態は純粋なタカです（$E(H, H) = E(D, H) = 0$ かつ $E(H, D) = V > E(D, D) = V/2$）．
+
+---
+
+## 連続ゲーム
+
+連続ゲームでは，各役割が箱の中の実数ベクトル（生産量，価格，拠出額など）を選びます．
+この crate は連続ゲームを有限ゲームと同じ部品の組で扱います．
+
+| 部品 | 場所 | feature |
+|---|---|---|
+| トレイト `ContinuousGame` と `check_continuous_action` | crate の根 | 既定 |
+| 組込みのゲーム 3 つ：`Cournot`，`BertrandDifferentiated`，`PublicGoodsContinuous` | `socsim_games::continuous` | 既定 |
+| 減衰付きの最適応答反復ソルバーと黄金分割による最適応答 | `socsim_games::solve`（crate の根からも再エクスポート） | 既定 |
+| 決定規則 `DampedBestResponse` と `GradientAscent` | crate の根 | `core` |
+| `game_metrics` の連続版 `ContinuousMetrics` | crate の根 | `core` |
+| `imitate_best`，`fermi_update`，`moran_update`（ガウスの突然変異つき）での連続の行動 | crate の根 | `core` / `engine` |
+| LLM による決定：`ActionParser` としての `NumberParser`，`DescribedRenderer` | `socsim_games::llm` | `llm` |
+
+`build_world`，Matching，`NormalFormOutcome`，`assemble`，`assemble_with_aggregates`，`assemble_with` はそのまま使えます．行動の型が `Vec<f64>` になるだけです．
+
+### `ContinuousGame`
+
+```rust
+pub trait ContinuousGame: NormalFormGame<Action = Vec<f64>> {
+    fn bounds(&self, role: usize) -> &[(f64, f64)];
+    fn best_response(&self, role: usize, profile: &[Vec<f64>]) -> Option<Vec<f64>> { None }
+    fn numeric_br(&self) -> NumericBr { NumericBr::Unavailable }
+    fn gradient(&self, role: usize, profile: &[Vec<f64>]) -> Option<Vec<f64>> { None }
+}
+```
+
+| メソッド | 意味 |
+|---|---|
+| `bounds(role)` | 役割の行動の成分ごとの閉区間 `(lo, hi)`．成分は 1 つ以上で，端点は有限，どの成分でも `lo < hi` でなければならない |
+| `best_response(role, profile)` | 解析的な最適応答があれば返す．`profile` は**全役割**の行動を役割の番号順に並べたもの．`profile[role]` は読んではならず，結果はほかの役割の行動だけで決まる．結果は `bounds(role)` の中にある |
+| `numeric_br()` | `NumericBr::Unimodal1D` は «どの役割の利得も 1 次元の自分の行動について単峰» という宣言で，解析的な最適応答が無いときに黄金分割の探索を許す．既定の `Unavailable` は許さない |
+| `gradient(role, profile)` | 自分の行動についての利得の解析勾配（長さは `bounds(role).len()`）．`None` なら `GradientAscent` は数値微分を使う |
+
+`best_response` が «ほかの役割» ではなく全員分の行動の組を受けるのは，ほかの役割だけを詰めた短いスライスでは，非対称なゲームで役割の番号がずれるからです．
+
+**行動の検査．** `StageGame::check_action` は `check_continuous_action(self, role, action)` で実装します．
+次の順に検査し，最初の違反を返します．
+
+| 検査 | `ActionError` |
+|---|---|
+| `role < n_roles()` | `InvalidRole { role }` |
+| `action.len() == bounds(role).len()` | `DimensionMismatch { role, expected, actual }` |
+| すべての成分が有限 | `NonFiniteComponent { role, dim }` |
+| すべての成分が自分の閉区間の中 | `OutOfBounds { role, dim }` |
+
+エラーが持つのは添字だけで，違反した `f64` の値は持ちません．
+`game_decide` は有限ゲームとまったく同じく，すべての決定に `check_action` を適用します．
+NaN や区間の外の値を返す規則は，`OnInvalidAction::Stop` ではステップを止め，`Fallback` では置き換えられます．
+`build_world` はすべての初期行動をすべての役割について検査し，`Fixed::new(vec![..])` は規則の状態の初期化のときに自分の行動を検査します（`RuleError::InvalidAction`）．
+
+区間そのものは使う箇所で検査します．ソルバーは `SolveError::InvalidGame`，規則は `RuleError::Unsupported`，`ContinuousMetrics` は `GameError::Metrics`，集団動学は `GameError::Population`，`NumberParser` は `RuleError::Unsupported` を返します．
+
+### 組込みの連続ゲーム
+
+`socsim_games::continuous` は 1 次元の行動を持つゲームを 3 つ提供します．
+
+| 型 | 役割 $i$ の行動 | 役割 $i$ の利得 | 構築時の検査 |
+|---|---|---|---|
+| `Cournot::new(n, a, b, c, q_max)` | 生産量 $q_i \in [0, q_{\max}]$ | $q_i\,(P - c)$．$P = a - bQ$，$Q = \sum_j q_j$ | `n ≥ 2`，`b > 0`，`a > c ≥ 0`，`q_max > 0` |
+| `BertrandDifferentiated::new(n, a, b, d, c, p_max)` | 価格 $p_i \in [0, p_{\max}]$ | $(p_i - c)\,(a - b\,p_i + d \sum_{j \ne i} p_j)$ | `n ≥ 2`，`b > 0`，`d ≥ 0`，`2b > (n − 1) d`，`c ≥ 0`，`p_max > 0` |
+| `PublicGoodsContinuous::new(k, endowment, r)` | 拠出額 $x_i \in [0, e]$ | $e - x_i + (r/k) \sum_j x_j$ | `k ≥ 2`，`endowment > 0`，`r ≥ 0` |
+
+パラメータはすべて有限でなければならず（`CatalogError::NonFinite`），それ以外の違反は `CatalogError::Condition(_)` です．
+`PublicGoodsContinuous::social_dilemma(k, e, r)` はさらに $1 < r < k$ を要求します．何も拠出しないことが支配戦略で，全額の拠出が社会的に最適になる範囲です．
+`Cournot` の価格も `BertrandDifferentiated` の需要も 0 で切り捨てません．
+
+理論値とその成立条件は次のとおりです．
+
+| メソッド | 値 |
+|---|---|
+| `Cournot::equilibrium_quantity()` | 一意な対称均衡 $q^* = \min\{(a - c)/((n + 1)\,b),\ q_{\max}\}$ |
+| `BertrandDifferentiated::equilibrium_price()` | $p^* = (a + bc)/(2b - (n - 1)\,d)$ として，$p^* < c$ なら `None`（均衡の需要が負になり，モデルの範囲の外），そうでなければ $\min\{p^*, p_{\max}\}$ |
+| `PublicGoodsContinuous::equilibrium_contribution()` | $r < k$ なら `0`，$r > k$ なら全額（どちらも支配戦略）．$r = k$ ではどの拠出額も最適応答なので `None` |
+| `PublicGoodsContinuous::social_optimum_contribution()` | 総利得 $k e + (r - 1) \sum_j x_j$ を最大にする拠出額．$r > 1$ なら全額，$r < 1$ なら `0`，$r = 1$ なら `None` |
+
+どのゲームも解析的な最適応答を持ちます．制約の無い最適応答を区間へ射影したもので，クールノーは $\mathrm{clamp}\big((a - c - b\,Q_{-i})/(2b),\ 0,\ q_{\max}\big)$，ベルトランは $\mathrm{clamp}\big((a + bc + d \sum_{j \ne i} p_j)/(2b),\ 0,\ p_{\max}\big)$，公共財は $r \le k$ なら `0`，$r > k$ なら全額です．
+どれも解析勾配を持ち，`NumericBr::Unimodal1D` を宣言し，`CommonActionSpace`，`DescribeGame`（プロンプト用の自然言語の説明），`AggregateGame` を実装します．
+
+| ゲーム | 公開集計値（対戦をまたぐ集約） |
+|---|---|
+| `Cournot` | `total_output`（`Sum`），`price`（`Mean`） |
+| `BertrandDifferentiated` | `mean_price`（`Mean`），`total_demand`（`Sum`） |
+| `PublicGoodsContinuous` | `total_contribution`（`Sum`） |
+
+型は serde で直列化でき，読込みの時にも構築子の検査を行います．
+
+### 最適応答反復
+
+`best_response_iteration(&game, &x0, &options)` は，任意の `ContinuousGame` の均衡を，**同時手番**の減衰付き最適応答で探します．
+すべての役割が同じ行動の組に応答し，
+
+$$x \leftarrow \mathrm{Proj}_{\text{bounds}}\big((1 - \alpha)\,x + \alpha\,\mathrm{BR}(x)\big)$$
+
+と更新します．
+
+減衰の無い同時手番の最適応答（$\alpha = 1$）は収束するとは限りません．
+線形のクールノー競争では，内点の均衡は 3 社で中立安定，4 社以上で不安定です（Theocharis, 1960）．
+反復は区間へ射影されるので発散はせず，周期軌道になります．3 社が $q = 20$ から始めると，減衰の無い写像は 25 と 20 を永遠に交互にとります．
+対称な方向では，減衰付きの写像は偏差を $1 - \alpha (n + 1)/2$ 倍するので，線形クールノーの内点では $\alpha < 4/(n + 1)$ のときに限って収束します．
+そこでソルバーは既定で減衰をかけ，試行が失敗するたびに $\alpha$ を半分にして `x0` からやり直します．
+
+| `BrIterationOptions` のメソッド | 既定値 | 意味 |
+|---|---|---|
+| `new()` / `default()` | — | 以下の既定値 |
+| `damping(alpha)` | `0.5` | 最初の $\alpha$．有限で $(0, 1]$ の中 |
+| `adaptive(on)` | `true` | 収束しなかった試行の後に $\alpha$ を半分にし，`x0` からやり直す．`false` なら最初の $\alpha$ だけを試す |
+| `min_damping(m)` | $2^{-10}$ | 試す最小の $\alpha$．有限で正，`damping` 以下 |
+| `tol(tol)` | 開始時に決める | $\max \lvert \mathrm{BR}(x) - x \rvert \le \texttt{tol} \cdot \max(1, w)$（$w$ はどの役割のものも含めて最も広い区間の幅）で受け入れる．指定しなければ，`x0` でいずれかの役割の最適応答が黄金分割の探索から来るときは `1e-7`，そうでなければ `1e-12` |
+| `max_iter(n)` | `10_000` | $\alpha$ 1 つあたりの減衰付き更新の回数．正でなければならない |
+| `oracle(&dyn BestResponseOracle<G>)` | なし | 解析的な最適応答を持たない役割の最適応答 |
+
+結果は `BrIteration { profile, residual, status, damping, iterations }` です．
+`residual` は `profile` での $\max \lvert \mathrm{BR}(x) - x \rvert$，`damping` は最後の試行の $\alpha$，`iterations` は全試行の減衰付き更新の回数の合計です．
+`status` は，残差が許容誤差に達したら `BrStatus::Converged`，どの $\alpha$ でも達しなければ `BrStatus::MaxIter` で，そのときの `profile` は最後の反復値にすぎません．
+**均衡として使ってよいのは `Converged` の行動の組だけです．**
+
+**最適応答の出どころ．** 役割ごとに，次の順に使います．ゲームの解析的な `best_response`，oracle，黄金分割の探索（ゲームが `NumericBr::Unimodal1D` を宣言し，役割の行動が 1 成分のとき）．
+どれも無ければソルバーは `SolveError::NoBestResponse { role }` を返します．選んだ最適応答が `Converged` でない，成分の数が違う，有限でない，のどれかのときも同じです．
+多次元のゲームを座標ごとに探索することはしません．解析的な最適応答か oracle が要ります．
+`BestResponseOracle<G>`（`Send + Sync`）は `best_response(&self, game, role, profile) -> BrResult` を実装します．`profile[role]` を読んではならず，`Converged` でない結果は失敗として扱われます．
+
+**数値の最適応答の精度．** `golden_section_best_response(&game, role, &profile, &GoldenSectionOptions)` は，役割の区間の上で括弧を，幅が `1e-12 · max(1, hi − lo)`（`tol_width`）以下になるか 200 回縮めるまで（`max_iter`．状態は `MaxIter`）縮めます．
+その後，区間の両端，最後の括弧の両端と中点の利得を比べて最良の点を返します（同点なら小さい行動）．区間の端にある最適応答はちょうどその値で返ります．
+`BrResult::residual` は最後の括弧の幅です．
+最大値の位置は利得の値の比較で決めており，利得は最大値の近くで 2 次まで平らなので，括弧をどれだけ狭めても位置は $\sqrt{\varepsilon}\,\lvert x \rvert$ 程度（$\varepsilon$ は `f64` の計算機イプシロン，$\sqrt{\varepsilon} \approx 1.5 \times 10^{-8}$）までしか定まりません．
+反復の既定の許容誤差がこの経路で相対 `1e-7` になるのはこのためで，`1e-12` を求めると `MaxIter` に終わります．
+
+ほかの失敗：区間が不正なら `SolveError::InvalidGame`，オプションが不正か，`x0` の役割の数が違うか行動が不正なら `SolveError::InvalidOptions` です．
+`best_response_step(&game, &profile, damping, oracle)` は同時手番の更新を 1 回だけ行い（`damping = 1` なら減衰の無い写像），同じ条件で `NoBestResponse` を返します．
+
+```rust
+use socsim_games::continuous::{BertrandDifferentiated, Cournot, PublicGoodsContinuous};
+use socsim_games::{best_response_iteration, best_response_step, BrIterationOptions};
+
+fn main() {
+    // P = 100 - Q, unit cost 10, quantities in [0, 100]: q* = 90 / (n + 1).
+    for n in [3, 10] {
+        let game = Cournot::new(n, 100.0, 1.0, 10.0, 100.0).unwrap();
+        let x0 = vec![vec![0.0]; n];
+        let run = best_response_iteration(&game, &x0, &BrIterationOptions::new()).unwrap();
+        println!(
+            "n = {n}: q* = {:.6}, found {:.6}, {:?}, damping {}, residual {:.1e}",
+            game.equilibrium_quantity(),
+            run.profile[0][0],
+            run.status,
+            run.damping,
+            run.residual
+        );
+    }
+
+    // Undamped simultaneous best responses cycle for three firms.
+    let game = Cournot::new(3, 100.0, 1.0, 10.0, 100.0).unwrap();
+    let mut x = vec![vec![20.0], vec![20.0], vec![20.0]];
+    for t in 1..=4 {
+        x = best_response_step(&game, &x, 1.0, None).unwrap();
+        println!("undamped step {t}: {:?}", x.iter().map(|a| a[0]).collect::<Vec<_>>());
+    }
+
+    let bertrand = BertrandDifferentiated::new(2, 10.0, 2.0, 1.0, 2.0, 100.0).unwrap();
+    println!("Bertrand p* = {:?}", bertrand.equilibrium_price());
+    let pgg = PublicGoodsContinuous::social_dilemma(4, 20.0, 1.6).unwrap();
+    println!(
+        "public goods: equilibrium {:?}, social optimum {:?}",
+        pgg.equilibrium_contribution(),
+        pgg.social_optimum_contribution()
+    );
+}
+```
+
+```text
+n = 3: q* = 22.500000, found 22.500000, Converged, damping 0.5, residual 0.0e0
+n = 10: q* = 8.181818, found 8.181818, Converged, damping 0.25, residual 8.4e-11
+undamped step 1: [25.0, 25.0, 25.0]
+undamped step 2: [20.0, 20.0, 20.0]
+undamped step 3: [25.0, 25.0, 25.0]
+undamped step 4: [20.0, 20.0, 20.0]
+Bertrand p* = Some(4.666666666666667)
+public goods: equilibrium Some(0.0), social optimum Some(20.0)
+```
+
+10 社では $\alpha = 0.5$ が $4/11$ を超えるので最初の試行が失敗し，$\alpha = 0.25$ で収束します．
+
+解析的な最適応答を持たない利用者定義のゲームは，黄金分割の探索と，緩めた既定の許容誤差で解かれます．
+
+```rust
+use socsim_games::{
+    best_response_iteration, check_continuous_action, ActionError, BrIterationOptions,
+    ContinuousGame, NormalFormGame, NumericBr, StageGame,
+};
+
+/// Two players, x_i in [0, 10], u_i = x_i (10 - x_i - x_j): no analytic best response.
+struct Duopoly {
+    bounds: [(f64, f64); 1],
+}
+
+impl StageGame for Duopoly {
+    type Action = Vec<f64>;
+    fn n_roles(&self) -> usize { 2 }
+    fn check_action(&self, role: usize, action: &Vec<f64>) -> Result<(), ActionError> {
+        check_continuous_action(self, role, action)
+    }
+}
+
+impl NormalFormGame for Duopoly {
+    fn payoff(&self, role: usize, profile: &[Vec<f64>]) -> f64 {
+        let (own, other) = (profile[role][0], profile[1 - role][0]);
+        own * (10.0 - own - other)
+    }
+}
+
+impl ContinuousGame for Duopoly {
+    fn bounds(&self, _role: usize) -> &[(f64, f64)] { &self.bounds }
+    fn numeric_br(&self) -> NumericBr { NumericBr::Unimodal1D } // concave in the own action
+}
+
+fn main() {
+    let game = Duopoly { bounds: [(0.0, 10.0)] };
+    let run = best_response_iteration(&game, &[vec![0.0], vec![0.0]], &BrIterationOptions::new())
+        .unwrap();
+    println!("{:?} x = {:.7} residual {:.1e}", run.status, run.profile[0][0], run.residual);
+    let strict = BrIterationOptions::new().tol(1e-12).adaptive(false);
+    let run = best_response_iteration(&game, &[vec![0.0], vec![0.0]], &strict).unwrap();
+    println!("tol 1e-12: {:?} residual {:.1e}", run.status, run.residual);
+}
+```
+
+```text
+Converged x = 3.3333331 residual 2.9e-7
+tol 1e-12: MaxIter residual 2.0e-8
+```
+
+均衡は $x^* = 10/3$ です．数値の最適応答は $\sqrt{\varepsilon}\,\lvert x \rvert$ 程度の残差を残し，既定の許容誤差（`1e-7` × 区間の幅 10）はこれを受け入れ，`1e-12` は受け入れません．
+
+### 決定規則：`DampedBestResponse` と `GradientAscent`
+
+| 規則（`name()`） | 構築子 | 役割 $r$ のエージェント $i$ の更新 | 状態のスロット |
+|---|---|---|---|
+| `DampedBestResponse<G>`（`damped_best_response`） | `DampedBestResponse::<G>::new(alpha)?`（$\alpha$ は有限で $(0, 1]$ の中），`.with_oracle(Arc<dyn BestResponseOracle<G>>)` | $x_i \leftarrow \mathrm{Proj}\big((1 - \alpha)\,x_i + \alpha\,\mathrm{BR}_r(x_{-i})\big)$ | `ContinuousState`（`Continuous`） |
+| `GradientAscent`（`gradient`） | `GradientAscent::new(step)?`（有限で `> 0`） | $x_i \leftarrow \mathrm{Proj}\big(x_i + \texttt{step} \cdot \nabla_{x_i} u_r(x_i, x_{-i})\big)$ | `ContinuousState`（`Continuous`） |
+
+どちらも `G: ContinuousGame`（有限ゲームではコンパイルできない）と `X::PolicyState: Slot<ContinuousState>` を要求します．
+`BuiltinPolicyState` は変種 `Continuous(ContinuousState { last })` を持ちます．
+`alpha()` と `step()` はパラメータを返し，不正な値は構築子が `RuleError::Unsupported` で拒否します．
+どちらの規則も乱数を引きません．
+
+**同時手番．** どちらの規則も **前のステップ** の行動に応答します．
+ほかの役割の行動は，その席のエージェントが最後に出した行動で，ステップの履歴（`opponent_history(j)`）から読みます．
+ステップを休んだ相手は，履歴の窓（`history_len`）の中で最後に出した行動で表します．
+規則は相手の保持行動を読みません．`game_decide` は各エージェントの決定をその場で `held` に書くので，Decision の間に保持行動を読むと，そのステップの行動と前のステップの行動が混ざります．
+それは逐次手番（Gauss–Seidel 型）の更新で，結果がエージェントの処理順に依存します．
+Theocharis の不安定性は同時手番（Jacobi 型）の反復の性質であり，規則が再現するのはこちらです．
+$\alpha$ の `DampedBestResponse` は，`best_response_step(&game, &x, alpha, None)` とちょうど同じ更新をします．
+$x_i$ はそのエージェントが最後に出した行動（`ContinuousState::last`）で，まだ出していなければ保持行動です．エージェントが休んだステップでは `last` は変わりません．
+
+**最初のステップ．** ほかの役割の行動がまだ分からない間（最初のステップのように，履歴の窓に出された行動が無いとき）は，自分の保持行動（`DecisionContext::my_held()`）をそのまま出します．
+したがってステップ 1 は初期の行動の組 $x_0$ を出し，ステップ $k$ はソルバーの写像の反復値 $x_{k-1}$ を出します．
+下の例では企業は `[0, 50, 100]` から始め，ステップ 1 はそのまま，ステップ 2 は `[0, 25, 60]` を出します．
+
+**席．** ほかの役割はエージェントの対戦から取るので，Matching は役割ごとに 1 人を座らせなければなりません．2 役割なら `FixedPlayers`，エージェントごとに 1 役割なら `WholePopulation`，`k` 役割なら `RandomGroups::new(k)` です．
+対戦の無い粒度（`PerAgentRole`）では相手を順に使い，相手の数が役割の数と合わなければ `RuleError::Unsupported` でステップが止まります．
+
+**検査．** `init_state`（したがって `build_world`）は不正な区間を `RuleError::Unsupported` で拒否します．
+oracle が無ければ，`DampedBestResponse` はさらに，すべての役割が区間の中点の組で解析的な最適応答を持つか，`NumericBr::Unimodal1D` の 1 次元の行動であることを要求します．
+実行時には，最適応答が得られないか `Converged` でなければ `RuleError::BestResponse(_)`，解析勾配の長さが違えば `RuleError::Unsupported`，勾配の成分が NaN か無限大なら `RuleError::NonFiniteGradient { dim }` でステップが止まります．
+
+**数値微分．** `gradient` が `None` を返すと，`GradientAscent` は各成分 $d$ で刻み $h = 10^{-6} \max(1, \lvert x_d \rvert)$ の中心差分を使います．
+区間の端の近くでは区間の中に収まる片側差分に切り替え（$x_d - h < lo$ なら前進差分，$x_d + h > hi$ なら後退差分），幅が $2h$ より狭い成分では区間の幅の半分を刻みにします．
+利得を区間の外で評価することはありません．
+中心差分の誤差は $O(h^2)$ ですが，片側差分の誤差は $\tfrac{1}{2} \lvert u'' \rvert h$ のオーダーで，$h$ が $\lvert x \rvert$ に比例するので誤差も $\lvert x \rvert$ に比例して増えます．
+クールノー（$u'' = -2b$）では誤差は $b\,h$ で，$b = 1$，$q = 50$ ではおよそ $5 \times 10^{-5}$ です．
+反復値が区間の端にあり精度が要るときは `gradient` を実装してください．
+
+線形クールノーの内点では，同時手番の勾配上昇は $\texttt{step} < 2/((n + 1)\,b)$ のときに限って収束します．3 社，$b = 1$ なら，`0.2` は 22.5 に収束し，`0.6` は収束しません．
+
+**例：`cournot`．** `examples/cournot.rs` は，3 社のクールノー（$a = 100$，$b = 1$，$c = 10$，$q \in [0, 100]$．したがって $q^* = 22.5$）を，`[0, 50, 100]` から $\alpha = 0.5$ の `DampedBestResponse` で学習させます．
+Matching は `WholePopulation` で，`ContinuousMetrics` が，どの生産量も 10 ステップ続けて `1e-9` 以上変わらなくなった時点で実行を止めます．
+
+```rust
+let game = Cournot::new(3, 100.0, 1.0, 10.0, 100.0)?;
+let metrics = ContinuousMetrics::new(&game, ContinuousMetricsOptions::new().stop(1e-9, 10))?;
+
+let mut rules = RuleBook::new();
+let rule: Arc<dyn DecisionRule<Cournot, ()>> = Arc::new(DampedBestResponse::<Cournot>::new(0.5)?);
+rules.register("damped_best_response", rule)?;
+
+let world = build_world(
+    game, 3, (),
+    InitialActions::PerAgent(vec![vec![0.0], vec![50.0], vec![100.0]]),
+    &rules,
+    &Assignment::Ordered(vec![AssignGroup {
+        kind: AssignKind::Rule("damped_best_response".to_owned()),
+        count: 3,
+    }]),
+    1, 500, seed,
+)?;
+let mut simulation = assemble(world, WholePopulation::new(), rules, NormalFormOutcome, PlayOptions::new(), seed)?
+    .add_mechanism(Box::new(metrics))
+    .build();
+simulation.run()?;
+```
+
+```sh
+cargo run -p socsim-games --features core,engine --example cournot
+```
+
+```text
+equilibrium quantity: 22.5000000000
+stopped after 92 of 500 steps
+last metrics row: t = 92, mean quantity 22.5000000000
+firm 0: 22.4999999998
+firm 1: 22.5000000000
+firm 2: 22.5000000002
+max |q_i - q*|: 1.803e-10
+```
+
+例は，実行が `t_max` より前に止まること，`game_metrics` が毎ステップ `game.mean_action.0` を 1 つ書いたこと，どの企業も $q^*$ から `1e-9` 以内で終わることを assert で確かめます．
+ステップ 1 は初期の行動の組を繰り返すので，ステップ 92 での停止は `best_response_step` の 91 回目の反復値に当たります．
+
+### 指標：`ContinuousMetrics`
+
+`GameMetrics` は `G: FiniteGame` を要求します．連続ゲームには `ContinuousMetrics<G: ContinuousGame>`（feature `core`）を使います．
+Mechanism の名前（`game_metrics`），フェーズ（PostStep），表（`"game"`）は同じで，ビルダーへの足し方も同じです．
+別の Mechanism ではなく，`game_metrics` の連続版です．
+
+```rust
+let metrics = ContinuousMetrics::new(           // before `game` moves into build_world
+    &game,
+    ContinuousMetricsOptions::new()
+        .equilibrium(ContinuousEquilibrium::Solve)
+        .stop(1e-9, 10),
+)?;
+```
+
+| `ContinuousMetricsOptions` のメソッド | 既定値 | 効果 |
+|---|---|---|
+| `new()` / `default()` | — | 均衡までの距離なし，停止なし |
+| `equilibrium(ContinuousEquilibrium)` | `None` | `Solve`：`new` の中で `best_response_iteration` を 1 回，区間の中点から既定のオプションで走らせ，`Converged` でなければ失敗する．`Given(profile)`：この行動の組（役割ごとに長さの合った有限の行動）を使う．どちらも `game.eq_distance` を足す |
+| `stop(tol, window)` | なし | どのエージェントの行動も `window` ステップ続けて `tol` 以上変わらなければ実行を終える．`tol` は有限で `> 0`，`window ≥ 1` |
+
+`ContinuousMetrics::new` は，区間かオプションが不正なとき，与えた行動の組の形が合わないとき，解が収束しないときに `GameError::Metrics` を返します．
+`Solve` が見つける均衡は 1 つです．均衡が複数あるゲームでは，意図した均衡を `Given` で渡してください．
+`equilibrium()` は使っている行動の組を，`describe()` は設定した列の `(pattern, meaning)` の組を返します．
+
+| 列 | 現れる条件 | 値 |
+|---|---|---|
+| `game.mean_action.<d>` | すべての役割の成分の数が等しく，ステップに席がある | ステップで出されたすべての席にわたる成分 `d` の平均（役割をまとめる） |
+| `game.action_sd.<d>` | `mean_action.<d>` と同じ | 同じ値の母標準偏差 |
+| `game.mean_action.r<r>-<d>`，`game.action_sd.r<r>-<d>` | 役割によって成分の数が違い，役割 `r` に席がある | 同じものを役割 `r` の席にわたって |
+| `game.mean_payoff`，`game.payoff_sd` | 少なくとも 1 人が対戦した | `GameMetrics` と同じ |
+| `game.aggregate.<name>` | 集計値つきで組み立てた | `GameMetrics` と同じ |
+| `game.eq_distance` | 均衡を設定し，すべての役割に席がある | $\sum_r \sum_d \lvert \bar x_{r,d} - x^*_{r,d} \rvert$．ステップでの各役割の平均行動と均衡との L1 距離 |
+
+列の順は `mean_action.*`，`action_sd.*`，`mean_payoff`，`payoff_sd`，`aggregate.*`，`eq_distance` です．
+有限ゲームと同じく，値の定まらない列は行に含めず，有限でない値はステップを止めます．
+`GameMetrics` の割合，`coop_rate`，`regret`，`action_entropy`，`population_share` に当たる連続の列はありません．
+
+**収束による停止はエージェントごとです．** `game_metrics` は毎ステップ，各エージェントがそのステップで出した行動を `AgentId` 順につないだベクトルを作ります．対戦しなかったエージェントは前の値を保ちます（最初のステップでは保持行動）．
+前のステップからどの成分も `tol` 以上変わっていなければカウンタを 1 増やし，そうでなければ 0 に戻します．`window` に達したら，その行を記録してから停止を要求します．
+割合で判定する有限ゲームの停止と違い，平均行動が落ち着いていても個々のエージェントが動いている集団は止まり**ません**．
+最も早い停止はステップ `window + 1` で，カウンタと前のベクトルは World（`MetricsState`）に置かれるので，再開した実行も同じステップで止まります．
+
+列は [暗黙の評価経路](#対戦を実体化しない評価)（全員が Held の `WholePopulation`，`GridNeighborhood`，`NetworkEdges`）でも同じです．
+評価のステップがたどったパターンで席をたどるので，値は `materialize(true)` のときとビット単位で一致します．
+
+### 連続の行動での集団動学
+
+`imitate_best`，`fermi_update`，`moran_update` はどんな型の行動でも写せるので，その設定の型は有限ゲームのほか `ContinuousGame + CommonActionSpace` も受け付けます．
+`replicator_update`（`ProportionalImitation`）は有限ゲームだけです（連続ゲームではコンパイルできません）．上限 $\beta \le 1/\Delta\pi$ に，全行動の組にわたる利得の範囲が要るからです．
+
+| 動学 | 連続の行動では |
+|---|---|
+| `imitate_best` | 最も稼いだエージェントの行動ベクトルを写す．有限の規則が «最小の行動番号» で同点を解くところを，連続の規則は **辞書式に最小の行動ベクトル**（成分は `f64::total_cmp` で比べ，長さが違えば短い方が先）で解く |
+| `fermi_update` | 相手の行動ベクトルをそのまま写す |
+| `moran_update` | `Fitness::Linear` は拒否される（正値性の検査に全行動の組にわたる利得の範囲が要る）．`Fitness::Exponential` を使う．突然変異体は，親の行動の各成分に独立なガウス雑音を加え，区間へ切り詰めたもの |
+
+ガウスの突然変異はモラン過程に設定します．
+
+```rust
+let moran = MoranUpdate::new(Fitness::Exponential { w: 0.05 }, 0.1, Update::Synchronous)?
+    .gaussian_mutation(2.0)?; // mutant = parent + N(0, 2^2) per component, clamped to the bounds
+```
+
+`gaussian_mutation(sd)` は有限で `sd > 0` を要求し（そうでなければ `GameError::Population`），`gaussian_sd()` がその値を返します．
+組み立ての時に，`mutation > 0` で `sd` の無い連続ゲームと，`sd` を設定した有限ゲームは `GameError::Population` で拒否されます．`mutation = 0` の連続ゲームには `sd` は要りません．
+連続ゲームの共通の行動空間とは，すべての役割の成分の数が等しく，区間も同一であることです．そうでなければ組み立ては `GameError::Population` で失敗します．
+線形の適応度で連続ゲームのモラン過程を組むと，次のエラーになります．
+
+```text
+invalid population dynamics: linear fitness requires a payoff range, which cannot be enumerated for a continuous game; use Fitness::Exponential
+```
+
+1 ステップで引く乱数の個数は固定です．連続ゲームの `moran_update` は，親（`f64`），死ぬエージェント（`gen_range`），突然変異の判定（`f64`）を引き，続いて Box–Muller 変換のために成分ごとに一様な `f64` を 2 つ引きます．突然変異が起きないときや `sd` が無いときも必ず引きます．
+
+### 連続ゲームでの LLM による決定
+
+`llm` feature を有効にすると，LLM の企業が規則で動く企業と対戦できます．
+
+| 部品 | 連続の形 |
+|---|---|
+| 観測 | `OwnHistoryObs::new(window)` — `OwnHistory<Vec<f64>>` |
+| レンダラ | `DescribedRenderer::new(field)`（`G: ContinuousGame + DescribeGame`）．システムプロンプトは，見出し（既定は `Game rules`．`.with_heading(..)` で変える），`You are role r.`，ゲームの `describe(role)`，許される区間，返答の形式 `{"<field>": <number>, "reason": "<reason>"}` からなる．各ターンには自分の行動と利得，相手の最後の行動を並べる |
+| パーサ | `NumberParser::new(field)` はすべての `ContinuousGame` について `ActionParser<G>` である |
+
+`NumberParser` は 1 つの数を読み，1 次元の行動にします．
+`.bounds(lo, hi)` を指定しなければ値を役割のゲームの区間で検査し，指定すれば自分の範囲で検査します．自分の範囲はゲームの区間の中になければなりません（規則の状態の初期化のときに走る `validate` が，そうでなければ `RuleError::Unsupported` を返します）．
+`OutOfRange::Clamp` は違反を報告する代わりに切り詰めます．
+2 成分以上の行動は `validate` が拒否し，ゲームに無い役割への返答は `ViolationKind::Range` の違反です．
+`Fallback::UniformRandom` は同じ区間から一様に引きます．
+レンダラとパーサには同じフィールド名を渡してください．
+2 成分以上の行動についてのレンダラの文言は仮のものです．そうした返答を読む組込みのパーサはまだありません．
+
+`DescribeGame`（`describe(role) -> String`）は crate の根（既定のビルド）で定義されているので，ゲームは `llm` feature 無しで実装できます．`socsim_games::llm::DescribeGame` はその再エクスポートです．
+`assemble_with_llm` は Matching が対応する役割の数ならいくつでも受け付けるので，`WholePopulation` の下の 3 社も組めます．
+
+```rust
+let mut rules: RuleBook<Cournot, WithLlm<()>> = RuleBook::new();
+let damped: Arc<dyn DecisionRule<Cournot, WithLlm<()>>> =
+    Arc::new(DampedBestResponse::<Cournot>::new(0.5)?);
+rules.register("damped", damped)?;
+let mut llm_rules: LlmRuleBook<Cournot, WithLlm<()>> = LlmRuleBook::new();
+llm_rules.register(
+    "llm",
+    Arc::new(LlmPolicy::new(
+        OwnHistoryObs::new(4),
+        DescribedRenderer::new("quantity"), // the reply field ...
+        NumberParser::new("quantity"),      // ... is the field the parser reads
+    )),
+)?;
+// Firm 0 is the LLM firm, firms 1 and 2 play the damped best response;
+// build the world with build_world_with and a KindCatalog of both books, then
+// assemble_with_llm(world, WholePopulation::new(), rules, setup, NormalFormOutcome, opts, seed).
+```
+
+企業 0 のシステムプロンプトは次のようになります．
+
+```text
+# Game rules
+
+You are role 0.
+
+Cournot competition among 3 firms. Each firm chooses a quantity in [0, 100]. The market price is 100 - 1 * Q, where Q is the total quantity of all firms; the price can become negative. A firm producing quantity q earns q * (price - 10). You are firm 0.
+
+Your action is a single number between 0 and 100 (inclusive).
+
+Reply with JSON: {"quantity": <number>, "reason": "<reason>"}.
+```
+
+常に 20 と答えるモデルなら，企業 1 と 2 は $(90 - 20)/3 \approx 23.33$ に落ち着きます．
+
+### 連続ゲームの snapshot
+
+連続の行動は World に残り続けます（`held`，ステップの履歴，`ContinuousState::last`，`game_metrics` の収束判定のベクトル）．
+そのため JSON を経由する snapshot は，どの `f64` もビット単位で元に戻さなければなりません．
+`serde_json` の既定はそれを保証しません．おおよそ 11 個に 1 個の値が最下位の桁で 1 だけずれて戻り，再開した実行は通しの実行から離れていきます．
+そこで `socsim-games` は `serde_json` の feature `float_roundtrip` を有効にしています．
+Cargo は feature を統合するので，`socsim-games` を `core` つきで使うビルドでは，どの crate も浮動小数を正確に読みます．
+snapshot を別の直列化で保存する場合も，この性質を保ってください．
+
+### 現時点の制限
+
+- 数値の最適応答は，`NumericBr::Unimodal1D` を宣言した 1 次元の行動だけを扱います．多次元のゲームには解析的な `best_response` か `BestResponseOracle` が要ります．
+- 役割によって成分の数が違うゲームはソルバーでは扱えますが，まだ World に組めません．`build_world` がすべての初期行動をすべての役割について検査するからです．
+- `NumberParser` は 1 次元の行動だけを扱います．
+- `replicator_update` は有限ゲームだけで，`moran_update` は連続ゲームでは `Fitness::Linear` を拒否します．

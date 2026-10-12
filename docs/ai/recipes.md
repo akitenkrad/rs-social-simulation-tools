@@ -1214,8 +1214,8 @@ rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
   `X` too.
 - The matching decides the role count (`Matching::supports_roles`): the built-in
   pair matchings take **two roles**, `RandomGroups::new(k)` takes `k`,
-  `WholePopulation` one per agent (`GameError::UnsupportedRoles` otherwise;
-  LLM assembly stays two-role). `GridNeighborhood` uses `Credit::Center` (only
+  `WholePopulation` one per agent (`GameError::UnsupportedRoles` otherwise,
+  for `assemble_with_llm` too). `GridNeighborhood` uses `Credit::Center` (only
   seat 0 is credited).
 - `world().payoffs()` / `n_played()` are **per step** (reset in PreStep);
   `PayoffAggregation::Mean` divides by `n_played`.
@@ -1271,6 +1271,36 @@ rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
   a runvault dependency to the crate.
 - See also [`docs/games.md`](../games.md) (§ Metrics) and the `game_match` /
   `game_decide` / `game_play` / `game_metrics` pages under `docs/mechanisms/`.
+- **Continuous games** (`ContinuousGame`, actions `Vec<f64>`; built-ins
+  `socsim_games::continuous::{Cournot, BertrandDifferentiated,
+  PublicGoodsContinuous}`): rules `DampedBestResponse::<G>::new(alpha)?` and
+  `GradientAscent::new(step)?`, metrics `ContinuousMetrics` (same mechanism
+  name `game_metrics`; columns `mean_action.<d>` / `action_sd.<d>`; the stop is
+  per agent). Worked example: `crates/socsim-games/examples/cournot.rs`.
+  - **Keep the damping (Theocharis).** Undamped simultaneous best responses
+    (`alpha = 1`) do not converge in linear Cournot with three firms (a
+    2-cycle) or more (unstable); the interior is stable only for
+    `alpha < 4 / (n + 1)`. `best_response_iteration` halves the damping by
+    default — check `status == BrStatus::Converged` before treating
+    `profile` as an equilibrium (`MaxIter` returns the last iterate).
+  - Continuous rules respond to the **previous step's** actions (step
+    history), never to peers' `held`; step 1 repeats the initial actions, so
+    step `k` plays solver iterate `x_{k-1}`. Write custom continuous rules the
+    same way.
+  - The numerical best response (golden section) is 1-D and unimodal only and
+    accurate to ~√ε·|x|: the default `tol` relaxes to `1e-7` on that path;
+    multi-dimensional games need an analytic `best_response` or a
+    `BestResponseOracle`.
+  - `ProportionalImitation` (`replicator_update`) is **finite only** (compile
+    error with a continuous game); use `FermiUpdate`, `ImitateBest` or
+    `MoranUpdate`.
+  - `MoranUpdate` with `Fitness::Linear` is **rejected** for continuous games
+    (`GameError::Population`) — use `Fitness::Exponential`; with
+    `mutation > 0` set `.gaussian_mutation(sd)?`.
+  - Snapshots rely on `serde_json`'s `float_roundtrip` (enabled by
+    `socsim-games`); keep exact float round-trip if you serialise elsewhere.
+  - LLM firms: `NumberParser::new(field)` + `DescribedRenderer::new(field)`
+    (same field; 1-D actions only).
 - LLM-driven players: see [Recipe 8b — LLM agents in a normal-form game](#recipe-8b--llm-agents-in-a-normal-form-game-socsim-games-feature-llm).
 - Imitation / selection without decision rules (spatial or well-mixed
   evolutionary games): see [Recipe 10b — Population dynamics](#recipe-10b--population-dynamics-socsim-games).

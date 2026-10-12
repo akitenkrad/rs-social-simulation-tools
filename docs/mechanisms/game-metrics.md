@@ -32,6 +32,28 @@ A column whose value is undefined in a step is left out of the row; nothing is
 ever recorded as NaN. The full column reference is in
 [`docs/games.md` § Metrics](../games.md#metrics).
 
+**Continuous games.** `GameMetrics` requires a `FiniteGame`. For a
+[continuous game](../games.md#continuous-games) the same mechanism comes as
+`ContinuousMetrics<G>` (`G: ContinuousGame`), built with
+`ContinuousMetrics::new(&game, ContinuousMetricsOptions)`. It registers under
+the same name, `game_metrics`, runs in PostStep and writes to the same table
+`"game"`, so this page covers both forms. After every step the continuous
+form
+
+1. writes the mean and population standard deviation of every action
+   component over the step's seats, `game.mean_action.<d>` and
+   `game.action_sd.<d>` (per role, `game.mean_action.r<r>-<d>` and
+   `game.action_sd.r<r>-<d>`, when the roles have different numbers of
+   components);
+2. writes `game.mean_payoff`, `game.payoff_sd` and `game.aggregate.<name>` as
+   the finite form does;
+3. with an equilibrium configured, writes `game.eq_distance`;
+4. updates a **per-agent** convergence counter and, once no agent's action
+   has moved by `tol` for `window` steps, requests the end of the run.
+
+It writes no shares, `coop_rate`, `regret`, `action_entropy` or
+`population_share`.
+
 ## 2. Theory & source
 
 With $S_t$ the seats of step $t$, $a_s$ the action in seat $s$ and $r(s)$ its
@@ -61,6 +83,19 @@ It differs from $p_t$ twice: it counts agents rather than seats, and under
 [population dynamics](../games.md#population-dynamics) it describes the
 actions **after** the step's update (those of the next step), while $p_t$
 describes the actions played in the step.
+
+**Continuous form.** With $x_s$ the action vector in seat $s$, $S_t^r$ the
+seats of role $r$ and $x^*$ the configured equilibrium,
+
+$$\bar x_{t,d} = \frac{1}{\lvert S_t\rvert} \sum_{s \in S_t} x_{s,d}, \qquad \text{action\_sd}_{t,d} = \sqrt{\frac{1}{\lvert S_t\rvert} \sum_{s \in S_t} \big(x_{s,d} - \bar x_{t,d}\big)^2}, \qquad \text{eq\_distance}_t = \sum_r \sum_d \Big\lvert \frac{1}{\lvert S_t^r\rvert} \sum_{s \in S_t^r} x_{s,d} - x^*_{r,d} \Big\rvert$$
+
+`eq_distance` compares each role's mean action with that role's equilibrium
+action, so it is zero exactly when every role's seats average to the
+equilibrium. The convergence stop compares, step by step, the vector $v_t$
+that concatenates every agent's played action in `AgentId` order (an agent
+that did not play keeps its previous entry): the counter grows while
+$\max_k \lvert v_t(k) - v_{t-1}(k)\rvert < \texttt{tol}$. It is a per-agent
+criterion — a steady mean with moving individuals does not stop the run.
 
 ## 3. Data flow
 
@@ -94,6 +129,7 @@ after it.
 | aggregate table | ✓ | | Only the last row, and only if its `t` is this step's. |
 | mixed-strategy reports, `PolicyTable` slots | ✓ | | `MixedSource::Reported` only. The reports must be this step's; `Held` seats count as pure strategies. |
 | `MetricsState { prev, below, cumulative }` | ✓ | ✓ | Created on the first step when `stop` or `PlayedCumulative` is set; field `metrics_state` of the world (omitted from the world JSON otherwise). Survives snapshot/resume. |
+| step history, `held` | ✓ | | Continuous form with `stop` only: each agent's played action of the step (the first seat's action under `PerEncounter`), or the previous entry, or — on the first step — the held action. |
 | recorder table `"game"` | | ✓ | One `record_row` per step. |
 | stop request | | ✓ | `StepContext::request_stop` when the convergence counter reaches `window`. |
 
@@ -128,6 +164,16 @@ Policy states, held actions, plays and payoffs are never written: adding
 | `action_entropy(on)` | on | observation | Feature `metrics` only; pooled ids only. |
 | `population_share(on)` | off | observation | Adds `game.population_share.a<k>` (agents holding `k` ÷ all agents, after any population dynamics). Every role must have the same number of actions (`GameError::Metrics`). |
 
+The continuous form takes `ContinuousMetricsOptions`:
+
+| Parameter | Default | Kind | Notes |
+|---|---|---|---|
+| `equilibrium(ContinuousEquilibrium)` | `None` | observation | `Solve`: `best_response_iteration` once in `new`, from the interval midpoints with the default options; rejected unless `Converged`; finds one equilibrium. `Given(profile)`: one finite action of the right length per role. Either adds `game.eq_distance`. |
+| `stop(tol, window)` | off | control | Stop after `window` consecutive steps in which no component of any agent's played action changes by `tol` or more. `tol` finite `> 0`, `window ≥ 1`. |
+
+Invalid bounds or options, a mismatched `Given` profile and a solve that does
+not converge are `GameError::Metrics` from `ContinuousMetrics::new`.
+
 ## 8. How to apply
 
 Library-only. Build the mechanism, then add it to the builder returned by
@@ -159,7 +205,23 @@ sim.run()?;                               // may end before t_max via the stop r
 ```
 
 With Tit-for-Tat against a defector this run ends at `t = 22` (shares unchanged
-from `t = 2`, twenty stable steps from `t = 3`). `describe()` lists the
+from `t = 2`, twenty stable steps from `t = 3`).
+
+For a continuous game:
+
+```rust
+use socsim_games::{ContinuousEquilibrium, ContinuousMetrics, ContinuousMetricsOptions};
+
+let metrics = ContinuousMetrics::new(     // before `game` moves into build_world
+    &game,
+    ContinuousMetricsOptions::new()
+        .equilibrium(ContinuousEquilibrium::Solve)
+        .stop(1e-9, 10),
+)?;
+let mut sim = assemble(world, WholePopulation::new(), rules, NormalFormOutcome, PlayOptions::new(), seed)?
+    .add_mechanism(Box::new(metrics))
+    .build();
+``` `describe()` lists the
 columns of this configuration; see
 [`docs/games.md` § Describing the columns](../games.md#describing-the-columns-describe)
 for copying them into a runvault declaration.
@@ -184,6 +246,22 @@ against an unconditional defector with `cooperate_label("C")`,
 - `t ≥ 2`: `played_share.a1 = 1`, `coop_rate = 0`, `mean_payoff = 1`,
   `payoff_sd = 0`, `regret = 0`, `eq_distance = 0`;
 - the run stops at `t = 5`.
+
+Three Cournot firms ($P = 100 - Q$, unit cost 10, $q^* = 22.5$) learning by
+`DampedBestResponse` with $\alpha = 0.5$ from `[0, 50, 100]` under
+`WholePopulation`, assembled with aggregates, with
+`ContinuousEquilibrium::Solve` (which finds `[[22.5], [22.5], [22.5]]`) and
+`stop(1e-9, 10)`:
+
+- `t = 1`: `game.mean_action.0 = 50`, `game.action_sd.0 ≈ 40.82`,
+  `game.mean_payoff = -3000`, `game.aggregate.total_output = 150`,
+  `game.aggregate.price = -50`, `game.eq_distance = 127.5`
+  ($22.5 + 27.5 + 77.5$: each role's own seat against 22.5);
+- `t = 2`: actions `[0, 25, 60]`, `game.mean_action.0 ≈ 28.33`,
+  `game.eq_distance = 62.5`;
+- the run stops at `t = 92` with `game.mean_action.0 = 22.5`,
+  `game.mean_payoff = 506.25` and `game.eq_distance ≈ 3.6e-10`
+  (`examples/cournot.rs` prints the same stop).
 
 In the hawk–dove example of
 [`docs/games.md` § Population dynamics](../games.md#population-dynamics)

@@ -79,7 +79,7 @@ Reward は，`game_play` が書いたそのステップの記録を読み，会�
   `assemble_with_llm` は World の種類の一覧をそのカタログと照合します（`GameError::InvalidKinds`）．両方の表にある種類は `RuleError::DuplicateKind` です．
 - **実験状態：** `X: HasLlmManifest`（`WithLlm<X>` を使う）．`LlmPolicy` には `X::PolicyState: Slot<LlmConversation>` も要ります．
 - **情報構造：** 観測は `DecisionContext` だけから作る（`omniscient()` を使わない）ので，既定のビュー（自分の対戦の相手と `X::view_for(me)`）が保たれます．
-- **2 役割だけ：** `assemble_with_llm` はそれ以外のゲームを `GameError::UnsupportedRoles` で拒否します．
+- **役割の数：** `assemble_with_llm` は Matching が対応する役割の数（`Matching::supports_roles`）を受け付け，それ以外を `GameError::UnsupportedRoles` で拒否します．`FixedPlayers` なら 2 役割，`WholePopulation` ならエージェントごとに 1 役割です．
 
 ## 7. パラメータ
 

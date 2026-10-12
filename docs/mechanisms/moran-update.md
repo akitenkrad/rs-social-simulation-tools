@@ -21,8 +21,10 @@ played it performs exactly one birth–death event:
 3. draws the agent that **dies** uniformly from all agents — the parent
    included;
 4. writes the parent's held action to the dying agent's `held`, or, with
-   probability `mutation`, an action drawn uniformly from the common action
-   set.
+   probability `mutation`, a mutant: in a finite game an action drawn
+   uniformly from the common action set, in a continuous game the parent's
+   action plus independent $N(0, \sigma^2)$ noise on every component, clamped
+   to the bounds.
 
 All other agents keep their actions. Because a step changes at most one agent,
 a Moran run needs on the order of $N$ steps for what imitation dynamics do in
@@ -93,13 +95,20 @@ describes the step just played (see
   `Fitness::Exponential` needs no such check.
 - **Held agents only** and a **common action space**, as for every dynamic
   (`GameError::Population`).
+- **Continuous games:** a `ContinuousGame` works with `Fitness::Exponential`
+  only — `Fitness::Linear` needs the payoff range over every action profile,
+  which cannot be enumerated, and is rejected with `GameError::Population`.
+  With `mutation > 0` the Gaussian width must be set with
+  `gaussian_mutation(sd)`; a width set for a finite game is rejected too. See
+  [Population dynamics with continuous actions](../games.md#population-dynamics-with-continuous-actions).
 
 ## 7. Parameters
 
 | Parameter | Default | Kind | Notes |
 |---|---|---|---|
 | `fitness: Fitness` | — (required) | tunable | `Linear { w }` with `w` in `[0, 1]`, or `Exponential { w }` with finite `w`; otherwise `MoranUpdate::new` returns `GameError::Population`. `w` is the intensity of selection. |
-| `mutation: f64` | — (required) | tunable | Probability in `[0, 1]` that the offspring takes a uniformly drawn action instead of the parent's (which may coincide with it). `0` gives absorbing monomorphic states. |
+| `mutation: f64` | — (required) | tunable | Probability in `[0, 1]` that the offspring takes a mutant instead of the parent's action (a uniformly drawn action in a finite game, which may coincide with the parent's; a Gaussian perturbation of the parent's action in a continuous game). `0` gives absorbing monomorphic states. |
+| `gaussian_mutation(sd)` | unset | tunable | Continuous games only: the standard deviation $\sigma$ of the Gaussian mutation, the same for every component; finite and `> 0`, else `GameError::Population`. Required when `mutation > 0`; `gaussian_sd()` returns it. |
 | `update: Update` | — (required) | structural | `Update::Synchronous`, the only schedule; it has no default. |
 
 ## 8. How to apply
@@ -141,7 +150,9 @@ values per step, in this order: one uniform `f64` for the parent (a walk over
 the cumulative fitness in `AgentId` order), one `gen_range` for the dying
 agent, one uniform `f64` for the mutation decision, and one uniform action for
 the mutant — drawn every step, even when no mutation happens, so the number of
-draws does not depend on the outcome. The mechanism keeps no state between
+draws does not depend on the outcome. In a continuous game the mutant takes
+two uniform `f64` per component instead (a Box–Muller transform), likewise
+drawn every step, even without a width set. The mechanism keeps no state between
 steps, so a snapshot resumes it exactly.
 
 ## 10. Expected behaviour

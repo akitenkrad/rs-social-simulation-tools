@@ -70,6 +70,7 @@ $$a_i^{t+1} = a_{j^*}^{t}, \qquad j^* \in \arg\max_{j \in \{i\} \cup N(i)} \pi_j
   模倣に使う近傍は Matching ではなくトポロジーから取ります．
 - **Held のエージェントだけ：** 決定規則を持つエージェントがいる World は拒否されます（`GameError::Population`）．
 - **共通の行動の集合：** ゲームが `CommonActionSpace` を実装し（コンパイル時），すべての役割の行動数が等しくなければなりません（`GameError::Population`）．
+- **連続ゲーム：** `ContinuousGame` でも動きます．エージェントは行動ベクトル全体を写し，すべての役割の区間が同一でなければなりません（`GameError::Population`）．[連続の行動での集団動学](../games.ja.md#連続の行動での集団動学) を参照してください．
 - **下流：** 次のステップの `game_decide` が，Held のエージェントを新しい行動で席に着けます．
   `MetricsOptions::population_share(true)` の [`game_metrics`](game-metrics.ja.md) が更新後の割合を記録します．
 
@@ -78,7 +79,7 @@ $$a_i^{t+1} = a_{j^*}^{t}, \qquad j^* \in \arg\max_{j \in \{i\} \cup N(i)} \pi_j
 | パラメータ | 既定 | 種別 | 備考 |
 |---|---|---|---|
 | `update: Update` | —（必須） | structural | `Update::Synchronous`．方式はこれだけ．方式を足しても既存の設定が変わらないよう，既定値は無い． |
-| `tie_break(ImitationTie)` | `KeepOwn` | structural | `KeepOwn`：自分の利得が最高に並ぶなら自分の行動を保ち，そうでなければ最高の近傍のうち最小の行動の添字を採る．`LowestAction`：最高の利得に並ぶ自分と近傍のうち最小の行動の添字を採る． |
+| `tie_break(ImitationTie)` | `KeepOwn` | structural | `KeepOwn`：自分の利得が最高に並ぶなら自分の行動を保ち，そうでなければ最高の近傍のうち最小の行動の添字を採る．`LowestAction`：最高の利得に並ぶ自分と近傍のうち最小の行動の添字を採る．連続ゲームでの «最小の行動» は辞書式に最小の行動ベクトル（成分は `f64::total_cmp` で比べ，長さが違えば短い方が先）． |
 
 ## 8. 適用方法
 

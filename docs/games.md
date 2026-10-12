@@ -19,7 +19,10 @@ per-step metrics mechanism `game_metrics` (see [Metrics](#metrics)). Separately 
 simulation, the crate ships classic games and solvers for finite games — Nash
 equilibria, dominance, minimax, logit QRE, equilibria of anonymous games, the
 replicator dynamics and evolutionary stability (see
-[Solving finite games](#solving-finite-games)).
+[Solving finite games](#solving-finite-games)). Games with real-valued actions —
+Cournot and Bertrand competition, continuous public goods — have their own
+built-in games, best-response iteration solver, decision rules and metrics (see
+[Continuous games](#continuous-games)).
 
 ---
 
@@ -27,8 +30,8 @@ replicator dynamics and evolutionary stability (see
 
 | Feature | Adds | socsim dependencies |
 |---|---|---|
-| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`, `AggregateGame`, `AnonymousGame`, `CommonActionSpace`), `MatrixGame`, the built-in games (`catalog`), mixed strategies (`mixed`), the solvers (`solve`, including `pure_nash_counts`, the replicator dynamics and `ess_verdict`), the learning-rule cores (`learn`), `AggregateSpec` and the metric action ids (`metric_action_ids`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
-| `core` | the world (`GameWorld`, `Topology`), rules (including the learning rules), outcome rules, the matchings (`FixedPlayers`, `RoundRobin`, `RandomPairs`, `RandomGroups`, `WholePopulation`), views, `build_world`, the configuration types of the population dynamics (`ImitateBest`, `FermiUpdate`, `ProportionalImitation`, `MoranUpdate`), the metrics mechanism `GameMetrics` | `socsim-core` |
+| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`, `ContinuousGame`, `AggregateGame`, `AnonymousGame`, `CommonActionSpace`, `DescribeGame`), `MatrixGame`, the built-in games (`catalog`, and `continuous` for continuous actions), mixed strategies (`mixed`), the solvers (`solve`, including `pure_nash_counts`, the replicator dynamics, `ess_verdict` and the continuous `best_response_iteration`), the learning-rule cores (`learn`), `AggregateSpec` and the metric action ids (`metric_action_ids`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
+| `core` | the world (`GameWorld`, `Topology`), rules (including the learning rules and the continuous rules `DampedBestResponse` / `GradientAscent`), outcome rules, the matchings (`FixedPlayers`, `RoundRobin`, `RandomPairs`, `RandomGroups`, `WholePopulation`), views, `build_world`, the configuration types of the population dynamics (`ImitateBest`, `FermiUpdate`, `ProportionalImitation`, `MoranUpdate`), the metrics mechanism `GameMetrics` and its continuous form `ContinuousMetrics` | `socsim-core` |
 | `engine` | `assemble`, `assemble_with_aggregates` and `assemble_with` (all return a `SimulationBuilder`), the play paths (`Pairwise`, `counting_play()`) and the population-dynamics mechanisms; implies `core` | `socsim-core`, `socsim-engine` |
 | `net` | `Topology::network` / `Topology::directed_network` and the matching `NetworkEdges` (see [Topology](#topology-gameworldwith_topology)); implies `core` | `socsim-core`, `socsim-net` |
 | `grid` | `Topology::grid` (`GridSpec`) and the matching `GridNeighborhood`; implies `core` | `socsim-core`, `socsim-grid` |
@@ -136,9 +139,14 @@ each role. Three traits form a ladder:
 | `NormalFormGame: StageGame` | a payoff for every role and profile | `payoff(role, profile)`, `payoffs_into(profile, out)` (default loops over `payoff`) |
 | `FiniteGame: NormalFormGame<Action = usize>` | finitely many indexed actions | `n_actions(role)`, `action_label(role, action)` (default `"a{action}"`), `is_symmetric()` (default `false`) |
 
+Beside `FiniteGame`, `ContinuousGame: NormalFormGame<Action = Vec<f64>>` describes
+games whose actions are real vectors inside a box (`bounds(role)`); see
+[Continuous games](#continuous-games).
+
 Rules and outcome rules state the rung they need as a trait bound —
-`UniformRandom` and `TitForTat` require `FiniteGame`, `NormalFormOutcome`
-requires `NormalFormGame` — so a mismatch is a compile error, not a runtime one.
+`UniformRandom` and `TitForTat` require `FiniteGame`, `DampedBestResponse` and
+`GradientAscent` require `ContinuousGame`, `NormalFormOutcome` requires
+`NormalFormGame` — so a mismatch is a compile error, not a runtime one.
 
 ### Anonymous games and `CommonActionSpace`
 
@@ -156,10 +164,11 @@ enumerating profiles. `CommonActionSpace` is required by the dynamics that copy
 actions between agents (`imitate_best`, `fermi_update`, `replicator_update`,
 `moran_update`); using one of them with a game that does not implement it is a
 compile error. The marker is a promise, and assembly still checks it at run
-time: for a `FiniteGame` every role must have the same number of actions
-(`GameError::Population` otherwise). `MatrixGame` and every built-in game
-implement `CommonActionSpace`; the four population games of the catalog also
-implement `AnonymousGame`.
+time: for a `FiniteGame` every role must have the same number of actions, and
+for a `ContinuousGame` every role must have the same number of components with
+identical intervals (`GameError::Population` otherwise). `MatrixGame` and every
+built-in game, finite or continuous, implement `CommonActionSpace`; the four
+population games of the catalog also implement `AnonymousGame`.
 
 ### `MatrixGame`
 
@@ -185,8 +194,8 @@ How many roles an encounter may have is decided by the matching
 `NetworkEdges` and `GridNeighborhood` seat two roles, `RandomGroups::new(k)`
 seats `k`, and `WholePopulation` seats one role per agent. `assemble` rejects a
 game whose `n_roles()` the matching does not support with
-`GameError::UnsupportedRoles`. LLM decisions (`assemble_with_llm`) remain
-two-role only.
+`GameError::UnsupportedRoles`, and so does `assemble_with_llm` for LLM
+decisions.
 
 ### Built-in games: `catalog`
 
@@ -321,7 +330,10 @@ Built-in rules:
 Further built-in rules — `Mixed` (a fixed mixed strategy),
 `MyopicBestResponse`, `FictitiousPlay`, `LogitChoice`, `RothErev` and the
 repeated-game automata `Automaton` — are described in
-[Learning rules and decision scope](#learning-rules-and-decision-scope).
+[Learning rules and decision scope](#learning-rules-and-decision-scope). For
+continuous games, `Fixed::new(vec![..])` plays a constant action vector, and
+`DampedBestResponse` and `GradientAscent` are described in
+[Continuous games](#decision-rules-dampedbestresponse-and-gradientascent).
 
 Rules are registered by **kind name** in a `RuleBook`
 (`register(kind, Arc<dyn DecisionRule<G, X>>)`; a duplicate kind is
@@ -437,8 +449,9 @@ through the `Slot<T>` trait (`slot`, `slot_mut`, `from_slot`). `Fixed`,
 `TitForTat` needs `Slot<TftState>`, and the learning rules need
 `Slot<BeliefState>` (`FictitiousPlay`), `Slot<EstimateState>` (`LogitChoice`),
 `Slot<PropensityState>` (`RothErev`) or `Slot<AutomatonPolicyState>`
-(`Automaton`). `BuiltinPolicyState` (the `PolicyState` of `X = ()`) implements
-all of them. To mix
+(`Automaton`), and the continuous rules `DampedBestResponse` and
+`GradientAscent` need `Slot<ContinuousState>`. `BuiltinPolicyState` (the
+`PolicyState` of `X = ()`) implements all of them. To mix
 built-in and custom rules, wrap it:
 
 ```rust
@@ -528,6 +541,7 @@ default methods give the information structure of a standard repeated game:
 | `role()`, `encounter()` | own role and encounter for this decision (`encounter()` is `None` under `PerAgentRole`) |
 | `opponents()` | the other agents **in the same encounter** (under `PerAgentRole`, in all encounters of that role) |
 | `my_history()` | own past `StepRecord`s (action, payoff, `n_played`) |
+| `my_held()` | own held action before this decision: the initial action, or the action last chosen |
 | `opponent_history(id)` | the actions of `id` — **`None` unless `id` is a current opponent** |
 | `pair_history(id)` | this agent's past encounters with `id` — `None` unless the pair history is enabled and `id` is a current opponent |
 | `game()` | the stage game |
@@ -1594,7 +1608,9 @@ prompt, `feedback` → the text appended on a retry):
   a standalone helper (`parse_number(raw) -> ParseOutcome<f64>`) for numeric
   answers: a JSON number or a numeric string (`value_was_string`), finite only;
   out of range is `Violation` (default) or clamped (`clamped`). It is not an
-  `ActionParser` for `MatrixGame`.
+  `ActionParser` for `MatrixGame`, but it is one for every `ContinuousGame` with
+  one-dimensional actions, paired with `DescribedRenderer` (see
+  [LLM decisions in continuous games](#llm-decisions-in-continuous-games)).
 
 Each accepted reply carries `ParseFlags { fenced, value_was_string, clamped,
 lenient_match }`; each rejected one a `Violation { kind, message }` with
@@ -1961,6 +1977,12 @@ out-of-range parameters with the same error):
 - **Topology.** `imitate_best` requires a grid or network topology;
   `moran_update` requires a world without topology. `fermi_update` and
   `replicator_update` accept both.
+- **Continuous games.** `imitate_best`, `fermi_update` and `moran_update` also
+  accept a `ContinuousGame` (every role with the same intervals);
+  `replicator_update` is finite only, and `moran_update` rejects
+  `Fitness::Linear` for a continuous game and needs a Gaussian mutation width
+  when `mutation > 0` (see
+  [Population dynamics with continuous actions](#population-dynamics-with-continuous-actions)).
 - **The upper bound of `replicator_update`.** The adoption probability
   $\beta\,[\pi_j - \pi_i]_+$ must never exceed one, so
   $\beta \le 1/\Delta\pi$, where $\Delta\pi$ is the width of the attainable
@@ -2234,7 +2256,7 @@ $0.5$.
 
 ## Metrics
 
-`GameMetrics` is a read-only mechanism, named `game_metrics`, that records one
+`GameMetrics` (for a `FiniteGame`) is a read-only mechanism, named `game_metrics`, that records one
 row of per-step game statistics — action shares, payoff mean and spread,
 cooperation rate, regret, distance to equilibrium and public aggregates — to the
 recorder's table `"game"`. It is not registered by `assemble`: build it from the
@@ -2242,7 +2264,10 @@ game and add it to the returned builder. It runs in **PostStep**, after every
 game mechanism, so it sees the completed step. It draws no randomness and changes
 no model state; the only thing it writes into the world is its own
 bookkeeping for the convergence stop and the cumulative source (see
-[the mechanism page](mechanisms/game-metrics.md)).
+[the mechanism page](mechanisms/game-metrics.md)). A continuous game uses the
+continuous form of the same mechanism, `ContinuousMetrics`, with mean and
+spread of the actions instead of shares (see
+[Metrics: `ContinuousMetrics`](#metrics-continuousmetrics)).
 
 ### Adding `game_metrics`
 
@@ -2859,8 +2884,10 @@ learning, visiting agents in ascending `AgentId` order. `fermi_update` and
 uniform `f64`; an agent without neighbours draws nothing. `imitate_best` draws
 nothing. `moran_update` draws four values per step: one uniform `f64` for the
 parent, one `gen_range` for the agent that dies, one uniform `f64` for the
-mutation decision and one uniform action for the mutant, which is drawn even
-when no mutation happens. `RandomPairs` and `RandomGroups` draw one shuffle
+mutation decision and one uniform action for the mutant (in a continuous game,
+two uniform `f64` per component for a Gaussian mutant), which is drawn even
+when no mutation happens. `DampedBestResponse` and `GradientAscent` draw
+nothing. `RandomPairs` and `RandomGroups` draw one shuffle
 per step in Decision; the other built-in matchings draw nothing. The dynamics
 keep no state outside the world, so a snapshot resumes them exactly.
 
@@ -2870,7 +2897,9 @@ keep no state outside the world, so a snapshot resumes them exactly.
 
 Independently of the simulation, the crate computes equilibria and related
 solution concepts of any `FiniteGame` — a `MatrixGame`, a
-[built-in game](#built-in-games-catalog) or your own type. Mixed strategies
+[built-in game](#built-in-games-catalog) or your own type. Equilibria of
+continuous games are found by
+[best-response iteration](#best-response-iteration). Mixed strategies
 live in `socsim_games::mixed`, the solvers in `socsim_games::solve`. Both are in
 the default build: no feature flag and no `socsim-*` crate are needed (the
 linear programs are solved with the pure-Rust `microlp` crate).
@@ -3404,3 +3433,591 @@ For hawk–dove $\dot x = x(1 - x)(1 - 2x)$; the integration stops once
 $\lvert \dot x \rvert < 10^{-12}$. The two pure rest points are not stable:
 pure dove is not even an equilibrium. With $V = C$ the stable state is pure
 hawk ($E(H, H) = E(D, H) = 0$ and $E(H, D) = V > E(D, D) = V/2$).
+
+---
+
+## Continuous games
+
+In a continuous game every role chooses a real vector inside a box — a
+quantity, a price, a contribution. The crate covers continuous games with the
+same pieces as finite ones:
+
+| Piece | Where | Feature |
+|---|---|---|
+| the trait `ContinuousGame` and `check_continuous_action` | crate root | default |
+| three built-in games: `Cournot`, `BertrandDifferentiated`, `PublicGoodsContinuous` | `socsim_games::continuous` | default |
+| the damped best-response iteration solver and the golden-section best response | `socsim_games::solve` (also re-exported at the root) | default |
+| the decision rules `DampedBestResponse` and `GradientAscent` | crate root | `core` |
+| the continuous form of `game_metrics`, `ContinuousMetrics` | crate root | `core` |
+| continuous actions in `imitate_best`, `fermi_update` and `moran_update` (with Gaussian mutation) | crate root | `core` / `engine` |
+| LLM decisions: `NumberParser` as an `ActionParser`, `DescribedRenderer` | `socsim_games::llm` | `llm` |
+
+`build_world`, the matchings, `NormalFormOutcome`, `assemble`,
+`assemble_with_aggregates` and `assemble_with` work unchanged: the action type is
+simply `Vec<f64>`.
+
+### `ContinuousGame`
+
+```rust
+pub trait ContinuousGame: NormalFormGame<Action = Vec<f64>> {
+    fn bounds(&self, role: usize) -> &[(f64, f64)];
+    fn best_response(&self, role: usize, profile: &[Vec<f64>]) -> Option<Vec<f64>> { None }
+    fn numeric_br(&self) -> NumericBr { NumericBr::Unavailable }
+    fn gradient(&self, role: usize, profile: &[Vec<f64>]) -> Option<Vec<f64>> { None }
+}
+```
+
+| Method | Meaning |
+|---|---|
+| `bounds(role)` | one closed interval `(lo, hi)` per component of the role's action. There must be at least one component, the end points must be finite and `lo < hi` in every component |
+| `best_response(role, profile)` | an analytic best response, if the game has one. `profile` holds the actions of **all** roles, indexed by role; `profile[role]` must not be read, so the result depends only on the other roles. The result lies inside `bounds(role)` |
+| `numeric_br()` | `NumericBr::Unimodal1D` declares that every role's payoff is unimodal in its own one-dimensional action, which permits a golden-section search when there is no analytic best response. The default `Unavailable` permits none |
+| `gradient(role, profile)` | the analytic gradient of the role's payoff with respect to its own action, of length `bounds(role).len()`. `None` makes `GradientAscent` differentiate numerically |
+
+`best_response` takes the whole profile rather than "the others": with the
+other roles packed into a shorter slice, the role indices of an asymmetric game
+would shift.
+
+**Checking actions.** Implement `StageGame::check_action` with
+`check_continuous_action(self, role, action)`. It checks, in this order, and
+returns the first violation:
+
+| Check | `ActionError` |
+|---|---|
+| `role < n_roles()` | `InvalidRole { role }` |
+| `action.len() == bounds(role).len()` | `DimensionMismatch { role, expected, actual }` |
+| every component is finite | `NonFiniteComponent { role, dim }` |
+| every component lies in its closed interval | `OutOfBounds { role, dim }` |
+
+The error carries indices only, never the offending `f64`. `game_decide` applies
+`check_action` to every decision exactly as for finite games, so a rule that
+returns NaN or a value outside the bounds stops the step under
+`OnInvalidAction::Stop` and is replaced under `Fallback`. `build_world` checks
+every initial action against every role, and `Fixed::new(vec![..])` checks its
+action when the rule state is initialised (`RuleError::InvalidAction`).
+
+The bounds themselves are validated where they are used: the solver returns
+`SolveError::InvalidGame`, the rules `RuleError::Unsupported`, `ContinuousMetrics`
+`GameError::Metrics`, the population dynamics `GameError::Population`, and
+`NumberParser` `RuleError::Unsupported`.
+
+### Built-in continuous games
+
+`socsim_games::continuous` provides three games with one-dimensional actions:
+
+| Type | Action of role $i$ | Payoff of role $i$ | Checked at construction |
+|---|---|---|---|
+| `Cournot::new(n, a, b, c, q_max)` | quantity $q_i \in [0, q_{\max}]$ | $q_i\,(P - c)$ with $P = a - bQ$, $Q = \sum_j q_j$ | `n ≥ 2`, `b > 0`, `a > c ≥ 0`, `q_max > 0` |
+| `BertrandDifferentiated::new(n, a, b, d, c, p_max)` | price $p_i \in [0, p_{\max}]$ | $(p_i - c)\,(a - b\,p_i + d \sum_{j \ne i} p_j)$ | `n ≥ 2`, `b > 0`, `d ≥ 0`, `2b > (n − 1) d`, `c ≥ 0`, `p_max > 0` |
+| `PublicGoodsContinuous::new(k, endowment, r)` | contribution $x_i \in [0, e]$ | $e - x_i + (r/k) \sum_j x_j$ | `k ≥ 2`, `endowment > 0`, `r ≥ 0` |
+
+All parameters must be finite (`CatalogError::NonFinite`); any other violation
+is `CatalogError::Condition(_)`. `PublicGoodsContinuous::social_dilemma(k, e, r)`
+additionally requires $1 < r < k$, the range in which contributing nothing is
+dominant while full contribution is socially optimal. Neither the price of
+`Cournot` nor the demand of `BertrandDifferentiated` is truncated at zero.
+
+The theoretical values and the conditions under which they hold:
+
+| Method | Value |
+|---|---|
+| `Cournot::equilibrium_quantity()` | the unique symmetric equilibrium $q^* = \min\{(a - c)/((n + 1)\,b),\ q_{\max}\}$ |
+| `BertrandDifferentiated::equilibrium_price()` | with $p^* = (a + bc)/(2b - (n - 1)\,d)$: `None` when $p^* < c$ (the equilibrium demand would be negative, outside the model), otherwise $\min\{p^*, p_{\max}\}$ |
+| `PublicGoodsContinuous::equilibrium_contribution()` | `0` when $r < k$ and the whole endowment when $r > k$ (dominant strategies); `None` when $r = k$, where every contribution is a best response |
+| `PublicGoodsContinuous::social_optimum_contribution()` | the contribution that maximises the total payoff $k e + (r - 1) \sum_j x_j$: the endowment when $r > 1$, `0` when $r < 1$, `None` when $r = 1$ |
+
+Each game has an analytic best response — the unconstrained one projected onto
+the bounds: $\mathrm{clamp}\big((a - c - b\,Q_{-i})/(2b),\ 0,\ q_{\max}\big)$ for
+Cournot, $\mathrm{clamp}\big((a + bc + d \sum_{j \ne i} p_j)/(2b),\ 0,\ p_{\max}\big)$
+for Bertrand, and `0` (when $r \le k$) or the endowment (when $r > k$) for
+public goods. Each also has an analytic gradient, declares `NumericBr::Unimodal1D`,
+and implements `CommonActionSpace`, `DescribeGame` (a natural-language
+description for prompts) and `AggregateGame`:
+
+| Game | Aggregates (reduction across encounters) |
+|---|---|
+| `Cournot` | `total_output` (`Sum`), `price` (`Mean`) |
+| `BertrandDifferentiated` | `mean_price` (`Mean`), `total_demand` (`Sum`) |
+| `PublicGoodsContinuous` | `total_contribution` (`Sum`) |
+
+The types serialise with serde, and deserialisation runs the constructor
+checks.
+
+### Best-response iteration
+
+`best_response_iteration(&game, &x0, &options)` looks for an equilibrium of any
+`ContinuousGame` by **simultaneous**, damped best responses: every role
+responds to the same profile, and
+
+$$x \leftarrow \mathrm{Proj}_{\text{bounds}}\big((1 - \alpha)\,x + \alpha\,\mathrm{BR}(x)\big)$$
+
+Undamped simultaneous best responses ($\alpha = 1$) need not converge. In linear
+Cournot competition the interior equilibrium is neutrally stable for three firms
+and unstable for four or more (Theocharis, 1960); because the iterates are
+projected onto the bounds, they do not diverge but cycle. With three firms
+from $q = 20$ the undamped map alternates between 25 and 20 forever. Along the
+symmetric direction the damped map multiplies a deviation by
+$1 - \alpha (n + 1)/2$, so in the interior of linear Cournot it converges if
+and only if $\alpha < 4/(n + 1)$. The solver is therefore damped by default and
+halves $\alpha$, restarting from `x0`, whenever an attempt fails.
+
+| `BrIterationOptions` method | Default | Meaning |
+|---|---|---|
+| `new()` / `default()` | — | the defaults below |
+| `damping(alpha)` | `0.5` | initial $\alpha$, finite and in $(0, 1]$ |
+| `adaptive(on)` | `true` | after an attempt that does not converge, halve $\alpha$ and restart from `x0`; `false` tries only the initial $\alpha$ |
+| `min_damping(m)` | $2^{-10}$ | the smallest $\alpha$ tried; finite, positive and no larger than `damping` |
+| `tol(tol)` | chosen at the start | accept a profile when $\max \lvert \mathrm{BR}(x) - x \rvert \le \texttt{tol} \cdot \max(1, w)$, $w$ the widest interval of any role. Unset, it is `1e-7` when some role's best response at `x0` comes from the golden-section search, and `1e-12` otherwise |
+| `max_iter(n)` | `10_000` | damped updates per value of $\alpha$; must be positive |
+| `oracle(&dyn BestResponseOracle<G>)` | none | best responses for roles without an analytic one |
+
+The result is a `BrIteration { profile, residual, status, damping, iterations }`:
+`residual` is $\max \lvert \mathrm{BR}(x) - x \rvert$ at `profile`, `damping`
+the $\alpha$ of the last attempt and `iterations` the number of damped updates
+over all attempts. `status` is `BrStatus::Converged` when the residual reached
+the tolerance, and `BrStatus::MaxIter` when no $\alpha$ did — the returned
+profile is then just the last iterate. **Use only a `Converged` profile as an
+equilibrium.**
+
+**Where a best response comes from.** For each role, in this order: the game's
+analytic `best_response`; the oracle; a golden-section search, when the game
+declares `NumericBr::Unimodal1D` and the role's action has one component.
+Otherwise the solver returns `SolveError::NoBestResponse { role }`, and so it
+does when the chosen best response is not `Converged`, has the wrong number of
+components or is not finite. A multi-dimensional game is never searched
+coordinate by coordinate: it needs an analytic best response or an oracle. A
+`BestResponseOracle<G>` (`Send + Sync`) implements
+`best_response(&self, game, role, profile) -> BrResult`; it must not read
+`profile[role]`, and a result that is not `Converged` counts as a failure.
+
+**Precision of the numerical best response.**
+`golden_section_best_response(&game, role, &profile, &GoldenSectionOptions)`
+shrinks a bracket over the role's interval until it is no wider than
+`1e-12 · max(1, hi − lo)` (`tol_width`) or 200 reductions have been made
+(`max_iter`; status `MaxIter`). It then compares the payoffs at both ends of the
+bounds, both ends of the final bracket and its midpoint, and returns the best
+(ties go to the smaller action), so a best response on a bound is returned
+exactly. `BrResult::residual` is the final bracket width. Because the maximum
+is located by comparing payoff values, which are flat to second order near the
+maximum, the location is resolved only to about $\sqrt{\varepsilon}\,\lvert x \rvert$
+($\varepsilon$ the `f64` machine epsilon, $\sqrt{\varepsilon} \approx 1.5 \times 10^{-8}$),
+however narrow the bracket. That is why the default tolerance of the iteration
+is relative `1e-7` on that path; asking for `1e-12` there ends in `MaxIter`.
+
+Other failures: invalid bounds are `SolveError::InvalidGame`; an invalid
+option, or an `x0` with the wrong number of roles or an invalid action, is
+`SolveError::InvalidOptions`. `best_response_step(&game, &profile, damping,
+oracle)` performs one simultaneous update (with `damping = 1`, the undamped
+map) and fails with `NoBestResponse` under the same conditions.
+
+```rust
+use socsim_games::continuous::{BertrandDifferentiated, Cournot, PublicGoodsContinuous};
+use socsim_games::{best_response_iteration, best_response_step, BrIterationOptions};
+
+fn main() {
+    // P = 100 - Q, unit cost 10, quantities in [0, 100]: q* = 90 / (n + 1).
+    for n in [3, 10] {
+        let game = Cournot::new(n, 100.0, 1.0, 10.0, 100.0).unwrap();
+        let x0 = vec![vec![0.0]; n];
+        let run = best_response_iteration(&game, &x0, &BrIterationOptions::new()).unwrap();
+        println!(
+            "n = {n}: q* = {:.6}, found {:.6}, {:?}, damping {}, residual {:.1e}",
+            game.equilibrium_quantity(),
+            run.profile[0][0],
+            run.status,
+            run.damping,
+            run.residual
+        );
+    }
+
+    // Undamped simultaneous best responses cycle for three firms.
+    let game = Cournot::new(3, 100.0, 1.0, 10.0, 100.0).unwrap();
+    let mut x = vec![vec![20.0], vec![20.0], vec![20.0]];
+    for t in 1..=4 {
+        x = best_response_step(&game, &x, 1.0, None).unwrap();
+        println!("undamped step {t}: {:?}", x.iter().map(|a| a[0]).collect::<Vec<_>>());
+    }
+
+    let bertrand = BertrandDifferentiated::new(2, 10.0, 2.0, 1.0, 2.0, 100.0).unwrap();
+    println!("Bertrand p* = {:?}", bertrand.equilibrium_price());
+    let pgg = PublicGoodsContinuous::social_dilemma(4, 20.0, 1.6).unwrap();
+    println!(
+        "public goods: equilibrium {:?}, social optimum {:?}",
+        pgg.equilibrium_contribution(),
+        pgg.social_optimum_contribution()
+    );
+}
+```
+
+```text
+n = 3: q* = 22.500000, found 22.500000, Converged, damping 0.5, residual 0.0e0
+n = 10: q* = 8.181818, found 8.181818, Converged, damping 0.25, residual 8.4e-11
+undamped step 1: [25.0, 25.0, 25.0]
+undamped step 2: [20.0, 20.0, 20.0]
+undamped step 3: [25.0, 25.0, 25.0]
+undamped step 4: [20.0, 20.0, 20.0]
+Bertrand p* = Some(4.666666666666667)
+public goods: equilibrium Some(0.0), social optimum Some(20.0)
+```
+
+With ten firms $\alpha = 0.5$ exceeds $4/11$, the first attempt fails, and the
+solver converges with $\alpha = 0.25$.
+
+A user-defined game without an analytic best response is solved through the
+golden-section search, with the relaxed default tolerance:
+
+```rust
+use socsim_games::{
+    best_response_iteration, check_continuous_action, ActionError, BrIterationOptions,
+    ContinuousGame, NormalFormGame, NumericBr, StageGame,
+};
+
+/// Two players, x_i in [0, 10], u_i = x_i (10 - x_i - x_j): no analytic best response.
+struct Duopoly {
+    bounds: [(f64, f64); 1],
+}
+
+impl StageGame for Duopoly {
+    type Action = Vec<f64>;
+    fn n_roles(&self) -> usize { 2 }
+    fn check_action(&self, role: usize, action: &Vec<f64>) -> Result<(), ActionError> {
+        check_continuous_action(self, role, action)
+    }
+}
+
+impl NormalFormGame for Duopoly {
+    fn payoff(&self, role: usize, profile: &[Vec<f64>]) -> f64 {
+        let (own, other) = (profile[role][0], profile[1 - role][0]);
+        own * (10.0 - own - other)
+    }
+}
+
+impl ContinuousGame for Duopoly {
+    fn bounds(&self, _role: usize) -> &[(f64, f64)] { &self.bounds }
+    fn numeric_br(&self) -> NumericBr { NumericBr::Unimodal1D } // concave in the own action
+}
+
+fn main() {
+    let game = Duopoly { bounds: [(0.0, 10.0)] };
+    let run = best_response_iteration(&game, &[vec![0.0], vec![0.0]], &BrIterationOptions::new())
+        .unwrap();
+    println!("{:?} x = {:.7} residual {:.1e}", run.status, run.profile[0][0], run.residual);
+    let strict = BrIterationOptions::new().tol(1e-12).adaptive(false);
+    let run = best_response_iteration(&game, &[vec![0.0], vec![0.0]], &strict).unwrap();
+    println!("tol 1e-12: {:?} residual {:.1e}", run.status, run.residual);
+}
+```
+
+```text
+Converged x = 3.3333331 residual 2.9e-7
+tol 1e-12: MaxIter residual 2.0e-8
+```
+
+The equilibrium is $x^* = 10/3$; the numerical best responses leave a residual
+of the order of $\sqrt{\varepsilon}\,\lvert x \rvert$, which the default
+tolerance (`1e-7` × the interval width 10) accepts and `1e-12` does not.
+
+### Decision rules: `DampedBestResponse` and `GradientAscent`
+
+| Rule (`name()`) | Constructor | Update of agent $i$ in role $r$ | State slot |
+|---|---|---|---|
+| `DampedBestResponse<G>` (`damped_best_response`) | `DampedBestResponse::<G>::new(alpha)?` ($\alpha$ finite, in $(0, 1]$), `.with_oracle(Arc<dyn BestResponseOracle<G>>)` | $x_i \leftarrow \mathrm{Proj}\big((1 - \alpha)\,x_i + \alpha\,\mathrm{BR}_r(x_{-i})\big)$ | `ContinuousState` (`Continuous`) |
+| `GradientAscent` (`gradient`) | `GradientAscent::new(step)?` (finite, `> 0`) | $x_i \leftarrow \mathrm{Proj}\big(x_i + \texttt{step} \cdot \nabla_{x_i} u_r(x_i, x_{-i})\big)$ | `ContinuousState` (`Continuous`) |
+
+Both require `G: ContinuousGame` (with a finite game the call does not compile)
+and `X::PolicyState: Slot<ContinuousState>`; `BuiltinPolicyState` has the
+variant `Continuous(ContinuousState { last })`. `alpha()` and `step()` return
+the parameters; an invalid value is `RuleError::Unsupported` from the
+constructor. Neither rule draws randomness.
+
+**Simultaneous moves.** Both rules respond to the actions of the **previous
+step**: the action of each other role is the last action its occupant played,
+read from the step history (`opponent_history(j)`), and a peer that sat a step
+out is represented by the last action it played within the history window
+(`history_len`). The rules never read the held
+actions of peers: `game_decide` writes each agent's decision into `held` as soon
+as it is made, so held actions read during Decision would mix this step's and
+the previous step's actions — a sequential (Gauss–Seidel) update whose result
+depends on the activation order. Theocharis's instability is a property of the
+simultaneous (Jacobi) iteration, and that is what the rules reproduce:
+`DampedBestResponse` with $\alpha$ performs exactly the steps of
+`best_response_step(&game, &x, alpha, None)`. $x_i$ is the action the agent
+last played (`ContinuousState::last`), or its held action before it has
+played; a step in which the agent sat out leaves `last` unchanged.
+
+**The first step.** While the action of some other role is still unknown (no
+played action in the history window, as on the first step), the agent repeats
+its own held action
+(`DecisionContext::my_held()`). Step 1 therefore plays the initial profile
+$x_0$, and step $k$ plays the iterate $x_{k-1}$ of the solver's map. In the
+example below the firms start from `[0, 50, 100]`; step 1 plays exactly that,
+step 2 plays `[0, 25, 60]`.
+
+**Seats.** The other roles are taken from the agent's encounter, so the
+matching must seat one agent per role: `FixedPlayers` for two roles,
+`WholePopulation` for one role per agent, `RandomGroups::new(k)` for `k` roles.
+Under a scope without an encounter (`PerAgentRole`) the opponents are used in
+order; when their number does not match the role count, the step fails with
+`RuleError::Unsupported`.
+
+**Checks.** `init_state` (so `build_world`) rejects invalid bounds with
+`RuleError::Unsupported`. Without an oracle, `DampedBestResponse` also requires
+every role to have an analytic best response at the profile of interval
+midpoints, or a one-dimensional action with `NumericBr::Unimodal1D`. At run
+time a best response that is unavailable or not `Converged` stops the step with
+`RuleError::BestResponse(_)`, an analytic gradient of the wrong length with
+`RuleError::Unsupported`, and a NaN or infinite gradient component with
+`RuleError::NonFiniteGradient { dim }`.
+
+**Numerical gradient.** When `gradient` returns `None`, `GradientAscent` uses a
+central difference with step $h = 10^{-6} \max(1, \lvert x_d \rvert)$ in every
+component $d$. Near a bound it switches to the one-sided difference that stays
+inside the interval — forward when $x_d - h < lo$, backward when $x_d + h > hi$
+— and in a component narrower than $2h$ it uses half the width of the
+interval. The payoff is never evaluated outside the bounds. The central
+difference is accurate to $O(h^2)$; a one-sided difference has an error of the
+order of $\tfrac{1}{2} \lvert u'' \rvert h$, which grows in proportion to
+$\lvert x \rvert$ because $h$ does. For Cournot ($u'' = -2b$) the error is
+$b\,h$: about $5 \times 10^{-5}$ at $q = 50$ with $b = 1$. Provide `gradient`
+when the iterates sit at a bound and precision matters.
+
+In the interior of linear Cournot, simultaneous gradient ascent converges if
+and only if $\texttt{step} < 2/((n + 1)\,b)$ — with three firms and $b = 1$,
+`0.2` converges to 22.5 and `0.6` does not.
+
+**Example: `cournot`.** `examples/cournot.rs` runs three Cournot firms
+($a = 100$, $b = 1$, $c = 10$, $q \in [0, 100]$, so $q^* = 22.5$) that learn by
+`DampedBestResponse` with $\alpha = 0.5$ from `[0, 50, 100]`, under
+`WholePopulation`, with `ContinuousMetrics` stopping the run once no quantity
+has changed by `1e-9` or more for ten consecutive steps:
+
+```rust
+let game = Cournot::new(3, 100.0, 1.0, 10.0, 100.0)?;
+let metrics = ContinuousMetrics::new(&game, ContinuousMetricsOptions::new().stop(1e-9, 10))?;
+
+let mut rules = RuleBook::new();
+let rule: Arc<dyn DecisionRule<Cournot, ()>> = Arc::new(DampedBestResponse::<Cournot>::new(0.5)?);
+rules.register("damped_best_response", rule)?;
+
+let world = build_world(
+    game, 3, (),
+    InitialActions::PerAgent(vec![vec![0.0], vec![50.0], vec![100.0]]),
+    &rules,
+    &Assignment::Ordered(vec![AssignGroup {
+        kind: AssignKind::Rule("damped_best_response".to_owned()),
+        count: 3,
+    }]),
+    1, 500, seed,
+)?;
+let mut simulation = assemble(world, WholePopulation::new(), rules, NormalFormOutcome, PlayOptions::new(), seed)?
+    .add_mechanism(Box::new(metrics))
+    .build();
+simulation.run()?;
+```
+
+```sh
+cargo run -p socsim-games --features core,engine --example cournot
+```
+
+```text
+equilibrium quantity: 22.5000000000
+stopped after 92 of 500 steps
+last metrics row: t = 92, mean quantity 22.5000000000
+firm 0: 22.4999999998
+firm 1: 22.5000000000
+firm 2: 22.5000000002
+max |q_i - q*|: 1.803e-10
+```
+
+The example asserts that the run stops before `t_max`, that `game_metrics`
+wrote one `game.mean_action.0` per step, and that every firm ends within `1e-9`
+of $q^*$. Because step 1 repeats the initial profile, the stop at step 92
+corresponds to iterate 91 of `best_response_step`.
+
+### Metrics: `ContinuousMetrics`
+
+`GameMetrics` requires `G: FiniteGame`. For a continuous game use
+`ContinuousMetrics<G: ContinuousGame>` (feature `core`): the same mechanism
+name, `game_metrics`, the same phase (PostStep) and the same table `"game"`,
+added to the builder in the same way. It is the continuous form of
+`game_metrics`, not a separate mechanism.
+
+```rust
+let metrics = ContinuousMetrics::new(           // before `game` moves into build_world
+    &game,
+    ContinuousMetricsOptions::new()
+        .equilibrium(ContinuousEquilibrium::Solve)
+        .stop(1e-9, 10),
+)?;
+```
+
+| `ContinuousMetricsOptions` method | Default | Effect |
+|---|---|---|
+| `new()` / `default()` | — | no equilibrium distance, no stop |
+| `equilibrium(ContinuousEquilibrium)` | `None` | `Solve`: run `best_response_iteration` once in `new`, from the interval midpoints with the default options, and fail unless it is `Converged`. `Given(profile)`: use this profile (one finite action of the right length per role). Either adds `game.eq_distance` |
+| `stop(tol, window)` | off | end the run once no agent's action changes by `tol` or more for `window` consecutive steps; `tol` finite and `> 0`, `window ≥ 1` |
+
+`ContinuousMetrics::new` returns `GameError::Metrics` for invalid bounds or
+options, a given profile of the wrong shape, or a solve that does not converge.
+`Solve` finds one equilibrium; for a game with several, pass the one you mean
+with `Given`. `equilibrium()` returns the profile in use, and `describe()` the
+`(pattern, meaning)` pairs of the configured columns.
+
+| Column | Appears when | Value |
+|---|---|---|
+| `game.mean_action.<d>` | every role has the same number of components, and the step has a seat | mean of component `d` over all seats played in the step, pooled across roles |
+| `game.action_sd.<d>` | as `mean_action.<d>` | population standard deviation of the same values |
+| `game.mean_action.r<r>-<d>`, `game.action_sd.r<r>-<d>` | the roles have different numbers of components, and role `r` has a seat | the same, over the seats of role `r` |
+| `game.mean_payoff`, `game.payoff_sd` | at least one agent played | as for `GameMetrics` |
+| `game.aggregate.<name>` | the simulation was assembled with aggregates | as for `GameMetrics` |
+| `game.eq_distance` | an equilibrium is configured and every role has a seat | $\sum_r \sum_d \lvert \bar x_{r,d} - x^*_{r,d} \rvert$, the L1 distance between each role's mean action in the step and the equilibrium |
+
+The columns come in the order `mean_action.*`, `action_sd.*`, `mean_payoff`,
+`payoff_sd`, `aggregate.*`, `eq_distance`. As for finite games, an undefined
+column is left out of the row and a non-finite value stops the step. The
+shares, `coop_rate`, `regret`, `action_entropy` and `population_share` of
+`GameMetrics` have no continuous counterpart.
+
+**The convergence stop is per agent.** After each step `game_metrics` builds
+one vector by concatenating, in `AgentId` order, the action each agent played
+in the step; an agent that did not play keeps its previous value (its held
+action on the first step). If no component changed by `tol` or more since the
+previous step the counter grows by one, otherwise it is reset; when it reaches
+`window` the row is recorded and a stop is requested. Unlike the share-based
+stop of finite games, a population whose mean action is steady while
+individual agents still move does **not** stop. The earliest stop is at step
+`window + 1`, and the counter and the previous vector are kept in the world
+(`MetricsState`), so a resumed run stops at the same step.
+
+The columns are the same on the
+[implicit play path](#evaluating-without-materialising-encounters)
+(`WholePopulation`, `GridNeighborhood`, `NetworkEdges` with all agents held):
+the seats are traversed with the pattern the play step used, and the values
+equal those of `materialize(true)` bit for bit.
+
+### Population dynamics with continuous actions
+
+`imitate_best`, `fermi_update` and `moran_update` copy actions of any type, so
+their configuration types accept a `ContinuousGame + CommonActionSpace` as well
+as a finite game. `replicator_update` (`ProportionalImitation`) stays finite
+only — with a continuous game the call does not compile — because its bound
+$\beta \le 1/\Delta\pi$ needs the payoff range over every action profile.
+
+| Dynamic | With continuous actions |
+|---|---|
+| `imitate_best` | copies the action vector of the best-paid agent. Where the finite rule breaks ties by the lowest action index, the continuous rule takes the **lexicographically smallest action vector** (components compared with `f64::total_cmp`, a shorter vector first) |
+| `fermi_update` | copies the partner's action vector unchanged |
+| `moran_update` | `Fitness::Linear` is rejected (its positivity check needs the payoff range over every profile) — use `Fitness::Exponential`. A mutant is the parent's action plus independent Gaussian noise on every component, clamped to the bounds |
+
+The Gaussian mutation is configured on the Moran process:
+
+```rust
+let moran = MoranUpdate::new(Fitness::Exponential { w: 0.05 }, 0.1, Update::Synchronous)?
+    .gaussian_mutation(2.0)?; // mutant = parent + N(0, 2^2) per component, clamped to the bounds
+```
+
+`gaussian_mutation(sd)` requires a finite `sd > 0` (`GameError::Population`
+otherwise); `gaussian_sd()` returns it. At assembly a continuous game with
+`mutation > 0` and no `sd`, and a finite game with an `sd`, are rejected with
+`GameError::Population`; a continuous game with `mutation = 0` needs no `sd`.
+The common action space of a continuous game means that every role has the same
+number of components with identical intervals; otherwise assembly fails with
+`GameError::Population`. A Moran process on a continuous game with linear
+fitness fails with:
+
+```text
+invalid population dynamics: linear fitness requires a payoff range, which cannot be enumerated for a continuous game; use Fitness::Exponential
+```
+
+The number of random values per step stays fixed: in a continuous game
+`moran_update` draws the parent (`f64`), the dying agent (`gen_range`), the
+mutation decision (`f64`) and then two uniform `f64` per component for the
+Box–Muller transform — always, even when no mutation happens or no `sd` is set.
+
+### LLM decisions in continuous games
+
+With the `llm` feature an LLM firm can play against rule-driven firms:
+
+| Part | Continuous form |
+|---|---|
+| Observation | `OwnHistoryObs::new(window)` — `OwnHistory<Vec<f64>>` |
+| Renderer | `DescribedRenderer::new(field)` (`G: ContinuousGame + DescribeGame`): the system prompt is the heading (default `Game rules`, `.with_heading(..)`), `You are role r.`, the game's `describe(role)`, the allowed interval and the reply format `{"<field>": <number>, "reason": "<reason>"}`; each turn lists the agent's own actions and payoffs and the opponents' last actions |
+| Parser | `NumberParser::new(field)` is an `ActionParser<G>` for every `ContinuousGame` |
+
+`NumberParser` reads one number into a one-dimensional action. Without
+`.bounds(lo, hi)` it checks the value against the game's interval for the
+role; with them it checks against its own bounds, which must lie inside the
+game's (`validate`, run when rule state is initialised, returns
+`RuleError::Unsupported` otherwise). `OutOfRange::Clamp` clamps instead of
+reporting a violation. Actions of more than one component are rejected by
+`validate`, and a reply for a role outside the game is a
+`ViolationKind::Range` violation. `Fallback::UniformRandom` draws uniformly
+from the same interval. Pass the same field name to the renderer and the
+parser. For actions of several components the renderer's wording is
+provisional: no built-in parser reads such replies yet.
+
+`DescribeGame` (`describe(role) -> String`) is defined at the crate root
+(default build), so games implement it without the `llm` feature;
+`socsim_games::llm::DescribeGame` re-exports it. `assemble_with_llm` accepts any
+role count the matching supports, so three firms under `WholePopulation`
+work:
+
+```rust
+let mut rules: RuleBook<Cournot, WithLlm<()>> = RuleBook::new();
+let damped: Arc<dyn DecisionRule<Cournot, WithLlm<()>>> =
+    Arc::new(DampedBestResponse::<Cournot>::new(0.5)?);
+rules.register("damped", damped)?;
+let mut llm_rules: LlmRuleBook<Cournot, WithLlm<()>> = LlmRuleBook::new();
+llm_rules.register(
+    "llm",
+    Arc::new(LlmPolicy::new(
+        OwnHistoryObs::new(4),
+        DescribedRenderer::new("quantity"), // the reply field ...
+        NumberParser::new("quantity"),      // ... is the field the parser reads
+    )),
+)?;
+// Firm 0 is the LLM firm, firms 1 and 2 play the damped best response;
+// build the world with build_world_with and a KindCatalog of both books, then
+// assemble_with_llm(world, WholePopulation::new(), rules, setup, NormalFormOutcome, opts, seed).
+```
+
+The system prompt of firm 0 then reads:
+
+```text
+# Game rules
+
+You are role 0.
+
+Cournot competition among 3 firms. Each firm chooses a quantity in [0, 100]. The market price is 100 - 1 * Q, where Q is the total quantity of all firms; the price can become negative. A firm producing quantity q earns q * (price - 10). You are firm 0.
+
+Your action is a single number between 0 and 100 (inclusive).
+
+Reply with JSON: {"quantity": <number>, "reason": "<reason>"}.
+```
+
+With a model that always answers 20, firms 1 and 2 settle at
+$(90 - 20)/3 \approx 23.33$.
+
+### Snapshots of continuous games
+
+Continuous actions stay in the world — in `held`, the step history,
+`ContinuousState::last` and the convergence vector of `game_metrics` — so a
+snapshot that goes through JSON must give every `f64` back bit for bit.
+`serde_json` does not guarantee that by default: roughly one value in eleven
+comes back one unit in the last place off, and a resumed run then drifts away
+from the uninterrupted one. `socsim-games` therefore enables the `serde_json`
+feature `float_roundtrip`. Cargo unifies features, so every crate in a build
+that uses `socsim-games` with `core` parses floats exactly. Keep that property
+if you store snapshots with another serializer.
+
+### Limits today
+
+- The numerical best response covers only one-dimensional actions declared
+  `NumericBr::Unimodal1D`; a multi-dimensional game needs an analytic
+  `best_response` or a `BestResponseOracle`.
+- Games whose roles have different numbers of components work with the
+  solvers, but cannot be built into a world yet: `build_world` checks every
+  initial action against every role.
+- `NumberParser` handles one-dimensional actions only.
+- `replicator_update` is finite only, and `moran_update` rejects
+  `Fitness::Linear` for continuous games.
