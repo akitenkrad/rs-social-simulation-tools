@@ -334,3 +334,89 @@ sim.run_observed(|report| {
 ```
 
 このモデルはデフォルトの `NullRecorder` を使います — `socsim-log` 依存は不要です．近傍APIの詳細は[ライブラリガイド](library.ja.md#アロケーションを伴わない近傍クエリ)を，`run_observed` / `StepReport` については[ステップごとの観測](library.ja.md#ステップごとの観測run_observed--stepreport)の節を参照してください．
+
+---
+
+## 8. シナリオから戦略形ゲームを走らせる
+
+[`normal-form` パック](packs/normal-form.ja.md)は，ゲーム理論のモデル（学習するエージェントどうしの繰り返しゲーム，空間ゲーム，寡占）をシナリオファイルだけで走らせます．同梱の3つのシナリオは，どれもそのまま CLI で走ります．
+
+### 繰り返し囚人のジレンマ — しっぺ返し対仮想プレイ
+
+```sh
+socsim run scenarios/normal_form_ipd.toml
+```
+
+```
+Running 'ipd_tft_vs_fp' (pack=normal-form, t_max=200, seeds=[42], parallel=false)
+
+Seed 42 — 0 events recorded
+
+t       game.action_entropy    game.coop_rate  game.eq_distance  game.mean_payoff    game.payoff_sd  game.played_share.a0  game.played_share.a1       game.regret
+10                0.0000            0.0000            0.0000            1.0000            0.0000            0.0000            1.0000            0.0000
+...
+200               0.0000            0.0000            0.0000            1.0000            0.0000            0.0000            1.0000            0.0000
+```
+
+仮想プレイはステップ2から裏切り（どんな信念に対しても裏切りが最適応答です），しっぺ返しはステップ3からそれに続き，2人はナッシュ均衡にとどまります（`eq_distance = 0`）．`fictitious_play` を `logit` に替え（`game_decide` に `logit_lambda` を足す），同じゲームで学習規則を比べられます．
+
+### 空間囚人のジレンマ（Nowak–May）と，誘惑の利得のスイープ
+
+`scenarios/normal_form_nowak_may.toml` は，行動を保持するだけの10 000エージェントを100 × 100 のトーラス状 Moore 格子に置き（協力者90 %），各エージェントに近傍で最も稼いだ行動をまねさせます（`imitate_best`）．誘惑の利得は $b = 1.85$ です．
+
+```sh
+socsim run scenarios/normal_form_nowak_may.toml
+```
+
+```
+Running 'nowak_may_b185' (pack=normal-form, t_max=200, seeds=[1], parallel=false)
+
+Seed 1 — 0 events recorded
+
+t       game.action_entropy    game.coop_rate  game.mean_payoff    game.payoff_sd  game.played_share.a0  game.played_share.a1  game.population_share.a0  game.population_share.a1       game.regret
+10                0.6553            0.3634            3.9380            3.3317            0.3634            0.6366            0.3818            0.6182            0.1123
+20                0.6150            0.3049            3.4049            3.2118            0.3049            0.6951            0.3037            0.6963            0.0790
+...
+190               0.6094            0.2983            3.3876            3.0985            0.2983            0.7017            0.3037            0.6963            0.0756
+200               0.5975            0.2849            3.2477            3.0804            0.2849            0.7151            0.2925            0.7075            0.0690
+```
+
+協力者の割合は0.9から下がり，0.3付近で揺れ続けます．空間ゲームのカオス的な共存の領域です．領域が $b$ にどう依存するかを見るには，ゲームのパラメータを直接スイープします（値ごとに10 seed）．
+
+```sh
+socsim sweep scenarios/normal_form_nowak_may.toml \
+    --param "world.game.temptation=1.6,1.7,1.8,1.9" --seeds 0..10 --parallel -o runs/nowak_may_sweep
+```
+
+最終ステップの協力者の割合（`game.population_share.a0`．10 seed の平均 ± 標準偏差．スイープの集計表から）：
+
+| $b$ | 1.6 | 1.7 | 1.8 | 1.9 |
+|---|---|---|---|---|
+| 協力者の割合 | 0.5880 ± 0.0080 | 0.7125 ± 0.0038 | 0.7346 ± 0.0071 | 0.3226 ± 0.0133 |
+
+出力ディレクトリには4つの CSV に加えて，値ごとの実効シナリオ（`combo_0000_world.game.temptation=1.6000.scenario.toml` など）があるので，表のどの列も単独で再実行できます．検証付きスイープの規則（未知のパスはエラー，整数は整数のまま）は [CLI リファレンス](cli.ja.md#検証付きスイープnormal-form)にあります．
+
+### クールノー寡占 — 減衰付き最適応答
+
+```sh
+socsim run scenarios/normal_form_cournot.toml
+```
+
+```
+Running 'cournot_n3' (pack=normal-form, t_max=500, seeds=[7], parallel=false)
+
+Seed 7 — 0 events recorded
+
+t       game.action_sd.0  game.aggregate.price  game.aggregate.total_output  game.eq_distance  game.mean_action.0  game.mean_payoff    game.payoff_sd
+10                1.2348           32.5000           67.5000            3.4739           22.5000          506.2500           27.7823
+20                0.0695           32.5000           67.5000            0.1956           22.5000          506.2500            1.5645
+30                0.0039           32.5000           67.5000            0.0110           22.5000          506.2500            0.0881
+40                0.0002           32.5000           67.5000            0.0006           22.5000          506.2500            0.0050
+50                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0003
+60                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+70                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+80                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+90                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+```
+
+3社は一様乱数の生産量から始め，各ステップで最適応答へ半分だけ近づきます（`br_damping = 0.5`）．平均の生産量は早いうちからクールノー・ナッシュ均衡の生産量 $q^* = (a - c)/((n + 1) b) = 22.5$ にあり，個々の生産量はそれより遅れて収束します（`game.action_sd.0` と `game.eq_distance` が0になる）．`game_metrics` の `stop_tol` / `stop_window` の規則が，500ステップのうち90ステップで実行を終えます．減衰が収束の速さにどう効くかは `game_decide.br_damping` をスイープして見られます．

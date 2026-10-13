@@ -122,6 +122,7 @@ Reward (rules learn from the outcome; your own Reward-phase mechanisms can read
 | `opts.payoff_aggregation` | `PayoffAggregation::Sum` | structural | `Sum` or `Mean`; agents that played nothing keep `0` under `Mean`. |
 | `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep`: `StepRecord::action` is the agent's action. `PerAgentRole` / `PerEncounter`: `None`. |
 | `aggregate_history_len` | — | structural | `assemble_with_aggregates` only; rows kept for `aggregate_history()`; must be `> 0` (`GameError::InvalidAggregateHistoryLength`). The names and reductions come from `AggregateGame::aggregate_spec()`. |
+| `counting` (scenario key) | `false` | structural | A key of `game_play`'s params in a scenario (`GameTrialFactory`, the [`normal-form` pack](../packs/normal-form.md#the-counting-path-counting)): `true` selects the `counting_play()` path for the anonymous finite kinds `hawk_dove`, `el_farol`, `minority` and `public_goods_finite`, with the same payoffs and metrics as `false`. Combines with `materialize` and `aggregate_history_len`. Rejected for the other finite kinds (`counting play requires an anonymous game`) and, even when `false`, for continuous games (`counting play requires a finite game`). |
 
 ## 8. How to apply
 

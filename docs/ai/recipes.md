@@ -1301,6 +1301,29 @@ name = "game_play"
 Full key tables, error messages and more scenarios:
 [`docs/games.md` § Scenario files](../games.md#scenario-files).
 
+**Code — the same scenario from the CLI (no Rust).** With
+`module_pack = "normal-form"` in `[simulation]`, the bundled `normal-form`
+pack runs the scenario through the same `GameTrialFactory` (built-in rules,
+`X = ()`; `[world.game] kind` picks `FiniteSpec` or `ContinuousSpec` via
+`socsim_games::game_family`):
+
+```sh
+socsim init --module-pack normal-form -o ipd.toml   # starter = scenarios/normal_form_ipd.toml
+socsim validate ipd.toml                             # every key + combinations + one dry build
+socsim run ipd.toml --seeds 0..10 --parallel         # JSONL per seed via [output] log_path
+socsim sweep scenarios/normal_form_nowak_may.toml \
+    --param "world.game.temptation=1.6,1.7,1.8,1.9" --seeds 0..10 -o runs/sweep
+# -> combo_<i>_<label>.csv + combo_<i>_<label>.scenario.toml (effective scenario)
+```
+
+From Rust, `socsim_packs::normal_form::NormalFormPack` (feature `normal-form`)
+is the CLI's entry point: `validate`, `run_trials(&scenario, &seeds, parallel)`,
+`run_sweep(&scenario, &axes, &seeds, parallel)`. Use the CLI route for sweeps
+over built-in games, rules and dynamics; use `GameSimFactory` /
+`GameTrialFactory` in your own crate for custom games, outcome rules,
+matchings, LLM rules, your own `X` or custom output. See
+[`docs/packs/normal-form.md`](../packs/normal-form.md).
+
 **Gotchas.**
 - Pass the **same `seed`** to `build_world` and `assemble`. Streams: `[0]` world
   init (`Assignment::Shuffled`), `[0, 1]` scenario network, `[0, 2]`
@@ -1317,8 +1340,16 @@ Full key tables, error messages and more scenarios:
 - In a scenario, a population dynamic must be listed after `game_decide`;
   `minority` / `el_farol` / `cournot` / `bertrand_differentiated` take their
   player count from `world.n_agents` (so `random_groups(k)` × `minority` needs
-  library mode); `fixed`, `mixed`, LLM rules, custom games / matchings /
-  outcome rules and the counting play path are library-mode only.
+  library mode); `fixed`, `mixed`, LLM rules and custom games / matchings /
+  outcome rules are library-mode only. The counting play path is
+  `game_play`'s `counting = true` (anonymous finite kinds only; a continuous
+  game rejects the key even when `false`).
+- **CLI sweeps (`normal-form`):** an integer in the base scenario stays an
+  integer (`temptation = 2` cannot take `1.6`; write `2.0`);
+  `world.population.initial_shares.<label>` exists only for labels written in
+  the base scenario; a `game_decide.<param>` that no assigned rule reads is
+  added and changes nothing. `run` / `sweep` validate first, so the base
+  scenario must be valid.
 - `validate` dry-builds for `scenario.simulation.seed` only: on a random
   network the `replicator_update` β bound depends on the generated degrees, so
   another seed may still fail (with an error).
@@ -1576,6 +1607,16 @@ always need a bespoke `WorldState`, paper-specific metrics, and paper-specific
 output layout — all of which are most naturally expressed as Rust in your own
 crate. Reach for the CLI / `socsim-runner` scenario path only when your model is
 already expressible as a registered pack and you just want sweeps for free.
+
+**Normal-form games are the exception that leans to CLI mode.** A model made
+of built-in `socsim-games` pieces (built-in game, built-in rules, built-in
+matching, one population dynamic, `game_metrics`) is fully described by a
+scenario, and the bundled `normal-form` pack runs it with
+`module_pack = "normal-form"` — validation of every key, checked sweeps over
+`world.game.*` and the effective scenario per combination included, with the
+same trajectory as `GameSimFactory` for the same configuration and seed. Move
+to library mode (Recipe 10) when you need a custom game / rule / matching /
+outcome rule, LLM rules, an experiment state `X`, or paper-specific output.
 
 **Where `TrialFactory` fits.** `socsim_runner::TrialFactory` is the bridge
 between the two modes when you want scenario files, multi-seed runs and sweeps

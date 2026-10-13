@@ -59,6 +59,7 @@ Available module packs:
   hr-lifecycle
   opinion-dynamics
   organizational-silence
+  normal-form
 ```
 
 各パックが登録するメカニズム：
@@ -98,6 +99,15 @@ Mechanisms by pack:
     retaliation_event
     silence_spiral
     voice_decision_rule
+  [normal-form]
+    fermi_update
+    game_decide
+    game_match
+    game_metrics
+    game_play
+    imitate_best
+    moran_update
+    replicator_update
 ```
 
 シナリオの `[[mechanism]]` ブロックは，そのパックのメカニズムしか指定できません．（`--features pack-organizational-silence-llm` でビルドした場合，`[organizational-silence]` ブロックには `voice_decision_rule` の LLM 変種である `voice_decision` も追加で表示されます．）

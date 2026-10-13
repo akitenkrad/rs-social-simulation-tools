@@ -334,3 +334,112 @@ sim.run_observed(|report| {
 ```
 
 The model uses the default `NullRecorder` — no `socsim-log` dependency required. See the [library guide](library.md#non-allocating-neighbour-queries) for the neighbour-API details and the [per-step observation](library.md#per-step-observation-run_observed--stepreport) section for `run_observed` / `StepReport`.
+
+---
+
+## 8. Normal-form games from a scenario
+
+The [`normal-form` pack](packs/normal-form.md) runs game-theoretic models —
+repeated games between learning agents, spatial games, oligopolies — from a
+scenario file alone. Three scenarios ship with it; each runs with the plain
+CLI.
+
+### Repeated prisoner's dilemma — tit for tat against fictitious play
+
+```sh
+socsim run scenarios/normal_form_ipd.toml
+```
+
+```
+Running 'ipd_tft_vs_fp' (pack=normal-form, t_max=200, seeds=[42], parallel=false)
+
+Seed 42 — 0 events recorded
+
+t       game.action_entropy    game.coop_rate  game.eq_distance  game.mean_payoff    game.payoff_sd  game.played_share.a0  game.played_share.a1       game.regret
+10                0.0000            0.0000            0.0000            1.0000            0.0000            0.0000            1.0000            0.0000
+...
+200               0.0000            0.0000            0.0000            1.0000            0.0000            0.0000            1.0000            0.0000
+```
+
+Fictitious play defects from step 2 (defection is its best response to any
+belief), tit for tat follows from step 3, and the pair stays at the Nash
+equilibrium (`eq_distance = 0`). Replace `fictitious_play` with `logit` (and
+add `logit_lambda` to `game_decide`) to compare learning rules on the same
+game.
+
+### Spatial prisoner's dilemma (Nowak–May) — and a sweep over the temptation
+
+`scenarios/normal_form_nowak_may.toml` places 10 000 held agents on a
+100 × 100 toroidal Moore lattice, 90 % cooperators, and lets every agent copy
+the best-earning action in its neighbourhood (`imitate_best`) with
+temptation $b = 1.85$:
+
+```sh
+socsim run scenarios/normal_form_nowak_may.toml
+```
+
+```
+Running 'nowak_may_b185' (pack=normal-form, t_max=200, seeds=[1], parallel=false)
+
+Seed 1 — 0 events recorded
+
+t       game.action_entropy    game.coop_rate  game.mean_payoff    game.payoff_sd  game.played_share.a0  game.played_share.a1  game.population_share.a0  game.population_share.a1       game.regret
+10                0.6553            0.3634            3.9380            3.3317            0.3634            0.6366            0.3818            0.6182            0.1123
+20                0.6150            0.3049            3.4049            3.2118            0.3049            0.6951            0.3037            0.6963            0.0790
+...
+190               0.6094            0.2983            3.3876            3.0985            0.2983            0.7017            0.3037            0.6963            0.0756
+200               0.5975            0.2849            3.2477            3.0804            0.2849            0.7151            0.2925            0.7075            0.0690
+```
+
+The cooperator share falls from 0.9 and keeps fluctuating around 0.3 — the
+chaotic coexistence regime of the spatial game. To see how the regime depends
+on $b$, sweep the game parameter directly (10 seeds per value):
+
+```sh
+socsim sweep scenarios/normal_form_nowak_may.toml \
+    --param "world.game.temptation=1.6,1.7,1.8,1.9" --seeds 0..10 --parallel -o runs/nowak_may_sweep
+```
+
+Final cooperator share (`game.population_share.a0`, mean ± std over the 10
+seeds, from the sweep's summary tables):
+
+| $b$ | 1.6 | 1.7 | 1.8 | 1.9 |
+|---|---|---|---|---|
+| cooperator share | 0.5880 ± 0.0080 | 0.7125 ± 0.0038 | 0.7346 ± 0.0071 | 0.3226 ± 0.0133 |
+
+Besides the four CSV files, the output directory holds the effective scenario
+of each value (`combo_0000_world.game.temptation=1.6000.scenario.toml`, …),
+so every row of the table can be rerun on its own. The rules of checked
+sweeps — unknown paths are errors, integers stay integers — are in the
+[CLI reference](cli.md#checked-sweeps-normal-form).
+
+### Cournot oligopoly — damped best responses
+
+```sh
+socsim run scenarios/normal_form_cournot.toml
+```
+
+```
+Running 'cournot_n3' (pack=normal-form, t_max=500, seeds=[7], parallel=false)
+
+Seed 7 — 0 events recorded
+
+t       game.action_sd.0  game.aggregate.price  game.aggregate.total_output  game.eq_distance  game.mean_action.0  game.mean_payoff    game.payoff_sd
+10                1.2348           32.5000           67.5000            3.4739           22.5000          506.2500           27.7823
+20                0.0695           32.5000           67.5000            0.1956           22.5000          506.2500            1.5645
+30                0.0039           32.5000           67.5000            0.0110           22.5000          506.2500            0.0881
+40                0.0002           32.5000           67.5000            0.0006           22.5000          506.2500            0.0050
+50                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0003
+60                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+70                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+80                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+90                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+```
+
+Three firms start from uniform random quantities and move half-way to their
+best response each step (`br_damping = 0.5`). The mean quantity sits at the
+Cournot–Nash quantity $q^* = (a - c)/((n + 1) b) = 22.5$ from early on; the
+individual quantities converge more slowly (`game.action_sd.0` and
+`game.eq_distance` fall to 0), and the `stop_tol` / `stop_window` rule of
+`game_metrics` ends the run at step 90 of 500. Sweep `game_decide.br_damping`
+to see how damping affects the speed of convergence.

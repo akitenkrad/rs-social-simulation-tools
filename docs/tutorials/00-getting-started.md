@@ -59,6 +59,7 @@ Available module packs:
   hr-lifecycle
   opinion-dynamics
   organizational-silence
+  normal-form
 ```
 
 And the mechanisms each pack registers:
@@ -98,6 +99,15 @@ Mechanisms by pack:
     retaliation_event
     silence_spiral
     voice_decision_rule
+  [normal-form]
+    fermi_update
+    game_decide
+    game_match
+    game_metrics
+    game_play
+    imitate_best
+    moran_update
+    replicator_update
 ```
 
 A scenario's `[[mechanism]]` blocks may only name mechanisms from its pack.

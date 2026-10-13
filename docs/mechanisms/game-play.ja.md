@@ -95,6 +95,7 @@ $$\pi_i^t = \sum_{e \ni i} u_{r_e(i)}\big(a^{e}\big) \quad (\texttt{Sum}), \qqua
 | `opts.payoff_aggregation` | `PayoffAggregation::Sum` | structural | `Sum` か `Mean`．`Mean` では対戦しなかったエージェントは `0` のまま． |
 | `opts.decision_scope` | `DecisionScope::PerStep` | structural | `PerStep`：`StepRecord::action` はエージェントの行動．`PerAgentRole` / `PerEncounter`：`None`． |
 | `aggregate_history_len` | — | structural | `assemble_with_aggregates` のときだけ．`aggregate_history()` のために保持する行数．`> 0` でなければならない（`GameError::InvalidAggregateHistoryLength`）．名前と集約の方法は `AggregateGame::aggregate_spec()` から． |
+| `counting`（シナリオのキー） | `false` | structural | シナリオ（`GameTrialFactory`，[`normal-form` パック](../packs/normal-form.ja.md#数え上げの経路counting)）の `game_play` の params のキー．`true` なら匿名の有限ゲーム `hawk_dove`，`el_farol`，`minority`，`public_goods_finite` で `counting_play()` の経路を選ぶ．利得と指標は `false` のときと同じ．`materialize` や `aggregate_history_len` と組み合わせられる．ほかの有限ゲームでは拒否され（`counting play requires an anonymous game`），連続ゲームでは `false` でも拒否される（`counting play requires a finite game`）． |
 
 ## 8. 適用方法
 

@@ -3613,7 +3613,7 @@ feature `config` の `GameTrialFactory` は，シミュレーション全体 —
 ```toml
 [simulation]
 name        = "ipd_tft_vs_fp"
-module_pack = "library"      # not read by GameTrialFactory
+module_pack = "library"      # not read by GameTrialFactory; "normal-form" to run it with the socsim CLI
 t_max       = 200
 seed        = 42
 scheduler   = "sequential"
@@ -3688,6 +3688,8 @@ final coop_rate: 0
 ```
 
 `G` は，有限ゲームなら `FiniteSpec`，連続ゲームなら `ContinuousSpec` で，それぞれ規則のレジストリを持ちます（`RuleRegistry::finite_builtins()` / `RuleRegistry::continuous_builtins()`）．
+
+`GameTrialFactory` は `module_pack` を読まないので，ライブラリモードではどの名前でも構いません．同じファイルを `socsim` CLI で走らせるには `module_pack = "normal-form"` と書きます．[`normal-form` パック](packs/normal-form.ja.md)が `[world.game] kind` から `FiniteSpec` か `ContinuousSpec` を選び，組込みの規則でこのファクトリを走らせます（`socsim validate`，`run`，検証付きの `sweep`．[CLI リファレンス](cli.ja.md#検証付きスイープnormal-form)を参照）．
 
 ### 書く場所
 
@@ -3821,6 +3823,7 @@ payoffs = [
 | `game_play` | `payoff_aggregation` | `"sum"`，`"mean"` | `"sum"` |
 | | `aggregate_history_len` | 個数 | なし．書くとゲームの公開集計値を記録する（`WithAggregates`） |
 | | `materialize` | 真偽値 | `false` |
+| | `counting` | 真偽値 | `false`．`true` なら `counting_play()` で評価する（利得は同じ）．受け付けるのは匿名の有限ゲーム `hawk_dove`，`el_farol`，`minority`，`public_goods_finite` だけで，連続ゲームでは `false` でもキーを拒否する |
 | `imitate_best` | `update` | `"synchronous"` | 必須 |
 | | `tie_break` | `"keep_own"`，`"lowest_action"` | `"keep_own"` |
 | `fermi_update` | `update`，`k` | `"synchronous"`，数 | どちらも必須 |
@@ -4116,7 +4119,7 @@ log_path = "runs/{name}_{seed}.jsonl"
 
 ### 制限
 
-- Scenario で選べるのは，組込みのゲーム・規則・Matching・動学です．利用者定義のゲーム・利得規則・Matching，数え上げの評価経路，`OnInvalidAction::Fallback`，規則 `fixed` と `mixed`，LLM の規則はライブラリモード（`GameSimFactory`）でだけ使えます．利用者の決定規則は `RuleRegistry::register` で登録できます．
+- Scenario で選べるのは，組込みのゲーム・規則・Matching・動学です．利用者定義のゲーム・利得規則・Matching，`OnInvalidAction::Fallback`，規則 `fixed` と `mixed`，LLM の規則はライブラリモード（`GameSimFactory`）でだけ使えます．利用者の決定規則は `RuleRegistry::register` で登録できます．数え上げの評価経路は `game_play` の `counting = true` で使えます（匿名の有限ゲームだけ）．
 - factory を `GameTrialFactory::with_state` で作らない限り，実験状態は `()` です．
 - 集団動学は `update = "synchronous"` だけを受け付けます．
 - `minority` や `el_farol` と `random_groups(k)` の組合せは書けません（プレイヤーは `n_agents` 人）．

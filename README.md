@@ -8,7 +8,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 ![tests: 953 passing](https://img.shields.io/badge/tests-953%20passing-brightgreen)
 
-`socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, spatial-grid primitives, world-state snapshots for save/resume, optional learnable (MARL) policies, an optional LLM-agent layer (Ollama/OpenAI with prompt caching), result-output helpers, a reusable observation-metrics library, survey-dataset schemas and a machine-readable dataset registry, a normal-form game layer (`socsim-games`: stage games, decision rules, matching, payoffs and population dynamics), and a CLI for running, sweeping, and summarising scenarios — all in a nineteen-crate workspace. The CLI is **world-polymorphic**: a scenario selects a *module pack* by name, and three packs ship today — a reference **HR lifecycle** module (ten mechanisms calibrated against published empirical findings), an **opinion-dynamics** pack that runs bounded-confidence consensus models on a social network, and an **`organizational-silence`** pack that models the emergence of a climate of silence on a hierarchical network with LLM- or rule-based voice decisions. Reusable, domain-agnostic mechanisms live in the general **`socsim-mechanisms`** catalog — eight mechanisms across four feature families: opinion dynamics, network contagion, cultural dissemination, and group dynamics.
+`socsim` is a composable agent-based social simulation platform written in Rust. It provides a trait-based mechanism system, deterministic reproducibility via seeded ChaCha20 RNG, a social-network layer, spatial-grid primitives, world-state snapshots for save/resume, optional learnable (MARL) policies, an optional LLM-agent layer (Ollama/OpenAI with prompt caching), result-output helpers, a reusable observation-metrics library, survey-dataset schemas and a machine-readable dataset registry, a normal-form game layer (`socsim-games`: stage games, decision rules, matching, payoffs and population dynamics), and a CLI for running, sweeping, and summarising scenarios — all in a nineteen-crate workspace. The CLI is **world-polymorphic**: a scenario selects a *module pack* by name, and four packs ship today — a reference **HR lifecycle** module (ten mechanisms calibrated against published empirical findings), an **opinion-dynamics** pack that runs bounded-confidence consensus models on a social network, an **`organizational-silence`** pack that models the emergence of a climate of silence on a hierarchical network with LLM- or rule-based voice decisions, and a **`normal-form`** pack that runs `socsim-games` simulations (repeated games, spatial games, oligopolies) built entirely from the scenario file. Reusable, domain-agnostic mechanisms live in the general **`socsim-mechanisms`** catalog — eight mechanisms across four feature families: opinion dynamics, network contagion, cultural dissemination, and group dynamics.
 
 ## Architecture overview
 
@@ -56,7 +56,7 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 60               35.6250           92.3841           41.8100            0.0000
 ```
 
-The `socsim` binary is world-polymorphic: scenarios select a **module pack** by name (`socsim list packs`). Three packs ship today — the calibrated `hr-lifecycle` reference module, a general `opinion-dynamics` pack that runs the bounded-confidence mechanisms from `socsim-mechanisms` on a social network, and an `organizational-silence` pack that models the emergence of a climate of silence on a hierarchical organisation:
+The `socsim` binary is world-polymorphic: scenarios select a **module pack** by name (`socsim list packs`). Four packs ship today — the calibrated `hr-lifecycle` reference module, a general `opinion-dynamics` pack that runs the bounded-confidence mechanisms from `socsim-mechanisms` on a social network, an `organizational-silence` pack that models the emergence of a climate of silence on a hierarchical organisation, and a `normal-form` pack for game-theoretic models:
 
 ```sh
 socsim run scenarios/opinion_dynamics_baseline.toml
@@ -88,6 +88,26 @@ t              silence_rate   climate_of_silence       voice_volume      org_per
 
 The climate of silence C(t) rises until the salience shock at t=24, then partly recovers as voicing under high σ feeds the team `knowledge_stock` via the Argyris double-loop learning mechanism.
 
+```sh
+socsim run scenarios/normal_form_cournot.toml
+```
+
+```
+Running 'cournot_n3' (pack=normal-form, t_max=500, seeds=[7], parallel=false)
+
+Seed 7 — 0 events recorded
+
+t       game.action_sd.0  game.aggregate.price  game.aggregate.total_output  game.eq_distance  game.mean_action.0  game.mean_payoff    game.payoff_sd
+10                1.2348           32.5000           67.5000            3.4739           22.5000          506.2500           27.7823
+20                0.0695           32.5000           67.5000            0.1956           22.5000          506.2500            1.5645
+...
+50                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0003
+...
+90                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+```
+
+Three Cournot firms with damped best responses settle at the Nash quantity $q^* = 22.5$; `game_metrics` stops the run once the quantities stop moving (step 90 of 500). The game, the population, the matching and every rule parameter come from the scenario file, and `socsim sweep` can vary `world.game.*` directly (see the [normal-form pack](docs/packs/normal-form.md)).
+
 ## Documentation
 
 | Document | Description |
@@ -99,7 +119,7 @@ The climate of silence C(t) rises until the salience shock at t=24, then partly 
 | [Library API](docs/library.md) | Implement custom mechanisms and use socsim as a library |
 | [Mechanism catalog](docs/mechanisms.md) | All thirty-seven mechanisms: theory, sources, diagrams, phase positioning, and how to apply each |
 | [Normal-form games](docs/games.md) | `socsim-games`: stage games, decision rules, outcome rules, experiment state, information structure, population dynamics on lattices and networks, game solvers, and snapshot-safe game simulations |
-| [Module packs](docs/packs.md) | The three bundled packs (`hr-lifecycle`, `opinion-dynamics`, `organizational-silence`): world data model, mechanism composition, starter scenarios, and recorded metrics |
+| [Module packs](docs/packs.md) | The four bundled packs (`hr-lifecycle`, `opinion-dynamics`, `organizational-silence`, `normal-form`): world data model, mechanism composition, starter scenarios, and recorded metrics |
 | [Architecture](docs/architecture.md) | Crate dependency graph, 6-phase tick loop, calibration philosophy |
 
 ## License

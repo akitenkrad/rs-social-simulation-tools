@@ -8,7 +8,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 ![tests: 953 passing](https://img.shields.io/badge/tests-953%20passing-brightgreen)
 
-`socsim` はRustで書かれた，コンポーザブルなエージェントベース社会シミュレーションプラットフォームです．トレイトベースのメカニズムシステム，シードされたChaCha20 RNGによる決定論的再現性，ソーシャルネットワーク層，空間グリッドのプリミティブ，保存・再開のためのWorld状態スナップショット，オプションの学習ポリシー（MARL），オプションのLLMエージェント層（Ollama/OpenAI，プロンプトキャッシュ付き），結果出力ヘルパ，再利用可能な観測メトリクスライブラリ，サーベイデータセットのスキーマと機械可読のデータセットレジストリ，戦略形ゲームの層（`socsim-games`：段階ゲーム，決定規則，対戦組み，利得，集団動学），そしてシナリオの実行・パラメータスイープ・集計のためのCLIを，19クレートのワークスペースとして提供します．CLIは **World 多態**です：シナリオは名前で *モジュールパック* を選択し，現在3つのパックを同梱しています — 文献に基づくキャリブレーションパラメータを持つ10メカニズムの参考実装 **HRライフサイクル** モジュール，ソーシャルネットワーク上で有界信頼コンセンサスモデルを実行する **opinion-dynamics** パック，そして階層的なネットワーク上で沈黙の風土の創発をモデル化し，LLM／ルールベースの voice 決定を切り替えられる **`organizational-silence`** パックです．再利用可能でドメイン非依存なメカニズムは汎用の **`socsim-mechanisms`** カタログに収録され，意見ダイナミクス，ネットワーク伝播，文化伝播，グループダイナミクスの4つのフィーチャファミリにわたる8メカニズムを提供します．
+`socsim` はRustで書かれた，コンポーザブルなエージェントベース社会シミュレーションプラットフォームです．トレイトベースのメカニズムシステム，シードされたChaCha20 RNGによる決定論的再現性，ソーシャルネットワーク層，空間グリッドのプリミティブ，保存・再開のためのWorld状態スナップショット，オプションの学習ポリシー（MARL），オプションのLLMエージェント層（Ollama/OpenAI，プロンプトキャッシュ付き），結果出力ヘルパ，再利用可能な観測メトリクスライブラリ，サーベイデータセットのスキーマと機械可読のデータセットレジストリ，戦略形ゲームの層（`socsim-games`：段階ゲーム，決定規則，対戦組み，利得，集団動学），そしてシナリオの実行・パラメータスイープ・集計のためのCLIを，19クレートのワークスペースとして提供します．CLIは **World 多態**です：シナリオは名前で *モジュールパック* を選択し，現在4つのパックを同梱しています — 文献に基づくキャリブレーションパラメータを持つ10メカニズムの参考実装 **HRライフサイクル** モジュール，ソーシャルネットワーク上で有界信頼コンセンサスモデルを実行する **opinion-dynamics** パック，階層的なネットワーク上で沈黙の風土の創発をモデル化し，LLM／ルールベースの voice 決定を切り替えられる **`organizational-silence`** パック，そしてシナリオファイルだけで組み立てた `socsim-games` のシミュレーション（繰り返しゲーム，空間ゲーム，寡占）を走らせる **`normal-form`** パックです．再利用可能でドメイン非依存なメカニズムは汎用の **`socsim-mechanisms`** カタログに収録され，意見ダイナミクス，ネットワーク伝播，文化伝播，グループダイナミクスの4つのフィーチャファミリにわたる8メカニズムを提供します．
 
 ## アーキテクチャ概要
 
@@ -56,7 +56,7 @@ t             avg_tenure   knowledge_stock   org_performance     turnover_rate
 60               35.6250           92.3841           41.8100            0.0000
 ```
 
-`socsim` バイナリは World 多態です：シナリオは **モジュールパック**を名前で選択します（`socsim list packs`）．現在3つのパックを同梱しています — 補正済みの `hr-lifecycle` リファレンスモジュール，`socsim-mechanisms` の有界信頼メカニズムをソーシャルネットワーク上で実行する汎用 `opinion-dynamics` パック，そして階層的な組織で沈黙の風土の創発をモデル化する `organizational-silence` パックです：
+`socsim` バイナリは World 多態です：シナリオは **モジュールパック**を名前で選択します（`socsim list packs`）．現在4つのパックを同梱しています — 補正済みの `hr-lifecycle` リファレンスモジュール，`socsim-mechanisms` の有界信頼メカニズムをソーシャルネットワーク上で実行する汎用 `opinion-dynamics` パック，階層的な組織で沈黙の風土の創発をモデル化する `organizational-silence` パック，そしてゲーム理論のモデルのための `normal-form` パックです：
 
 ```sh
 socsim run scenarios/opinion_dynamics_baseline.toml
@@ -88,6 +88,26 @@ t              silence_rate   climate_of_silence       voice_volume      org_per
 
 沈黙の風土 C(t) は t=24 の salience ショックまで上昇し，その後，高い σ のもとでの voice が Argyris ダブルループ学習メカニズム経由でチームの `knowledge_stock` に流入することで，部分的に回復します．
 
+```sh
+socsim run scenarios/normal_form_cournot.toml
+```
+
+```
+Running 'cournot_n3' (pack=normal-form, t_max=500, seeds=[7], parallel=false)
+
+Seed 7 — 0 events recorded
+
+t       game.action_sd.0  game.aggregate.price  game.aggregate.total_output  game.eq_distance  game.mean_action.0  game.mean_payoff    game.payoff_sd
+10                1.2348           32.5000           67.5000            3.4739           22.5000          506.2500           27.7823
+20                0.0695           32.5000           67.5000            0.1956           22.5000          506.2500            1.5645
+...
+50                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0003
+...
+90                0.0000           32.5000           67.5000            0.0000           22.5000          506.2500            0.0000
+```
+
+減衰付き最適応答に従うクールノーの3社は，ナッシュ均衡の生産量 $q^* = 22.5$ に落ち着きます．`game_metrics` は生産量が動かなくなった時点で実行を止めます（500ステップのうち90ステップ）．ゲーム，集団，Matching，規則のパラメータはすべてシナリオファイルから読まれ，`socsim sweep` で `world.game.*` を直接変えられます（[normal-form パック](docs/packs/normal-form.ja.md)を参照）．
+
 ## ドキュメント
 
 | ドキュメント | 内容 |
@@ -99,7 +119,7 @@ t              silence_rate   climate_of_silence       voice_volume      org_per
 | [ライブラリAPI](docs/library.ja.md) | カスタムメカニズムの実装とライブラリとしての利用 |
 | [Mechanismカタログ](docs/mechanisms.ja.md) | 全37メカニズム：理論，出典，図解，フェーズ上の位置付け，各メカニズムの適用方法 |
 | [戦略形ゲーム](docs/games.ja.md) | `socsim-games`：段階ゲーム，決定規則，利得規則，実験状態，情報構造，格子とネットワーク上の集団動学，ゲームのソルバー，snapshot から正確に再開できるゲームのシミュレーション |
-| [モジュールパック](docs/packs.ja.md) | 同梱の3つのパック（`hr-lifecycle`，`opinion-dynamics`，`organizational-silence`）：World のデータモデル，メカニズムの構成，スターターシナリオ，記録されるメトリクス |
+| [モジュールパック](docs/packs.ja.md) | 同梱の4つのパック（`hr-lifecycle`，`opinion-dynamics`，`organizational-silence`，`normal-form`）：World のデータモデル，メカニズムの構成，スターターシナリオ，記録されるメトリクス |
 | [アーキテクチャ](docs/architecture.ja.md) | クレート依存グラフ，6フェーズティックループ，キャリブレーション哲学 |
 
 ## ライセンス

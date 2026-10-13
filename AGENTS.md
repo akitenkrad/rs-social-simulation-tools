@@ -32,7 +32,8 @@ truth for signatures. When they disagree, trust the code.
   `PreStep → Environment → Decision → Interaction → Reward → PostStep`.
 - **Two usage modes.** *Library mode* — depend on just the crates you need, write
   your own `main.rs` + `Mechanism`s (most replications). *CLI mode* — author a
-  `Scenario` TOML and run the `socsim` binary against a bundled ModulePack.
+  `Scenario` TOML and run the `socsim` binary against a bundled pack
+  (`socsim list packs`; the `normal-form` pack has no `ModulePack`).
 - **Two-layer determinism.** The core is seed-deterministic and LLM-free; the
   optional `socsim-llm` layer is made cache-pseudo-deterministic on top, with LLM
   calls confined to the `Decision` phase.

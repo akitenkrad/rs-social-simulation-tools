@@ -4,7 +4,7 @@
 
 `socsim` バイナリは6つのシナリオ系サブコマンドに加え，サーベイデータセット取得用の `datasets` グループを提供します．`socsim --help` または `socsim <COMMAND> --help` でフラグを確認できます．
 
-このバイナリは **World 多態**です：すべてのシナリオは *モジュールパック* を名前で指定し，そのパックのWorld型へディスパッチされます．現在3つのパック（`hr-lifecycle`，`opinion-dynamics`，`organizational-silence`）を同梱しており，新しいパックは `pack-*` Cargoフィーチャの背後に登録されます．
+このバイナリは **World 多態**です：すべてのシナリオは *モジュールパック* を名前で指定し，そのパックのWorld型へディスパッチされます．現在4つのパック（`hr-lifecycle`，`opinion-dynamics`，`organizational-silence`，`normal-form`）を同梱しており，新しいパックは `pack-*` Cargoフィーチャの背後に登録されます．
 
 ```
 socsim <COMMAND>
@@ -12,7 +12,7 @@ socsim <COMMAND>
 Commands:
   init       Generate a starter scenario TOML for a module pack
   run        Run a scenario (single seed or multi-seed)
-  validate   Validate a scenario TOML against the pack's registry
+  validate   Validate a scenario TOML, then apply the selected pack's own checks
   list       List available module packs or mechanisms
   sweep      Run a grid parameter sweep
   summarize  Re-aggregate existing JSONL run logs into a summary
@@ -49,7 +49,7 @@ socsim init --module-pack hr-lifecycle --out scenarios/my_scenario.toml
 Wrote starter scenario to 'scenarios/my_scenario.toml'
 ```
 
-`opinion-dynamics` パックも利用可能です（例：`socsim init --module-pack opinion-dynamics --out scenarios/op.toml`）．
+どのパックにも雛形があります（例：`socsim init --module-pack opinion-dynamics --out scenarios/op.toml`，`socsim init --module-pack normal-form --out scenarios/ipd.toml`．後者は繰り返し囚人のジレンマで，`scenarios/normal_form_ipd.toml` と同じです）．
 
 ---
 
@@ -109,23 +109,57 @@ org_performance          42.8467      1.4574     40.7856     43.8800      3
 turnover_rate             0.0083      0.0118      0.0000      0.0250      3
 ```
 
+`run` は `Running …` を表示する前に，[`validate`](#validate) とまったく同じ検査を行います．無効なシナリオは終了コード1で止まり，何も実行も書き出しもしません．
+
 各実行後，シナリオTOMLの `output.log_path` で指定されたJSONLログファイルが書き出されます（後述の[JSONL出力形式](#jsonl出力形式)を参照）．
 
 ---
 
 ## validate
 
-シナリオTOML内のすべてのメカニズム名が指定のパックに登録されているか，またスケジューラーと `t_max` が有効かを確認します．
+シナリオTOMLを実行せずに検査します．
 
 ```
 socsim validate <SCENARIO>
 ```
+
+検査は2段からなり，この順に行います．
+
+1. **汎用のシナリオ検査**（どのパックでも同じ）：すべての `[[mechanism]]` の名前が指定のパックに登録されていること，スケジューラーが既知（`"sequential"` か `"random_activation"`）であること，`t_max > 0` であること．
+2. **パック固有の検査**（`CliPack::validate`）．`hr-lifecycle`，`opinion-dynamics`，`organizational-silence` のパックはここで何も足しません．`normal-form` パックはシナリオ全体を検査します．すべてのキーとその型，未知のキー，ゲーム・規則・Matching・集団動学の組合せ，シナリオの `seed` での1回の乾いた構築です（[normal-form パック § `validate` が拒否するもの](packs/normal-form.ja.md#validate-が拒否するもの)を参照）．
+
+1段目が失敗すれば2段目は行いません．
 
 **例**
 
 ```sh
 socsim validate scenarios/hr_lifecycle_baseline.toml
 # OK — scenario 'scenarios/hr_lifecycle_baseline.toml' is valid.
+```
+
+失敗するとファイル名と，その下に直すべきもの（`normal-form` パックではキーのパス）を表示します．
+
+```
+Error: validation failed for 'nowak_may.toml'
+
+Caused by:
+    config error: world.game.temptaton: unknown key (known keys: kind, punishment, reward, sucker, temptation)
+```
+
+```
+Error: validation failed for 'ipd.toml'
+
+Caused by:
+    config error: mechanism 'game_decid' is not registered in the 'normal-form' pack; available: [fermi_update, game_decide, game_match, game_metrics, game_play, imitate_best, moran_update, replicator_update]
+```
+
+**`run` と `sweep` は先に検証します．** どちらのコマンドも，`Running …` / `Sweeping …` を表示する前，試行を走らせる前，ファイルを書く前に同じ2段の検査を行います．失敗すると終了コード1で終わり，JSONL ログも CSV もシナリオのファイルも残しません．`hr-lifecycle`，`opinion-dynamics`，`organizational-silence` のパックでは，有効なシナリオは以前とまったく同じに走ります．無効なシナリオは実行されずに拒否されるようになりました．たとえば `t_max = 0` のシナリオは以前は0ステップ走っていましたが，今は次のように止まります．
+
+```
+Error: validation failed for 'hr0.toml'
+
+Caused by:
+    config error: simulation.t_max must be > 0
 ```
 
 ---
@@ -151,6 +185,7 @@ Available module packs:
   hr-lifecycle
   opinion-dynamics
   organizational-silence
+  normal-form
 ```
 
 ```sh
@@ -188,6 +223,15 @@ Mechanisms by pack:
     retaliation_event
     silence_spiral
     voice_decision_rule
+  [normal-form]
+    fermi_update
+    game_decide
+    game_match
+    game_metrics
+    game_play
+    imitate_best
+    moran_update
+    replicator_update
 ```
 
 CLI を `--features pack-organizational-silence-llm` でビルドした場合，`[organizational-silence]` ブロックには `voice_decision_rule` の LLM 変種である `voice_decision` のエントリも追加で表示されます．
@@ -204,7 +248,7 @@ socsim sweep [OPTIONS] <SCENARIO>
 
 | フラグ | デフォルト | 説明 |
 |---|---|---|
-| `--param <MECH.PARAM=V1,V2,...>` | — | スイープ軸（多次元スイープは繰り返し指定） |
+| `--param <MECH.PARAM\|world.PATH=V1,V2,...>` | — | スイープ軸（多次元スイープは繰り返し指定）．`normal-form` パックでは `world.<PATH>=V1,V2,...` も書ける |
 | `--seeds <A..B>` | `0..5` | 各組み合わせのシード範囲 |
 | `-o, --out <DIR>` | `runs/sweep` | 組み合わせごとのCSVの出力ディレクトリ |
 | `--parallel` | false | 各組み合わせ内のシードを並列実行 |
@@ -242,6 +286,82 @@ socsim sweep scenarios/hr_lifecycle_baseline.toml \
     --param "turnover.quit_cascade_bump=0.1,0.3,0.5" \
     --seeds 0..10 --parallel
 ```
+
+`sweep` は [`validate`](#validate) と同じく，まず基準のシナリオを検査します．そのため基準のシナリオそのものが有効でなければなりません．`hr-lifecycle`，`opinion-dynamics`，`organizational-silence` のパックでは組合せを検査しません．存在しないキーの軸は黙って無視され，どの組合せも基準のパラメータで走ります．
+
+```sh
+socsim sweep scenarios/hr_lifecycle_baseline.toml --param "toxic_spread.p_sprea=0.2,0.5" --seeds 0..1
+# exit 0; writes combo_0000_toxic_spread.p_sprea=0.2000.csv and combo_0001_…
+```
+
+綴りはメカニズムのページで確かめてください．
+
+### 検証付きスイープ（`normal-form`）
+
+`normal-form` パックは**検証付きスイープ**を行います．未知のパスはエラーになり，試行を1つも走らせる前にすべての組合せを検証し，組合せごとの実効シナリオを CSV の隣に書きます．
+
+```sh
+socsim sweep scenarios/normal_form_nowak_may.toml \
+    --param "world.game.temptation=1.6,1.9" --seeds 0..2 -o runs/nm_sweep
+```
+
+```
+Sweeping 'nowak_may_b185' over 1 axes × 2 seeds
+  world.game.temptation = [1.6, 1.9]
+  combo 0: world.game.temptation=1.6000
+metric                      mean         std         min         max      n
+------------------------------------------------------------------------
+game.action_entropy       0.6787      0.0054      0.6733      0.6841      2
+game.coop_rate            0.5832      0.0162      0.5670      0.5994      2
+game.mean_payoff          5.9735      0.1399      5.8337      6.1134      2
+...
+  combo 1: world.game.temptation=1.9000
+metric                      mean         std         min         max      n
+------------------------------------------------------------------------
+game.action_entropy       0.6114      0.0139      0.5975      0.6253      2
+game.coop_rate            0.3014      0.0165      0.2849      0.3179      2
+game.mean_payoff          3.4352      0.1473      3.2879      3.5825      2
+...
+
+Wrote 2 CSV files to 'runs/nm_sweep'
+```
+
+```
+runs/nm_sweep/
+  combo_0000_world.game.temptation=1.6000.csv
+  combo_0000_world.game.temptation=1.6000.scenario.toml
+  combo_0001_world.game.temptation=1.9000.csv
+  combo_0001_world.game.temptation=1.9000.scenario.toml
+```
+
+**軸．** 軸は `world.` のパス（`[world]` の下に既にあるキーで，入れ子のテーブルをたどれる．`world.game.temptation`，`world.population.initial_shares.C`，`world.history_len`）か，`<mechanism>.<param>`（`game_decide.logit_lambda`，`fermi_update.k` など．その名前を持つすべての `[[mechanism]]` の項目を書き換える）です．スイープできるのは整数と浮動小数だけです．スイープする価値のある軸はパックのページの[一覧](packs/normal-form.ja.md#スイープ)にあります．
+
+**実効シナリオ．** 各 `combo_<N>_<label>.scenario.toml` は，基準のシナリオにその組合せの値を書き込んだもので，`toml::to_string` で書かれます（コメントは消え，キーは整列されます）．完全なシナリオなので，これに `socsim run` をかけるとその組合せを再実行できます．ラベルは小数4桁で表示されるので，正確な値はこのファイルで読んでください（`stop_tol=1e-6` と `1e-9` はどちらも `0.0000` と表示されます．名前は組合せの番号で区別されます）．このファイルを書くのは `normal-form` パックだけです．
+
+**エラー．** 誤った軸は，試行を走らせる前，出力ディレクトリを作る前にスイープを止めます（終了コード1）．
+
+```
+Error: sweep failed
+
+Caused by:
+    config error: sweep axis 'world.game.temptaton': no key 'temptaton' in [world.game]
+```
+
+| 原因 | 文言（`config error: ` の後） |
+|---|---|
+| `world.` のパスの綴り間違い | `sweep axis 'world.game.temptaton': no key 'temptaton' in [world.game]` |
+| 未知のメカニズム名 | `sweep axis 'game_decid.logit_lambda': mechanism 'game_decid' is not in the scenario` |
+| 対象が数値でない | `sweep axis 'world.game.kind': existing value is a string; only integer and float values can be swept` |
+| 整数のキーに小数の値 | `sweep axis 'world.game.temptation': existing value is an integer; 1.6 is not an integral value representable as i64` |
+| 基準のシナリオが省いた構成比のラベル | `sweep axis 'world.population.initial_shares.D': no key 'D' in [world.population.initial_shares]` |
+| 有効なシナリオにならない組合せ | `sweep combination [world.game.temptation=0.9]: config error: world.game: catalog condition failed: T > R > P >= S` |
+| メカニズムのパラメータの綴り間違い | `sweep combination [game_decide.logit_lamda=1]: config error: mechanism[game_decide].logit_lamda: unknown key (known keys: …)` |
+
+**知っておくべき3つのこと．**
+
+1. **整数は整数のままです．** `temptation = 2` と書いたキーは整数値でしかスイープできません．スイープする値は浮動小数で書いてください（`temptation = 2.0`）．
+2. **`world.population.initial_shares.<label>` は基準のシナリオに書いたラベルだけをスイープできます．** 残りを受け取るために省いたラベルには，書き換えるキーがありません．
+3. **メカニズムのパラメータが無ければ，拒否されずに浮動小数として足されます．** 割り当てた規則が読まないパラメータ（`scenarios/normal_form_ipd.toml` の `game_decide.logit_lambda`．`logit` に従うエージェントはいない）をスイープしても検査は通り，どの値でも結果は同じです．
 
 ---
 

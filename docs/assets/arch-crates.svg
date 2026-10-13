@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 1000 680" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>socsim crate workspace dependency graph</title>
-<desc>The nineteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-packs use the green accent, while the library-only crates — socsim-marl (burn), socsim-mechanisms (depends on socsim-core only), socsim-llm, socsim-results, socsim-survey (engine-free survey recode), socsim-datasets (survey dataset schemas + registry + optional acquisition), socsim-reproduce (paper-anchor reproduction harness, depends on socsim-results), socsim-metrics (feature-gated observation stats), and socsim-games (normal-form games; depends on socsim-core and socsim-engine only, not on socsim-llm, socsim-config or socsim-runner) — are drawn with dashed borders.</desc>
+<desc>The nineteen-crate workspace in three layers. A binary spine runs socsim-cli into socsim-runner into socsim-engine, which depends on socsim-core, socsim-log and socsim-config; socsim-config depends on socsim-core. socsim-core and socsim-rng are the dependency-free foundation. A separate band holds the orthogonal and optional crates: the spatial and network crates socsim-grid, socsim-net and socsim-packs use the green accent (socsim-packs bundles the four CLI packs and, for the normal-form pack, depends on socsim-games), while the library-only crates — socsim-marl (burn), socsim-mechanisms (depends on socsim-core only), socsim-llm, socsim-results, socsim-survey (engine-free survey recode), socsim-datasets (survey dataset schemas + registry + optional acquisition), socsim-reproduce (paper-anchor reproduction harness, depends on socsim-results), socsim-metrics (feature-gated observation stats), and socsim-games (normal-form games; its core and engine features depend on socsim-core and socsim-engine only, not on socsim-llm, socsim-config or socsim-runner; it reaches the socsim binary only through the normal-form pack of socsim-packs) — are drawn with dashed borders.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#F6F4EE"/>
@@ -56,7 +56,7 @@
 <text class="body" x="458" y="384" font-size="10.5" fill="#6B6A64" text-anchor="middle">Params · Registry · Scenario</text>
 
 <!-- foundation -->
-<text class="body" x="58" y="430" font-size="12" fill="#0F6E56" font-weight="700">Foundation — no internal dependencies</text>
+<text class="body" x="68" y="524" font-size="12" fill="#0F6E56" font-weight="700">Foundation — no internal dependencies</text>
 <rect x="68" y="440" width="220" height="64" rx="11" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.5"/>
 <text class="mono" x="178" y="466" font-size="13" fill="#0B5040" text-anchor="middle" font-weight="700">socsim-core</text>
 <text class="body" x="178" y="484" font-size="10.5" fill="#3C7E6C" text-anchor="middle">traits · AgentId · Phase</text>
@@ -82,7 +82,7 @@
   <path d="M178 392 V438" marker-end="url(#hr)"/>
   <path d="M458 392 C 360 414, 300 420, 230 442" marker-end="url(#hr)"/>
 </g>
-<text class="body" x="150" y="420" font-size="9.5" fill="#534AB7">config→core</text>
+<text class="body" x="390" y="431" font-size="9.5" fill="#534AB7" text-anchor="middle">config→core</text>
 
 <!-- ===== orthogonal / optional band (right) ===== -->
 <rect x="618" y="96" width="346" height="552" rx="16" fill="#FBFAF6" stroke="#5F5E5A" stroke-width="1.2" stroke-dasharray="2 4"/>
@@ -101,7 +101,7 @@
 
 <rect x="638" y="266" width="306" height="44" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.4"/>
 <text class="mono" x="654" y="287" font-size="12.5" fill="#0B5040">socsim-packs</text>
-<text class="body" x="654" y="303" font-size="10" fill="#3C7E6C">reference module · 10 mechanisms</text>
+<text class="body" x="654" y="303" font-size="10" fill="#3C7E6C">4 CLI packs · normal-form → socsim-games</text>
 
 <!-- library-only (dashed) -->
 <text class="body" x="638" y="338" font-size="11.5" fill="#534AB7" font-weight="700">Library-only — not in the socsim binary</text>
@@ -115,8 +115,8 @@
 <rect x="638" y="394" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
 <text class="mono" x="654" y="412" font-size="12.5" fill="#332E6E">socsim-mechanisms</text>
 <text class="body" x="654" y="427" font-size="10" fill="#6B6A64">opinion dynamics: HK · Deffuant (→ core only)</text>
-<rect x="838" y="400" width="94" height="20" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.9"/>
-<text class="body" x="885" y="414" font-size="9.5" fill="#534AB7" text-anchor="middle">library pack</text>
+<rect x="838" y="398" width="94" height="17" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.9"/>
+<text class="body" x="885" y="410" font-size="9.5" fill="#534AB7" text-anchor="middle">library pack</text>
 
 <rect x="638" y="442" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
 <text class="mono" x="654" y="460" font-size="12.5" fill="#332E6E">socsim-llm</text>
@@ -133,14 +133,17 @@
 <rect x="638" y="538" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
 <text class="mono" x="654" y="556" font-size="12.5" fill="#332E6E">socsim-metrics</text>
 <text class="body" x="654" y="571" font-size="10" fill="#6B6A64">stats · network/spatial adapters (→ core/net/grid)</text>
-<rect x="828" y="544" width="104" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
-<text class="body" x="880" y="558" font-size="9.5" fill="#3C3B37" text-anchor="middle">feature-gated</text>
+<rect x="828" y="542" width="104" height="17" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
+<text class="body" x="880" y="554" font-size="9.5" fill="#3C3B37" text-anchor="middle">feature-gated</text>
 
 <rect x="638" y="586" width="306" height="42" rx="10" fill="#FBFAF6" stroke="#534AB7" stroke-width="1.3" stroke-dasharray="6 4"/>
 <text class="mono" x="654" y="604" font-size="12.5" fill="#332E6E">socsim-games</text>
 <text class="body" x="654" y="619" font-size="10" fill="#6B6A64">normal-form games (→ core, engine)</text>
-<rect x="858" y="592" width="74" height="20" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.9"/>
-<text class="body" x="895" y="606" font-size="9.5" fill="#3C3B37" text-anchor="middle">no LLM</text>
+<rect x="838" y="592" width="94" height="20" rx="9" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.9"/>
+<text class="body" x="885" y="606" font-size="9.5" fill="#0F6E56" text-anchor="middle">used by packs</text>
+
+<!-- socsim-packs -> socsim-games (normal-form pack), routed along the right edge of the band -->
+<path d="M944 288 H954 V607 H948" fill="none" stroke="#0F6E56" stroke-width="1.3" marker-end="url(#gr)"/>
 
 <!-- hr-lifecycle -> net (green dep), grid -> spine (core) -->
 <g stroke="#0F6E56" stroke-width="1.3" fill="none">

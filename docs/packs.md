@@ -11,17 +11,18 @@ a **starter scenario** TOML you can run immediately.
 
 The `socsim` CLI is **world-polymorphic**: a scenario selects a pack by name
 (`[simulation] module_pack = "..."`), and the binary dispatches to that pack's
-world type without ever naming a concrete world itself. Three packs ship today.
+world type without ever naming a concrete world itself. Four packs ship today.
 
 ![Module packs overview](assets/packs-overview.svg)
 
-## The three bundled packs
+## The four bundled packs
 
 | Pack | World | What it models | Mechanisms | Page |
 |---|---|---|---|---|
 | [`hr-lifecycle`](packs/hr-lifecycle.md) | `HrWorld` | An employee-lifecycle organisation: hiring, learning, peer effects, satisfaction, turnover cascades, knowledge loss | ten, calibrated against published empirical findings | [→ hr-lifecycle](packs/hr-lifecycle.md) |
 | [`opinion-dynamics`](packs/opinion-dynamics.md) | `OpinionWorld` | Bounded-confidence opinion formation on a social network (consensus, clustering, polarisation) | the `socsim-mechanisms` opinion family, reused via capability traits | [→ opinion-dynamics](packs/opinion-dynamics.md) |
 | [`organizational-silence`](packs/organizational-silence.md) | `SilenceWorld` | Hierarchical employees on a small-world network: heterogeneous silence motives, fear, psychological safety, supervisor openness, retaliation events, threshold cascades | ten (plus an LLM variant), calibrated against organizational-behaviour findings | [→ organizational-silence](packs/organizational-silence.md) |
+| [`normal-form`](packs/normal-form.md) | `GameWorld` (finite or continuous, chosen by `[world.game] kind`) | Normal-form (strategic-form) games: repeated play between rule-driven agents, population dynamics on lattices and networks, continuous-action oligopolies — configured entirely in the scenario | the eight [`socsim-games`](games.md) mechanisms (`game_match`, `game_decide`, `game_play`, four population dynamics, `game_metrics`) | [→ normal-form](packs/normal-form.md) |
 
 List them at any time from the CLI:
 
@@ -48,11 +49,26 @@ Every pack is defined by two traits and a starter TOML:
    can report the patched scenario of each combination.
    Each `CliPack` owns its concrete world internally and monomorphises the
    generic [`socsim-runner`](architecture.md) functions for it, so the CLI
-   binary stays free of any one domain model.
+   binary stays free of any one domain model. It also has `validate()`, which
+   checks pack-specific rules; its default accepts everything, and `socsim`
+   calls it after the generic scenario check in `validate`, `run` and `sweep`
+   (see [CLI reference § validate](cli.md#validate)).
+
+**A pack without a `Registry`.** The `normal-form` pack does not fit the
+`ModulePack<W>` shape: it implements no `ModulePack` and registers nothing. Its
+`NormalFormPack` reads `[world.game] kind` to choose a finite or a continuous
+game, and hands the **whole scenario** to the `socsim-games` trial factory
+(`GameTrialFactory`), which builds the world, the population, the matching,
+the rules, the population dynamic and the metrics from it — see
+[normal-form games § Scenario files](games.md#scenario-files). Its `CliPack`
+therefore checks the whole scenario in `validate()` (every key, every
+combination, one dry build) and runs trials and checked sweeps through
+`socsim_runner::run_trials` / `run_trial_sweep`, so a sweep can patch
+`world.` paths and reports each combination's effective scenario.
 
 All bundled packs are gated behind a Cargo feature of the same name
-(`pack-hr-lifecycle`, `pack-opinion-dynamics`, `pack-organizational-silence`),
-all on by default, so a downstream binary can compile in only the packs it
+(`pack-hr-lifecycle`, `pack-opinion-dynamics`, `pack-organizational-silence`,
+`pack-normal-form`), all on by default, so a downstream binary can compile in only the packs it
 needs. The `organizational-silence` pack additionally offers an
 `pack-organizational-silence-llm` feature that adds the LLM-driven
 `voice_decision` mechanism alongside the rule-based `voice_decision_rule`. See the
@@ -68,6 +84,9 @@ build of a pack from scratch.
 | **Scenario / CLI** | `module_pack = "..."` in a `.toml`, then `socsim run` | reproducible scenario files, parameter sweeps, no recompile |
 | **Library** | `Pack.register(&mut reg)` + `SimulationBuilder` in Rust | custom drivers, embedding socsim in a larger program |
 
+For `normal-form` the library path is `NormalFormPack` (the same entry point
+the CLI uses) or the `socsim-games` builders, not `register`.
+
 Each pack page below documents both paths, the world's data model, the
 mechanism composition across the [6-phase tick loop](architecture.md#the-6-phase-tick-loop),
 the starter scenario, and the metrics it records.
@@ -77,10 +96,11 @@ the starter scenario, and the metrics it records.
 - [**hr-lifecycle**](packs/hr-lifecycle.md) — the calibrated employee-lifecycle reference module (`HrWorld`, ten mechanisms).
 - [**opinion-dynamics**](packs/opinion-dynamics.md) — bounded-confidence opinion dynamics (`OpinionWorld`).
 - [**organizational-silence**](packs/organizational-silence.md) — climate-of-silence emergence on a hierarchical network (`SilenceWorld`, ten rule-based mechanisms + an optional LLM variant).
+- [**normal-form**](packs/normal-form.md) — normal-form game simulations built from the scenario alone (`GameWorld`, the eight `socsim-games` mechanisms, finite and continuous games).
 
 ## Adding a new pack
 
-The CLI registry is designed so new packs slot in beside the existing three
+The CLI registry is designed so new packs slot in beside the existing four
 without touching the run/sweep/validate/list pipeline:
 
 1. Implement a concrete `World` + its mechanisms (or reuse the
@@ -88,8 +108,13 @@ without touching the run/sweep/validate/list pipeline:
    opinion pack does).
 2. Implement `ModulePack<W>` for it (`pack_name` + `register`).
 3. Implement a `struct FooCliPack;` that `impl CliPack`, behind a
-   `pack-foo` Cargo feature.
+   `pack-foo` Cargo feature. Override `validate()` if the pack has rules
+   that the generic check (mechanism names, scheduler, `t_max`) cannot see.
 4. Push it into `packs()` in `crates/socsim-cli/src/packs.rs`.
+
+A pack that builds whole trials from the scenario, like `normal-form`, skips
+step 2: it implements `socsim_runner::TrialFactory` (or reuses one) and calls
+`run_trials` / `run_trial_sweep` from its `CliPack`.
 
 The [T5 tutorial](tutorials/05-scenario-pack.md) walks through steps 1–2 end to
 end.

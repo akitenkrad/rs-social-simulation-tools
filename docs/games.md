@@ -4318,7 +4318,7 @@ at every step.
 ```toml
 [simulation]
 name        = "ipd_tft_vs_fp"
-module_pack = "library"      # not read by GameTrialFactory
+module_pack = "library"      # not read by GameTrialFactory; "normal-form" to run it with the socsim CLI
 t_max       = 200
 seed        = 42
 scheduler   = "sequential"
@@ -4395,6 +4395,13 @@ final coop_rate: 0
 `G` is `FiniteSpec` for the finite games and `ContinuousSpec` for the
 continuous ones, each with its own registry of rules
 (`RuleRegistry::finite_builtins()` / `RuleRegistry::continuous_builtins()`).
+
+`GameTrialFactory` does not read `module_pack`, so any name works in library
+mode. To run the same file with the `socsim` CLI, write
+`module_pack = "normal-form"`: the [`normal-form` pack](packs/normal-form.md)
+picks `FiniteSpec` or `ContinuousSpec` from `[world.game] kind` and runs this
+factory with the built-in rules (`socsim validate`, `run` and a checked
+`sweep`; see the [CLI reference](cli.md#checked-sweeps-normal-form)).
 
 ### Where things go
 
@@ -4567,6 +4574,7 @@ Each entry is identified by its `name`; `phase` is ignored.
 | `game_play` | `payoff_aggregation` | `"sum"` or `"mean"` | `"sum"` |
 | | `aggregate_history_len` | count | none; when given, the game's public aggregates are recorded (`WithAggregates`) |
 | | `materialize` | boolean | `false` |
+| | `counting` | boolean | `false`; `true` evaluates through `counting_play()` (same payoffs) and is accepted only for the anonymous finite kinds `hawk_dove`, `el_farol`, `minority` and `public_goods_finite`; a continuous game rejects the key even when `false` |
 | `imitate_best` | `update` | `"synchronous"` | required |
 | | `tie_break` | `"keep_own"` or `"lowest_action"` | `"keep_own"` |
 | `fermi_update` | `update`, `k` | `"synchronous"`, number | both required |
@@ -4911,10 +4919,12 @@ With `run_trial(&scenario, &factory, 7)` the convergence stop ends the run after
 ### Limits
 
 - A scenario chooses among the built-in games, rules, matchings and
-  dynamics. A custom game, outcome rule or matching, the counting play path,
+  dynamics. A custom game, outcome rule or matching,
   `OnInvalidAction::Fallback`, the rules `fixed` and `mixed` and the LLM rules
   are available only in library mode (`GameSimFactory`); register your own
-  decision rules with `RuleRegistry::register`.
+  decision rules with `RuleRegistry::register`. The counting play path is
+  available through `game_play`'s `counting = true`, for the anonymous finite
+  kinds only.
 - The experiment state is `()` unless the factory is built with
   `GameTrialFactory::with_state`.
 - Population dynamics take only `update = "synchronous"`.
