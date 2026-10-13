@@ -4526,12 +4526,14 @@ dependencies = [
  "socsim-config",
  "socsim-core",
  "socsim-engine",
+ "socsim-games",
  "socsim-llm",
  "socsim-log",
  "socsim-marl",
  "socsim-mechanisms",
  "socsim-metrics",
  "socsim-net",
+ "socsim-runner",
  "toml 0.8.23",
 ]
 

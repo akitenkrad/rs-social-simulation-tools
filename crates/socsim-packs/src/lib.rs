@@ -1,6 +1,6 @@
 //! Bundled socsim CLI packs.
 //!
-//! This crate aggregates the three packs the `socsim` CLI ships with, keeping the
+//! This crate aggregates the four packs the `socsim` CLI ships with, keeping the
 //! CLI binary (`socsim-cli`) thin: each pack here is self-contained, bundling
 //! its world type, its mechanisms, a registration function, and a starter
 //! scenario TOML.
@@ -14,12 +14,16 @@
 //! - [`organizational_silence`] — the organizational-silence ABM (`SilenceWorld`,
 //!   `OrganizationalSilencePack`, rule-based voice decisions, with an optional
 //!   LLM voice-decision layer behind the `organizational-silence-llm` feature).
+//! - [`normal_form`] — finite and continuous normal-form games configured from
+//!   scenario TOML (`NormalFormPack` and its bundled starter scenario).
 //!
 //! Each module is gated behind a Cargo feature of the same conceptual name so
 //! downstream binaries can compile in only the packs they need.
 
 #[cfg(feature = "hr-lifecycle")]
 pub mod hr_lifecycle;
+#[cfg(feature = "normal-form")]
+pub mod normal_form;
 #[cfg(feature = "opinion-dynamics")]
 pub mod opinion;
 #[cfg(feature = "organizational-silence")]

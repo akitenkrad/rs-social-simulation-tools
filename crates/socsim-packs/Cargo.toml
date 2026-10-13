@@ -16,6 +16,8 @@ socsim-net        = { path = "../socsim-net" }
 socsim-config     = { path = "../socsim-config" }
 socsim-mechanisms = { path = "../socsim-mechanisms", default-features = false, features = ["opinion-dynamics"] }
 socsim-metrics    = { path = "../socsim-metrics" }
+socsim-games      = { path = "../socsim-games", optional = true, default-features = false }
+socsim-runner     = { path = "../socsim-runner", optional = true }
 socsim-marl       = { path = "../socsim-marl", optional = true }
 # Optional LLM helper layer, pulled in only when the
 # `organizational-silence-llm` feature is enabled (gates the
@@ -23,7 +25,7 @@ socsim-marl       = { path = "../socsim-marl", optional = true }
 socsim-llm        = { path = "../socsim-llm", optional = true, features = ["live"] }
 
 [features]
-default = ["hr-lifecycle", "opinion-dynamics", "organizational-silence"]
+default = ["hr-lifecycle", "opinion-dynamics", "organizational-silence", "normal-form"]
 # The 9-stage employee-lifecycle reference module.
 hr-lifecycle = []
 # The bounded-confidence opinion-dynamics world.
@@ -31,6 +33,8 @@ opinion-dynamics = []
 # The organizational-silence ABM (Morrison & Milliken 2000 + Van Dyne 2003 +
 # Noelle-Neumann 1974 + Kuran 1995).  Rule-based version, deterministic.
 organizational-silence = []
+# Normal-form games configured through scenarios.
+normal-form = ["dep:socsim-games", "dep:socsim-runner", "socsim-games/config", "socsim-games/metrics", "socsim-games/net", "socsim-games/grid"]
 # Optional LLM voice-decision layer for organizational-silence (Decision phase
 # replaced by a structured-prompt LLM call; rule version stays available).
 organizational-silence-llm = ["organizational-silence", "dep:socsim-llm"]
@@ -45,3 +49,11 @@ toml.workspace = true
 [[example]]
 name = "marl_turnover"
 required-features = ["marl"]
+
+[[test]]
+name = "validate_combos"
+required-features = ["normal-form"]
+
+[[test]]
+name = "cli_library_equivalence"
+required-features = ["normal-form"]
