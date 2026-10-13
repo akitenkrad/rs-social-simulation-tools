@@ -236,7 +236,7 @@ const MECHANISMS: &[&str] = &[
     "game_metrics",
 ];
 
-const DYNAMICS: &[&str] = &[
+pub(crate) const DYNAMICS: &[&str] = &[
     "imitate_best",
     "fermi_update",
     "replicator_update",

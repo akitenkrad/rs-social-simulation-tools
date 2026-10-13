@@ -60,6 +60,8 @@ pub use assemble::{
 pub use config::{RuleCtor, RuleRegistry, ScenarioConfig, ScenarioGame};
 #[cfg(feature = "core")]
 pub use error::GameError;
+#[cfg(feature = "config")]
+pub use factory::GameTrialFactory;
 #[cfg(feature = "factory")]
 pub use factory::{GameSimFactory, NoMatching, SchedulerChoice};
 #[cfg(feature = "grid")]

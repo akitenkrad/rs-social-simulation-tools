@@ -146,9 +146,10 @@ use socsim_config::{Params, Scenario};
 
 use crate::{
     Assignment, DecisionRule, ExperimentState, GameError, GameSimFactory, InitialActions,
-    NormalFormOutcome, Pairwise, PlayOptions, PopulationDynamics, SchedulerChoice, Topology,
+    PlayOptions, PlayPath, PopulationDynamics, SchedulerChoice, Topology,
 };
 use game::{sealed::SpecGame, InitialSpec};
+pub(crate) use mechanisms::DYNAMICS;
 use mechanisms::{read_mechanisms, AnyDynamics, AnyMatching, AnyPlay};
 use reader::ParamReader;
 use rules::{SharedRule, DECIDE_PATH};
@@ -170,6 +171,9 @@ pub struct ScenarioConfig<G: ScenarioGame, X: ExperimentState = ()> {
     assignment: Assignment,
     initial: InitialSpec<G>,
     rules: Vec<(String, Arc<dyn DecisionRule<G, X>>)>,
+    /// The parameters of `game_decide`, kept to check the rules no agent
+    /// follows.
+    decide: Params,
     matching: AnyMatching,
     play_options: PlayOptions<G::Action>,
     aggregate_history_len: Option<usize>,
@@ -204,14 +208,7 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
         let params = Params::from(mechanisms.decide.clone());
         let mut rules = Vec::with_capacity(population.rules.len());
         for name in population.rules {
-            let rule = registry
-                .build(&name, &params, &game)
-                .map_err(|error| match error {
-                    GameError::Config(message) if message.starts_with(DECIDE_PATH) => {
-                        GameError::Config(message)
-                    }
-                    other => GameError::Config(format!("{DECIDE_PATH}: rule {name:?}: {other}")),
-                })?;
+            let rule = build_rule(registry, &name, &params, &game)?;
             rules.push((name, rule));
         }
 
@@ -225,6 +222,7 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
             assignment: population.assignment,
             initial: population.initial,
             rules,
+            decide: params,
             matching: mechanisms.matching,
             play_options: mechanisms.play_options,
             aggregate_history_len: mechanisms.aggregate_history_len,
@@ -271,23 +269,16 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
     /// A [`GameSimFactory`] configured as the scenario describes, for `seed`
     /// (which fixes the network and the uniform initial actions).
     ///
-    /// The play path is pairwise with the normal-form outcome; when
-    /// [`aggregate_history_len`](Self::aggregate_history_len) is set, the
-    /// caller adds the aggregates with
-    /// [`GameSimFactory::aggregates`], or uses [`play_path`](Self::play_path).
-    #[allow(dead_code)] // The entry point of the scenario trial factory.
+    /// The play path chosen by the scenario (with or without the game's
+    /// aggregates) is passed whole, so the factory builds through exactly the
+    /// procedure that the public setting methods configure.
     pub(crate) fn factory(
         &self,
         x: X,
         seed: u64,
-    ) -> GameSimFactory<
-        G,
-        X,
-        AnyMatching,
-        Pairwise<NormalFormOutcome>,
-        AnyDynamics<<G as SpecGame>::Replicator>,
-    >
+    ) -> GameSimFactory<G, X, AnyMatching, AnyPlay, AnyDynamics<<G as SpecGame>::Replicator>>
     where
+        AnyPlay: PlayPath<G, X>,
         AnyDynamics<<G as SpecGame>::Replicator>: PopulationDynamics<G, X>,
     {
         let mut factory = GameSimFactory::with_state(self.game.clone(), x)
@@ -299,6 +290,7 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
             .assign(self.assignment.clone())
             .initial_held(self.initial_actions(seed))
             .play_options(self.play_options.clone())
+            .play_path(AnyPlay::new(self.aggregate_history_len))
             .dynamics(self.dynamics.clone());
         if let Some(topology) = self.topology(seed) {
             factory = factory.topology(topology);
@@ -312,18 +304,47 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
         }
     }
 
-    /// The number of aggregate rows kept for decisions, when the scenario
-    /// records the game's aggregates.
-    #[allow(dead_code)] // Read by the scenario trial factory.
-    pub(crate) fn aggregate_history_len(&self) -> Option<usize> {
-        self.aggregate_history_len
+    /// Constructs every registered rule that no agent follows but whose own
+    /// parameters appear in `game_decide`, and reports the first error.
+    ///
+    /// A rule counts as written when `game_decide` contains a key that the
+    /// rule declares and no other registered rule declares; a key shared by
+    /// several rules (such as `coop_label`) does not make an unused rule
+    /// required.
+    pub(crate) fn check_unassigned_rules(
+        &self,
+        registry: &RuleRegistry<G, X>,
+    ) -> Result<(), GameError> {
+        for name in registry.names() {
+            if self.rules.iter().any(|(assigned, _)| assigned == name) {
+                continue;
+            }
+            let written = registry
+                .exclusive_keys(name)
+                .any(|key| self.decide.get_value(key).is_some());
+            if written {
+                build_rule(registry, name, &self.decide, &self.game)?;
+            }
+        }
+        Ok(())
     }
+}
 
-    /// The play path of the scenario as one run-time value.
-    #[allow(dead_code)] // Read by the scenario trial factory.
-    pub(crate) fn play_path(&self) -> AnyPlay {
-        AnyPlay::new(self.aggregate_history_len)
-    }
+/// Constructs the rule `name`, locating any error in `game_decide`.
+fn build_rule<G: ScenarioGame, X: ExperimentState>(
+    registry: &RuleRegistry<G, X>,
+    name: &str,
+    params: &Params,
+    game: &G,
+) -> Result<Arc<dyn DecisionRule<G, X>>, GameError> {
+    registry
+        .build(name, params, game)
+        .map_err(|error| match error {
+            GameError::Config(message) if message.starts_with(DECIDE_PATH) => {
+                GameError::Config(message)
+            }
+            other => GameError::Config(format!("{DECIDE_PATH}: rule {name:?}: {other}")),
+        })
 }
 
 #[cfg(test)]
@@ -439,7 +460,7 @@ log_path = "runs/{name}_{seed}.jsonl"
             ScenarioConfig::<FiniteSpec>::read(&scenario, &RuleRegistry::finite_builtins())
                 .unwrap();
         assert_eq!(config.rules.len(), 2);
-        assert_eq!(config.aggregate_history_len(), None);
+        assert_eq!(config.aggregate_history_len, None);
         let mut simulation = config.factory((), 5).build(5).unwrap();
         simulation.run().unwrap();
         assert_eq!(simulation.world().clock.t(), 20);
@@ -452,9 +473,9 @@ log_path = "runs/{name}_{seed}.jsonl"
             ScenarioConfig::<ContinuousSpec>::read(&scenario, &RuleRegistry::continuous_builtins())
                 .unwrap();
         assert_eq!(config.scheduler, SchedulerChoice::RandomActivation);
-        let len = config.aggregate_history_len().unwrap();
-        assert!(matches!(config.play_path(), AnyPlay::WithAggregates(_)));
-        let mut simulation = config.factory((), 9).aggregates(len).build(9).unwrap();
+        assert_eq!(config.aggregate_history_len, Some(4));
+        let mut simulation = config.factory((), 9).build(9).unwrap();
+        assert!(simulation.world().aggregate.is_some());
         simulation.run().unwrap();
         assert!(simulation.world().clock.t() > 0);
     }

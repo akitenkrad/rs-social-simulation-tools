@@ -5,17 +5,20 @@ use std::fmt::Debug;
 
 use super::reader::{array_value, config_error, is_label, real_value, ParamReader};
 use super::rules::{action_labels, resolve_label};
+use super::ScenarioConfig;
 use crate::catalog::{
     BattleOfSexes, ElFarol, HawkDove, MatchingPennies, MinorityGame, PrisonersDilemma,
     PublicGoodsFinite, RockPaperScissors, StagHunt,
 };
 use crate::continuous::{BertrandDifferentiated, Cournot, PublicGoodsContinuous};
+use crate::GameWorld;
 use crate::{
     uniform_initial_actions, ContinuousEquilibrium, ContinuousMetricsOptions, ContinuousSpec,
     EquilibriumTarget, ExperimentState, FiniteGame, FiniteSpec, GameError, GameSimFactory,
     InitialActions, MatrixError, MatrixGame, MetricsOptions, MixedSource, ProportionalImitation,
     StageGame, Update,
 };
+use socsim_runner::Trial;
 
 /// Tolerance of the sum of shares around one.
 pub(crate) const SHARE_SUM_TOLERANCE: f64 = 1e-9;
@@ -119,6 +122,16 @@ pub(crate) mod sealed {
             factory: GameSimFactory<Self, X, M, P, D>,
             metrics: &Self::Metrics,
         ) -> GameSimFactory<Self, X, M, P, D>;
+
+        /// Builds a trial for `seed` from a configuration read from a
+        /// scenario, through [`GameSimFactory::build_trial`].
+        fn build_trial<X: ExperimentState + Clone>(
+            config: &ScenarioConfig<Self, X>,
+            x: X,
+            seed: u64,
+        ) -> Result<Trial<GameWorld<Self, X>>, GameError>
+        where
+            Self: ScenarioGame;
     }
 }
 
@@ -535,6 +548,14 @@ impl sealed::SpecGame for FiniteSpec {
     ) -> GameSimFactory<Self, X, M, P, D> {
         factory.metrics(metrics.clone())
     }
+
+    fn build_trial<X: ExperimentState + Clone>(
+        config: &ScenarioConfig<Self, X>,
+        x: X,
+        seed: u64,
+    ) -> Result<Trial<GameWorld<Self, X>>, GameError> {
+        config.factory(x, seed).build_trial(seed)
+    }
 }
 
 #[allow(private_interfaces)]
@@ -642,5 +663,13 @@ impl sealed::SpecGame for ContinuousSpec {
         metrics: &Self::Metrics,
     ) -> GameSimFactory<Self, X, M, P, D> {
         factory.continuous_metrics(metrics.clone())
+    }
+
+    fn build_trial<X: ExperimentState + Clone>(
+        config: &ScenarioConfig<Self, X>,
+        x: X,
+        seed: u64,
+    ) -> Result<Trial<GameWorld<Self, X>>, GameError> {
+        config.factory(x, seed).build_trial(seed)
     }
 }

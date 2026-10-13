@@ -2324,3 +2324,258 @@ mod config_guards {
         assert!(message.starts_with("world.game.vv"), "{message}");
     }
 }
+
+/// The run-time checks reached from a scenario: `GameTrialFactory::validate`
+/// reads the scenario, checks the order of `[[mechanism]]`, and builds a trial
+/// for `simulation.seed`, so every check of the assembly reports a
+/// configuration error that names the key or the mechanism at fault.
+#[cfg(feature = "config")]
+mod trial_guards {
+    use socsim_config::Scenario;
+    use socsim_core::SocsimError;
+    use socsim_games::{FiniteSpec, GameTrialFactory, RuleRegistry};
+    use socsim_runner::TrialFactory;
+
+    fn scenario(world: &str, population: &str, mechanisms: &[(&str, &str)]) -> Scenario {
+        let mechanisms: String = mechanisms
+            .iter()
+            .map(|(name, params)| {
+                format!("[[mechanism]]\nname = \"{name}\"\n[mechanism.params]\n{params}\n\n")
+            })
+            .collect();
+        Scenario::parse(&format!(
+            "[simulation]\nname = \"guards\"\nmodule_pack = \"normal-form\"\nt_max = 4\nseed = 1\nscheduler = \"sequential\"\n\n[world]\n{world}\n\n[world.population]\n{population}\n\n{mechanisms}[output]\nlog_path = \"runs/{{name}}_{{seed}}.jsonl\"\n"
+        ))
+        .unwrap()
+    }
+
+    fn validate(scenario: &Scenario) -> socsim_core::Result<()> {
+        let factory: GameTrialFactory<FiniteSpec> =
+            GameTrialFactory::new(RuleRegistry::finite_builtins());
+        factory.validate(scenario)
+    }
+
+    /// Checks that `scenario` is rejected with a message that starts with
+    /// `location` and mentions `reason`.
+    fn assert_rejected(scenario: &Scenario, location: &str, reason: &str) {
+        match validate(scenario) {
+            Err(SocsimError::Config(message)) => {
+                assert!(message.starts_with(location), "{message}");
+                assert!(message.contains(reason), "{message}");
+            }
+            Err(other) => panic!("expected a configuration error, got {other:?}"),
+            Ok(()) => panic!("expected {location} to be rejected"),
+        }
+    }
+
+    const HAWK_DOVE: &str = "[world.game]\nkind = \"hawk_dove\"\nv = 2\nc = 4";
+    const HELD: &str = "[[world.population.group]]\nrule = \"held\"\ncount = 10";
+    const TEN: &str = "n_agents = 10\nhistory_len = 1";
+
+    // (1) Population dynamics with an agent on an active rule.
+    #[test]
+    fn a_population_dynamic_rejects_a_group_with_an_active_rule() {
+        let population = "[[world.population.group]]\nrule = \"held\"\ncount = 9\n[[world.population.group]]\nrule = \"tit_for_tat\"\ncount = 1";
+        let mechanisms = [
+            ("game_match", "matching = \"random_pairs\""),
+            ("game_decide", "coop_label = \"H\""),
+            ("game_play", ""),
+            ("fermi_update", "update = \"synchronous\"\nk = 1.0"),
+        ];
+        let world = format!("{TEN}\n{HAWK_DOVE}");
+        assert_rejected(
+            &scenario(&world, population, &mechanisms),
+            "mechanism[fermi_update]",
+            "applies only to held agents",
+        );
+        validate(&scenario(&world, HELD, &mechanisms)).unwrap();
+    }
+
+    #[cfg(feature = "grid")]
+    #[test]
+    fn imitate_best_on_a_grid_rejects_a_tit_for_tat_group() {
+        let world = format!("topology = \"grid\"\ngrid_rows = 2\ngrid_cols = 5\nboundary = \"toroidal\"\nneighborhood = \"moore\"\nhistory_len = 1\n{HAWK_DOVE}");
+        let population = "[[world.population.group]]\nrule = \"held\"\ncount = 9\n[[world.population.group]]\nrule = \"tit_for_tat\"\ncount = 1";
+        let mechanisms = [
+            ("game_match", "matching = \"grid_neighborhood\""),
+            ("game_decide", "coop_label = \"H\""),
+            ("game_play", ""),
+            ("imitate_best", "update = \"synchronous\""),
+        ];
+        assert_rejected(
+            &scenario(&world, population, &mechanisms),
+            "mechanism[imitate_best]",
+            "applies only to held agents",
+        );
+    }
+
+    // (2) Roles that do not share one action space, on a grid so that the
+    // common-space check is the one that fails.
+    #[cfg(feature = "grid")]
+    #[test]
+    fn imitate_best_rejects_roles_with_different_action_counts() {
+        let world = "topology = \"grid\"\ngrid_rows = 2\ngrid_cols = 5\nboundary = \"toroidal\"\nneighborhood = \"moore\"\nhistory_len = 1\n[world.game]\nkind = \"matrix\"\nlabels = [[\"a\", \"b\"], [\"x\", \"y\", \"z\"]]\npayoffs = [[[1, 1], [0, 0], [0, 0]], [[0, 0], [1, 1], [0, 0]]]";
+        let mechanisms = [
+            ("game_match", "matching = \"grid_neighborhood\""),
+            ("game_decide", ""),
+            ("game_play", ""),
+            ("imitate_best", "update = \"synchronous\""),
+        ];
+        assert_rejected(
+            &scenario(world, HELD, &mechanisms),
+            "mechanism[imitate_best]",
+            "share one action space",
+        );
+    }
+
+    // (3) A per-step decision with an agent holding several roles.
+    #[test]
+    fn per_step_rejects_round_robin_with_three_agents() {
+        let world = format!("n_agents = 3\nhistory_len = 1\n{HAWK_DOVE}");
+        let population = "[[world.population.group]]\nrule = \"uniform_random\"\ncount = 3";
+        let mechanisms = |scope: &'static str| {
+            [
+                ("game_match", "matching = \"round_robin\""),
+                ("game_decide", scope),
+                ("game_play", ""),
+            ]
+        };
+        assert_rejected(
+            &scenario(
+                &world,
+                population,
+                &mechanisms("decision_scope = \"per_step\""),
+            ),
+            "mechanism[game_match]",
+            "per-step decision",
+        );
+        validate(&scenario(
+            &world,
+            population,
+            &mechanisms("decision_scope = \"per_encounter\""),
+        ))
+        .unwrap();
+    }
+
+    // (4) Fictitious play on a game with three roles.
+    #[test]
+    fn fictitious_play_rejects_a_three_role_game() {
+        let world = "n_agents = 3\nhistory_len = 1\n[world.game]\nkind = \"matrix\"\nlabels = [[\"a\", \"b\"], [\"a\", \"b\"], [\"a\", \"b\"]]\npayoffs = [[[[1, 1, 1], [0, 0, 0]], [[0, 0, 0], [1, 1, 1]]], [[[1, 1, 1], [0, 0, 0]], [[0, 0, 0], [1, 1, 1]]]]";
+        let population = "[[world.population.group]]\nrule = \"fictitious_play\"\ncount = 3";
+        let mechanisms = [
+            ("game_match", "matching = \"whole_population\""),
+            ("game_decide", ""),
+            ("game_play", ""),
+        ];
+        assert_rejected(
+            &scenario(world, population, &mechanisms),
+            "mechanism[game_decide]",
+            "requires 2 roles",
+        );
+    }
+
+    // (5) Dynamic parameters that the payoff range does not allow. Hawk-dove
+    // with v = 2, c = 4 pays between -1 and 2 per encounter, a width of 3,
+    // so beta may be at most 1/3 with one encounter per step.
+    #[test]
+    fn replicator_update_rejects_beta_above_the_inverse_payoff_width() {
+        let world = format!("{TEN}\n{HAWK_DOVE}");
+        let mechanisms = |beta: &'static str| {
+            [
+                ("game_match", "matching = \"random_pairs\""),
+                ("game_decide", ""),
+                ("game_play", ""),
+                ("replicator_update", beta),
+            ]
+        };
+        assert_rejected(
+            &scenario(
+                &world,
+                HELD,
+                &mechanisms("update = \"synchronous\"\nbeta = 0.5"),
+            ),
+            "mechanism[replicator_update]",
+            "beta",
+        );
+        validate(&scenario(
+            &world,
+            HELD,
+            &mechanisms("update = \"synchronous\"\nbeta = 0.3"),
+        ))
+        .unwrap();
+    }
+
+    // Linear Moran fitness 1 - w + w * payoff with w = 0.5 and a lowest
+    // payoff of -10 is negative.
+    #[test]
+    fn linear_moran_fitness_rejects_a_non_positive_fitness() {
+        let world = "n_agents = 10\nhistory_len = 1\n[world.game]\nkind = \"prisoners_dilemma\"\ntemptation = 5\nreward = 3\npunishment = 1\nsucker = -10";
+        let mechanisms = [
+            ("game_match", "matching = \"random_pairs\""),
+            ("game_decide", ""),
+            ("game_play", ""),
+            (
+                "moran_update",
+                "update = \"synchronous\"\nfitness = \"linear\"\nw = 0.5",
+            ),
+        ];
+        assert_rejected(
+            &scenario(world, HELD, &mechanisms),
+            "mechanism[moran_update]",
+            "must be positive",
+        );
+    }
+
+    // (6) A population dynamic listed before `game_decide`, reported by
+    // `validate`.
+    #[test]
+    fn a_population_dynamic_listed_before_game_decide_is_rejected() {
+        let world = format!("{TEN}\n{HAWK_DOVE}");
+        let before = [
+            ("game_match", "matching = \"random_pairs\""),
+            ("fermi_update", "update = \"synchronous\"\nk = 1.0"),
+            ("game_decide", ""),
+            ("game_play", ""),
+        ];
+        assert_rejected(
+            &scenario(&world, HELD, &before),
+            "mechanism[fermi_update]",
+            "after game_decide",
+        );
+        let after = [before[0], before[2], before[1], before[3]];
+        validate(&scenario(&world, HELD, &after)).unwrap();
+    }
+
+    // (7) A group of a rule kind that is not registered.
+    #[test]
+    fn a_group_of_an_unregistered_rule_is_rejected() {
+        let world = format!("{TEN}\n{HAWK_DOVE}");
+        let population = "[[world.population.group]]\nrule = \"tft\"\ncount = 10";
+        let mechanisms = [
+            ("game_match", "matching = \"random_pairs\""),
+            ("game_decide", ""),
+            ("game_play", ""),
+        ];
+        assert_rejected(
+            &scenario(&world, population, &mechanisms),
+            "world.population.group[0].rule",
+            "tft",
+        );
+    }
+
+    // (8) A built-in game whose parameters violate its conditions.
+    #[test]
+    fn a_prisoners_dilemma_with_invalid_payoffs_is_rejected() {
+        let world = "n_agents = 10\nhistory_len = 1\n[world.game]\nkind = \"prisoners_dilemma\"\ntemptation = 1\nreward = 2\npunishment = 3\nsucker = 4";
+        let mechanisms = [
+            ("game_match", "matching = \"random_pairs\""),
+            ("game_decide", ""),
+            ("game_play", ""),
+        ];
+        assert_rejected(
+            &scenario(world, HELD, &mechanisms),
+            "world.game",
+            "T > R > P >= S",
+        );
+    }
+}

@@ -41,6 +41,12 @@ use socsim_engine::{
 };
 use socsim_runner::Trial;
 
+#[cfg(feature = "config")]
+mod trial;
+
+#[cfg(feature = "config")]
+pub use trial::GameTrialFactory;
+
 use crate::assemble::{assemble_parts, AssembledParts};
 use crate::{
     build_world_with, AggregateGame, AnonymousGame, AssignGroup, AssignKind, Assignment,
@@ -377,6 +383,19 @@ impl<G: StageGame, X: ExperimentState, M, P, D> GameSimFactory<G, X, M, P, D> {
     pub fn scheduler(mut self, scheduler: SchedulerChoice) -> Self {
         self.scheduler = scheduler;
         self
+    }
+
+    /// Replaces the play path with `play`; this changes the type state.
+    ///
+    /// Crate-internal: a scenario chooses its play path at run time and passes
+    /// it whole, so a scenario and the public setting methods build through
+    /// the same procedure.
+    #[cfg(feature = "config")]
+    pub(crate) fn play_path<P2>(self, play: P2) -> GameSimFactory<G, X, M, P2, D>
+    where
+        P2: PlayPath<G, X> + Clone,
+    {
+        self.replace(|matching, _, dynamics| (matching, play, dynamics))
     }
 }
 

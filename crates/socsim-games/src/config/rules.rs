@@ -149,6 +149,20 @@ impl<G: StageGame, X: ExperimentState> RuleRegistry<G, X> {
             .flat_map(|entry| entry.keys.iter().map(String::as_str))
     }
 
+    /// The keys that the rule registered under `name` declares and no other
+    /// registered rule declares.
+    pub(crate) fn exclusive_keys<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> {
+        let own = self.rules.get(name).map(|entry| entry.keys.as_slice());
+        own.unwrap_or_default()
+            .iter()
+            .map(String::as_str)
+            .filter(move |key| {
+                self.rules
+                    .iter()
+                    .all(|(other, entry)| other == name || !entry.keys.iter().any(|k| k == key))
+            })
+    }
+
     /// Constructs the rule registered under `name`.
     pub(crate) fn build(
         &self,

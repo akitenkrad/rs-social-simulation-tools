@@ -235,6 +235,11 @@ name = "params_roundtrip"
 path = "tests/params_roundtrip.rs"
 required-features = ["config"]
 
+[[test]]
+name = "trial_factory_game"
+path = "tests/trial_factory_game.rs"
+required-features = ["config", "net", "grid"]
+
 [[example]]
 name = "ipd_pair"
 path = "examples/ipd_pair.rs"
