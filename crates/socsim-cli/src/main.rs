@@ -6,7 +6,7 @@
 //! |---------|-------------|
 //! | `init`      | Generate a starter scenario TOML |
 //! | `run`       | Execute a scenario (single or multi-seed) |
-//! | `validate`  | Check scenario TOML against the pack's registry |
+//! | `validate`  | Validate a scenario, then apply the selected pack's own checks |
 //! | `list`      | List packs or mechanisms |
 //! | `sweep`     | Grid parameter sweep |
 //! | `summarize` | Re-aggregate existing JSONL logs |
@@ -71,7 +71,7 @@ enum Commands {
         parallel: bool,
     },
 
-    /// Validate a scenario TOML against the pack's registry.
+    /// Validate a scenario TOML, then apply the selected pack's own checks.
     Validate {
         /// Path to the scenario TOML.
         scenario: PathBuf,
@@ -89,8 +89,10 @@ enum Commands {
         scenario: PathBuf,
 
         /// Parameter sweep axes, e.g. `peer_effect.alpha_peer=0.1,0.17,0.3`.
+        /// The normal-form pack also accepts `world.*` paths, e.g.
+        /// `world.game.temptation=1.6,1.9`.
         /// May be repeated for multi-dimensional sweeps.
-        #[arg(long, value_name = "MECH.PARAM=V1,V2,...")]
+        #[arg(long, value_name = "MECH.PARAM|world.PATH=V1,V2,...")]
         param: Vec<String>,
 
         /// Seed range `A..B` (e.g. `0..10`).

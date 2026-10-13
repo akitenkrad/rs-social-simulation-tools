@@ -73,11 +73,19 @@ metrics  = ["game.mean_payoff", "game.played_share.a0", "game.regret"]   # a0 is
 "#;
 
 /// Runs normal-form game scenarios through the shared game trial factories.
+///
+/// The pack inspects `[world.game] kind` to select the game family, routing
+/// finite games through [`GameTrialFactory<FiniteSpec>`] and continuous games
+/// through [`GameTrialFactory<ContinuousSpec>`].
 #[derive(Debug, Default)]
 pub struct NormalFormPack;
 
 impl NormalFormPack {
     /// Names of the mechanisms accepted by normal-form scenarios.
+    ///
+    /// The names are returned in scenario-validation order, exactly as listed
+    /// in [`SCENARIO_MECHANISM_NAMES`]. The CLI wrapper sorts them for its
+    /// own presentation and validation interface.
     pub fn mechanism_names(&self) -> Vec<String> {
         SCENARIO_MECHANISM_NAMES
             .iter()
@@ -85,7 +93,11 @@ impl NormalFormPack {
             .collect()
     }
 
-    /// Validates the complete scenario and its selected game family.
+    /// Validates the complete scenario with the factory for its game family.
+    ///
+    /// The `[world.game] kind` field selects either the
+    /// [`GameTrialFactory<FiniteSpec>`] or
+    /// [`GameTrialFactory<ContinuousSpec>`].
     pub fn validate(&self, scenario: &Scenario) -> Result<()> {
         match selected_family(scenario)? {
             GameFamily::Finite => finite_factory().validate(scenario),
@@ -94,7 +106,12 @@ impl NormalFormPack {
         }
     }
 
-    /// Runs all requested trial seeds.
+    /// Runs all requested trial seeds with the factory selected by
+    /// `[world.game] kind`.
+    ///
+    /// The selected [`GameTrialFactory`] validates the scenario exactly once
+    /// before any trial runs, regardless of the number of seeds or whether
+    /// execution is parallel.
     pub fn run_trials(
         &self,
         scenario: &Scenario,
@@ -108,7 +125,12 @@ impl NormalFormPack {
         }
     }
 
-    /// Runs a checked parameter sweep for all requested trial seeds.
+    /// Runs a checked parameter sweep with the factory selected by
+    /// `[world.game] kind`.
+    ///
+    /// Every effective scenario in the sweep is validated exactly once by the
+    /// selected [`GameTrialFactory`]. All combinations are validated before
+    /// any trial runs, and the trials do not repeat that validation.
     pub fn run_sweep(
         &self,
         scenario: &Scenario,

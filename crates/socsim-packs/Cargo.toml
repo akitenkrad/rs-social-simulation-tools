@@ -1,6 +1,6 @@
 [package]
 name        = "socsim-packs"
-description = "Bundled socsim CLI packs: the HR-lifecycle reference module and the opinion-dynamics world (world types + mechanisms + registration + starter scenarios)"
+description = "Bundled socsim CLI packs for HR lifecycle, opinion dynamics, organizational silence, and normal-form games"
 edition.workspace = true
 version.workspace = true
 authors.workspace = true
