@@ -10,6 +10,10 @@ license.workspace = true
 name = "socsim"
 path = "src/main.rs"
 
+[[test]]
+name = "normal_form_cli"
+required-features = ["pack-normal-form"]
+
 [dependencies]
 socsim-core         = { path = "../socsim-core" }
 socsim-config       = { path = "../socsim-config" }
@@ -24,10 +28,11 @@ anyhow.workspace    = true
 toml.workspace      = true
 
 [features]
-default = ["pack-hr-lifecycle", "pack-opinion-dynamics", "pack-organizational-silence"]
+default = ["pack-hr-lifecycle", "pack-opinion-dynamics", "pack-organizational-silence", "pack-normal-form"]
 pack-hr-lifecycle              = ["dep:socsim-packs", "socsim-packs/hr-lifecycle"]
 pack-opinion-dynamics          = ["dep:socsim-packs", "socsim-packs/opinion-dynamics"]
 pack-organizational-silence    = ["dep:socsim-packs", "socsim-packs/organizational-silence"]
+pack-normal-form               = ["dep:socsim-packs", "socsim-packs/normal-form"]
 pack-organizational-silence-llm = ["pack-organizational-silence", "socsim-packs/organizational-silence-llm"]
 # Enable on-demand dataset acquisition (network download) for `socsim datasets fetch`.
 datasets-acquire = ["socsim-datasets/acquire"]

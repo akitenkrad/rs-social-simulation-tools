@@ -68,6 +68,14 @@ pub trait CliPack: Send + Sync {
     /// Sorted names of all mechanisms this pack registers.
     fn mechanism_names(&self) -> Vec<String>;
 
+    /// Validate pack-specific scenario configuration.
+    ///
+    /// The CLI calls this after [`Scenario::validate`]. Packs without
+    /// additional validation keep this no-op default.
+    fn validate(&self, _scenario: &Scenario) -> Result<()> {
+        Ok(())
+    }
+
     /// Run the scenario over the given seeds, returning per-seed results.
     fn run_seeds(
         &self,
@@ -118,6 +126,8 @@ pub fn packs() -> Vec<Box<dyn CliPack>> {
     v.push(Box::new(OpinionDynamicsCliPack));
     #[cfg(feature = "pack-organizational-silence")]
     v.push(Box::new(OrganizationalSilenceCliPack));
+    #[cfg(feature = "pack-normal-form")]
+    v.push(Box::new(NormalFormCliPack));
     v
 }
 
@@ -427,3 +437,83 @@ mod organizational_silence {
 
 #[cfg(feature = "pack-organizational-silence")]
 pub use organizational_silence::OrganizationalSilenceCliPack;
+
+// ── normal-form pack ───────────────────────────────────────────────────────────
+
+#[cfg(feature = "pack-normal-form")]
+mod normal_form {
+    use super::*;
+
+    use socsim_packs::normal_form::{NormalFormPack, NORMAL_FORM_STARTER};
+
+    /// CLI-side wrapper exposing the `normal-form` pack through [`CliPack`].
+    pub struct NormalFormCliPack;
+
+    impl CliPack for NormalFormCliPack {
+        fn name(&self) -> &'static str {
+            "normal-form"
+        }
+
+        fn starter_toml(&self) -> &'static str {
+            NORMAL_FORM_STARTER
+        }
+
+        fn mechanism_names(&self) -> Vec<String> {
+            let mut names = NormalFormPack.mechanism_names();
+            names.sort();
+            names
+        }
+
+        fn validate(&self, scenario: &Scenario) -> Result<()> {
+            NormalFormPack.validate(scenario)?;
+            Ok(())
+        }
+
+        fn run_seeds(
+            &self,
+            scenario: &Scenario,
+            seeds: &[u64],
+            parallel: bool,
+        ) -> Result<Vec<RunResult>> {
+            Ok(NormalFormPack.run_trials(scenario, seeds, parallel)?)
+        }
+
+        fn run_sweep(
+            &self,
+            scenario: &Scenario,
+            axes: &[SweepAxis],
+            seeds: &[u64],
+            parallel: bool,
+        ) -> Result<Vec<SweepPoint>> {
+            let points = NormalFormPack.run_sweep(scenario, axes, seeds, parallel)?;
+            Ok(points
+                .into_iter()
+                .map(|point| SweepPoint {
+                    params: point.params,
+                    summary: point.summary,
+                })
+                .collect())
+        }
+
+        fn run_sweep_rows(
+            &self,
+            scenario: &Scenario,
+            axes: &[SweepAxis],
+            seeds: &[u64],
+            parallel: bool,
+        ) -> Result<Vec<SweepRow>> {
+            let points = NormalFormPack.run_sweep(scenario, axes, seeds, parallel)?;
+            Ok(points
+                .into_iter()
+                .map(|point| SweepRow {
+                    params: point.params,
+                    summary: point.summary,
+                    effective: Some(point.effective),
+                })
+                .collect())
+        }
+    }
+}
+
+#[cfg(feature = "pack-normal-form")]
+pub use normal_form::NormalFormCliPack;

@@ -173,14 +173,16 @@ fn cmd_run(scenario_path: &Path, seeds_arg: Option<&str>, parallel: bool) -> Res
     let scenario = Scenario::from_path(scenario_path)
         .with_context(|| format!("failed to load '{}'", scenario_path.display()))?;
 
+    let pack = packs::dispatch(&scenario.simulation.module_pack)
+        .with_context(|| format!("unknown module pack '{}'", scenario.simulation.module_pack))?;
+
+    check_scenario(pack.as_ref(), &scenario, scenario_path)?;
+
     let seeds: Vec<u64> = if let Some(range_str) = seeds_arg {
         parse_seed_range(range_str)?
     } else {
         vec![scenario.simulation.seed]
     };
-
-    let pack = packs::dispatch(&scenario.simulation.module_pack)
-        .with_context(|| format!("unknown module pack '{}'", scenario.simulation.module_pack))?;
 
     println!(
         "Running '{}' (pack={}, t_max={}, seeds=[{}], parallel={})",
@@ -224,12 +226,7 @@ fn cmd_validate(scenario_path: &Path) -> Result<()> {
     let pack = packs::dispatch(&scenario.simulation.module_pack)
         .with_context(|| format!("unknown module pack '{}'", scenario.simulation.module_pack))?;
 
-    let names = pack.mechanism_names();
-
-    let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-    scenario
-        .validate(&name_refs)
-        .with_context(|| format!("validation failed for '{}'", scenario_path.display()))?;
+    check_scenario(pack.as_ref(), &scenario, scenario_path)?;
 
     println!("OK — scenario '{}' is valid.", scenario_path.display());
     Ok(())
@@ -273,15 +270,17 @@ fn cmd_sweep(
     let scenario = Scenario::from_path(scenario_path)
         .with_context(|| format!("failed to load '{}'", scenario_path.display()))?;
 
+    let pack = packs::dispatch(&scenario.simulation.module_pack)
+        .with_context(|| format!("unknown module pack '{}'", scenario.simulation.module_pack))?;
+
+    check_scenario(pack.as_ref(), &scenario, scenario_path)?;
+
     let seeds = parse_seed_range(seeds_arg)?;
 
     let axes: Vec<SweepAxis> = param_args
         .iter()
         .map(|s| parse_sweep_axis(s))
         .collect::<Result<_>>()?;
-
-    let pack = packs::dispatch(&scenario.simulation.module_pack)
-        .with_context(|| format!("unknown module pack '{}'", scenario.simulation.module_pack))?;
 
     println!(
         "Sweeping '{}' over {} axes × {} seeds",
@@ -381,6 +380,18 @@ fn cmd_summarize(path: &Path, format: &str) -> Result<()> {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+fn check_scenario(pack: &dyn packs::CliPack, scenario: &Scenario, path: &Path) -> Result<()> {
+    let result: Result<()> = (|| {
+        let names = pack.mechanism_names();
+        let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        scenario.validate(&name_refs)?;
+        pack.validate(scenario)?;
+        Ok(())
+    })();
+
+    result.with_context(|| format!("validation failed for '{}'", path.display()))
+}
 
 /// Parse a seed range string `"A..B"` into a sorted `Vec<u64>`.
 fn parse_seed_range(s: &str) -> Result<Vec<u64>> {
@@ -948,5 +959,96 @@ log_path = "{log_template}"
         );
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── scenario validation ─────────────────────────────────────────────────
+
+    use std::sync::{Arc, Mutex};
+
+    struct StubValidationPack {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+        reject: bool,
+    }
+
+    impl CliPack for StubValidationPack {
+        fn name(&self) -> &'static str {
+            "stub-validation"
+        }
+
+        fn starter_toml(&self) -> &'static str {
+            ""
+        }
+
+        fn mechanism_names(&self) -> Vec<String> {
+            self.calls.lock().unwrap().push("mechanism_names");
+            vec!["org_performance".to_owned()]
+        }
+
+        fn validate(&self, _scenario: &Scenario) -> Result<()> {
+            self.calls.lock().unwrap().push("pack_validate");
+            if self.reject {
+                anyhow::bail!("pack validation rejected the scenario");
+            }
+            Ok(())
+        }
+
+        fn run_seeds(
+            &self,
+            _scenario: &Scenario,
+            _seeds: &[u64],
+            _parallel: bool,
+        ) -> Result<Vec<socsim_runner::RunResult>> {
+            unreachable!("validation tests do not run simulations")
+        }
+
+        fn run_sweep(
+            &self,
+            _scenario: &Scenario,
+            _axes: &[SweepAxis],
+            _seeds: &[u64],
+            _parallel: bool,
+        ) -> Result<Vec<SweepPoint>> {
+            unreachable!("validation tests do not run sweeps")
+        }
+    }
+
+    #[test]
+    fn check_scenario_stops_before_pack_validation_when_scenario_is_invalid() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let pack = StubValidationPack {
+            calls: Arc::clone(&calls),
+            reject: false,
+        };
+        let mut scenario = scenario_with_log("unused_{name}_{seed}.jsonl");
+        scenario.simulation.module_pack = "stub-validation".to_owned();
+        scenario.simulation.t_max = 0;
+
+        let error = check_scenario(&pack, &scenario, Path::new("zero.toml")).unwrap_err();
+
+        assert_eq!(*calls.lock().unwrap(), vec!["mechanism_names"]);
+        let message = format!("{error:#}");
+        assert!(message.contains("validation failed for 'zero.toml'"));
+        assert!(message.contains("simulation.t_max must be > 0"));
+    }
+
+    #[test]
+    fn check_scenario_calls_pack_validation_once_after_scenario_validation() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let pack = StubValidationPack {
+            calls: Arc::clone(&calls),
+            reject: true,
+        };
+        let mut scenario = scenario_with_log("unused_{name}_{seed}.jsonl");
+        scenario.simulation.module_pack = "stub-validation".to_owned();
+
+        let error = check_scenario(&pack, &scenario, Path::new("pack.toml")).unwrap_err();
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec!["mechanism_names", "pack_validate"]
+        );
+        let message = format!("{error:#}");
+        assert!(message.contains("validation failed for 'pack.toml'"));
+        assert!(message.contains("pack validation rejected the scenario"));
     }
 }
