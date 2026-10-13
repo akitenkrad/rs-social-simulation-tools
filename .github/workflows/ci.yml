@@ -35,14 +35,19 @@ jobs:
           # PR runs never need write access.
           ref: ${{ github.event_name == 'push' && github.ref_name || '' }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pin the toolchain: the trybuild compile-fail tests compare rustc's
+      # diagnostics verbatim, and those change between releases. Raise this
+      # together with the local toolchain and the blessed `.stderr` files.
+      - uses: dtolnay/rust-toolchain@1.94.0
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Test
-        # GitHub's bash shell runs with `pipefail`, so a test failure still
-        # fails this step despite the pipe into `tee`. `cargo test` also builds
-        # the whole workspace, so this doubles as the build gate.
+        # `shell: bash` runs with `-o pipefail` (the default shell does not),
+        # so a test failure still fails this step despite the pipe into `tee`.
+        # `cargo test` also builds the whole workspace, so this doubles as the
+        # build gate.
+        shell: bash
         run: cargo test --workspace 2>&1 | tee test-output.txt
 
       - name: Update test badge (main only)
