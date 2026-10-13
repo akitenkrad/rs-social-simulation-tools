@@ -2246,3 +2246,81 @@ mod factory_guards {
         ));
     }
 }
+
+#[cfg(feature = "config")]
+mod config_guards {
+    use socsim_config::Scenario;
+    use socsim_games::{FiniteSpec, GameError, RuleRegistry, ScenarioConfig};
+
+    fn read(world: &str, mechanisms: &str) -> Result<ScenarioConfig<FiniteSpec>, GameError> {
+        let text = format!(
+            "[simulation]\nname = \"guards\"\nmodule_pack = \"normal-form\"\nt_max = 4\nseed = 1\nscheduler = \"sequential\"\n\n[world]\n{world}\n{mechanisms}\n[output]\nlog_path = \"runs/{{name}}_{{seed}}.jsonl\"\n"
+        );
+        ScenarioConfig::read(
+            &Scenario::parse(&text).unwrap(),
+            &RuleRegistry::finite_builtins(),
+        )
+    }
+
+    const HAWK_DOVE: &str = "n_agents = 4\nhistory_len = 2\n[world.game]\nkind = \"hawk_dove\"\nv = 2\nc = 3\n[world.population]\n[[world.population.group]]\nrule = \"held\"\ncount = 4\n";
+
+    fn entry(name: &str, params: &str) -> String {
+        format!("[[mechanism]]\nname = \"{name}\"\n[mechanism.params]\n{params}\n\n")
+    }
+
+    fn config_message<T>(result: Result<T, GameError>) -> String {
+        match result {
+            Err(GameError::Config(message)) => message,
+            Err(other) => panic!("expected a configuration error, got {other:?}"),
+            Ok(_) => panic!("expected a configuration error, got Ok"),
+        }
+    }
+
+    // (6) A population dynamic listed before `game_decide`.
+    #[test]
+    fn a_population_dynamic_listed_before_game_decide_is_rejected() {
+        let matching = entry("game_match", "matching = \"random_pairs\"");
+        let fermi = entry("fermi_update", "update = \"synchronous\"\nk = 0.5");
+        let decide = entry("game_decide", "");
+        let play = entry("game_play", "");
+        let message = config_message(read(HAWK_DOVE, &format!("{matching}{fermi}{decide}{play}")));
+        assert!(message.starts_with("mechanism[fermi_update]"), "{message}");
+        assert!(read(HAWK_DOVE, &format!("{matching}{decide}{fermi}{play}")).is_ok());
+    }
+
+    // (8) A built-in game whose parameters violate its conditions.
+    #[test]
+    fn a_prisoners_dilemma_with_invalid_payoffs_is_rejected() {
+        let world = "n_agents = 4\nhistory_len = 2\n[world.game]\nkind = \"prisoners_dilemma\"\ntemptation = 1\nreward = 2\npunishment = 3\nsucker = 4\n[world.population]\n[[world.population.group]]\nrule = \"held\"\ncount = 4\n";
+        let mechanisms = format!(
+            "{}{}{}",
+            entry("game_match", "matching = \"random_pairs\""),
+            entry("game_decide", ""),
+            entry("game_play", "")
+        );
+        assert!(matches!(
+            read(world, &mechanisms),
+            Err(GameError::Catalog(_))
+        ));
+    }
+
+    // (7) A group that names a rule that is not registered, and unknown keys.
+    #[test]
+    fn unregistered_rules_and_unknown_keys_are_rejected() {
+        let mechanisms = format!(
+            "{}{}{}",
+            entry("game_match", "matching = \"random_pairs\""),
+            entry("game_decide", ""),
+            entry("game_play", "")
+        );
+        let world = HAWK_DOVE.replace("rule = \"held\"", "rule = \"tft\"");
+        let message = config_message(read(&world, &mechanisms));
+        assert!(
+            message.starts_with("world.population.group[0].rule"),
+            "{message}"
+        );
+        let world = HAWK_DOVE.replace("v = 2", "v = 2\nvv = 1");
+        let message = config_message(read(&world, &mechanisms));
+        assert!(message.starts_with("world.game.vv"), "{message}");
+    }
+}

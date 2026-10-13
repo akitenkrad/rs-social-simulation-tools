@@ -115,6 +115,10 @@ fn resolve_shares<G: StageGame>(
         .collect();
     let mut counts: Vec<usize> = quotas.iter().map(|quota| quota.floor() as usize).collect();
     let floored: usize = counts.iter().sum();
+    // The shares sum to 1 within 1e-9, so the floored counts can overshoot
+    // `n_agents`, or leave more agents than entries to hand out, only when
+    // `n_agents` is around 10^9 or larger. These checks keep that case an
+    // error instead of a panic.
     let remaining = n_agents.checked_sub(floored).ok_or_else(|| {
         GameError::Config(format!(
             "initial action shares: shares assign {floored} agents, more than {n_agents}"

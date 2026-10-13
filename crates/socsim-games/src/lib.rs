@@ -41,6 +41,8 @@ pub mod view;
 #[cfg(feature = "core")]
 pub mod world;
 
+#[cfg(feature = "config")]
+pub mod config;
 #[cfg(feature = "factory")]
 pub mod factory;
 
@@ -54,6 +56,8 @@ pub use assemble::{
     build_world, build_world_with, uniform_initial_actions, AssignGroup, AssignKind, Assignment,
     InitialActions, OnInvalidAction, PayoffAggregation, PlayOptions,
 };
+#[cfg(feature = "config")]
+pub use config::{RuleCtor, RuleRegistry, ScenarioConfig, ScenarioGame};
 #[cfg(feature = "core")]
 pub use error::GameError;
 #[cfg(feature = "factory")]

@@ -37,8 +37,8 @@ use super::catalog::{
 };
 use super::continuous::{BertrandDifferentiated, Cournot, PublicGoodsContinuous};
 use super::{
-    ActionError, AggregateGame, AggregateSpec, CommonActionSpace, ContinuousGame, FiniteGame,
-    MatrixGame, NormalFormGame, NumericBr, StageGame,
+    ActionError, AggregateGame, AggregateSpec, CommonActionSpace, ContinuousGame, DescribeGame,
+    FiniteGame, MatrixGame, NormalFormGame, NumericBr, StageGame,
 };
 
 /// A finite game selected at run time.
@@ -81,8 +81,8 @@ pub enum FiniteSpec {
 ///
 /// Each variant wraps one built-in continuous game. The implementations of
 /// [`StageGame`], [`NormalFormGame`], [`ContinuousGame`],
-/// [`CommonActionSpace`], and [`AggregateGame`] forward every method to the
-/// wrapped game.
+/// [`CommonActionSpace`], [`AggregateGame`], and [`DescribeGame`] forward every
+/// method to the wrapped game.
 ///
 /// Serialized with serde's default externally tagged representation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -252,6 +252,13 @@ impl AggregateGame for ContinuousSpec {
 
     fn aggregate_into(&self, profile: &[Vec<f64>], out: &mut [f64]) {
         continuous!(self, game => game.aggregate_into(profile, out))
+    }
+}
+
+#[diagnostic::do_not_recommend]
+impl DescribeGame for ContinuousSpec {
+    fn describe(&self, role: Option<usize>) -> String {
+        continuous!(self, game => game.describe(role))
     }
 }
 

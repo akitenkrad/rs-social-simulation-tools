@@ -230,6 +230,11 @@ name = "factory_typestate"
 path = "tests/factory_typestate.rs"
 required-features = ["factory", "grid"]
 
+[[test]]
+name = "params_roundtrip"
+path = "tests/params_roundtrip.rs"
+required-features = ["config"]
+
 [[example]]
 name = "ipd_pair"
 path = "examples/ipd_pair.rs"

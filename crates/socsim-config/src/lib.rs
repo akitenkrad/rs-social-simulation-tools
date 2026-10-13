@@ -67,6 +67,9 @@ impl Params {
     }
 
     /// Return the value for `key` as `f64`, or `default` if absent.
+    ///
+    /// Only a TOML float is read: a value of any other type, including a
+    /// TOML integer such as `2`, also yields `default`.
     pub fn get_f64(&self, key: &str, default: f64) -> f64 {
         self.table
             .get(key)
@@ -75,6 +78,10 @@ impl Params {
     }
 
     /// Return the value for `key` as `u64`, or `default` if absent.
+    ///
+    /// Only a TOML integer is read: a value of any other type, including a
+    /// TOML float such as `10.0`, also yields `default`.  A negative integer
+    /// is converted with `as u64`, so `-1` becomes `u64::MAX`.
     pub fn get_u64(&self, key: &str, default: u64) -> u64 {
         self.table
             .get(key)
@@ -84,6 +91,9 @@ impl Params {
     }
 
     /// Return the value for `key` as `i64`, or `default` if absent.
+    ///
+    /// Only a TOML integer is read: a value of any other type, including a
+    /// TOML float, also yields `default`.
     pub fn get_i64(&self, key: &str, default: i64) -> i64 {
         self.table
             .get(key)
@@ -92,6 +102,8 @@ impl Params {
     }
 
     /// Return the value for `key` as `bool`, or `default` if absent.
+    ///
+    /// A value of any other type also yields `default`.
     pub fn get_bool(&self, key: &str, default: bool) -> bool {
         self.table
             .get(key)
@@ -100,6 +112,8 @@ impl Params {
     }
 
     /// Return the value for `key` as `&str`, or `default` if absent.
+    ///
+    /// A value of any other type also yields `default`.
     ///
     /// The returned string is borrowed from the TOML table so it lives as
     /// long as `self`.
