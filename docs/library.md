@@ -115,7 +115,25 @@ impl ModulePack<CounterWorld> for DemoPack {
 }
 ```
 
-`Params` provides typed, defaulted getters (`get_f64`, `get_u64`, `get_bool`, `get_str`, …) backed by a TOML table. Constructors should always supply a sensible default so that scenarios without an explicit value still work.
+`Params` provides typed, defaulted getters (`get_f64`, `get_u64`, `get_i64`, `get_bool`, `get_str`) backed by a TOML table, plus `get_table` and `get_value`. Constructors should always supply a sensible default so that scenarios without an explicit value still work.
+
+- `get_table(key) -> Option<Params>` returns a copy of a nested table (`None` when the key is absent or its value is not a table), and `get_value(key) -> Option<&toml::Value>` returns the raw value with no conversion.
+- **A value of the wrong type falls back to the default** in the typed getters, exactly as if the key were absent: `get_f64` reads only TOML floats, so `rate = 2` gives the default; `get_u64` and `get_i64` read only TOML integers, so `count = 10.0` gives the default, and `get_u64` turns `-1` into `u64::MAX`; `get_bool` and `get_str` also return the default for a value of another type. A constructor that must reject such values reads them with `get_value` and checks the type itself (the scenario reader of `socsim-games` does this; see [Scenario files](games.md#scenario-files)).
+
+```rust,ignore
+use socsim_config::Params;
+
+let params = Params::from(toml::from_str::<toml::Table>(r#"
+rate = 2
+[shape]
+alpha = 0.5
+"#)?);
+assert_eq!(params.get_f64("rate", 1.0), 1.0);   // an integer is not a float: the default
+assert_eq!(params.get_value("rate").and_then(|v| v.as_integer()), Some(2));
+let shape = params.get_table("shape").expect("[shape] is a table");
+assert_eq!(shape.get_f64("alpha", 0.0), 0.5);
+assert!(params.get_table("rate").is_none());     // present, but not a table
+```
 
 ---
 

@@ -78,7 +78,9 @@ games: stage games, decision rules, matching, payoffs, per-step metrics
 features `core` / `engine`, `socsim-net` only with feature `net` (network
 topology, `NetworkEdges`), `socsim-grid` only with feature `grid` (lattice
 topology, `GridNeighborhood`), `socsim-llm` only with feature `llm`,
-`socsim-metrics` only with feature `metrics`; built-in classic and population
+`socsim-metrics` only with feature `metrics`, `socsim-runner` / `socsim-config`
+only with features `factory` (`GameSimFactory`) / `config` (`GameTrialFactory`,
+scenario files); built-in classic and population
 games and finite-game solvers — Nash, dominance, minimax, logit QRE,
 anonymous-game equilibria, replicator dynamics, ESS — in the default build;
 continuous-action games — Cournot, differentiated Bertrand, continuous public

@@ -14,6 +14,7 @@
 ステップごとの指標を記録する Mechanism `game_metrics`（[指標](#指標) を参照）を説明します．
 シミュレーションとは別に，古典的なゲームと有限ゲームのソルバー（Nash 均衡，支配，ミニマックス，ロジット QRE，匿名ゲームの均衡，レプリケータ動学，進化的安定性）も提供します（[有限ゲームを解く](#有限ゲームを解く) を参照）．
 実数の行動を持つゲーム（クールノー競争，ベルトラン競争，連続の公共財）には，専用の組込みのゲーム，最適応答反復のソルバー，決定規則，指標があります（[連続ゲーム](#連続ゲーム) を参照）．
+シミュレーションは，型で検査される構築器 `GameSimFactory` で組むこと（[`GameSimFactory` による組み立て](#gamesimfactory-による組み立て) を参照）も，`GameTrialFactory` で Scenario ファイルから丸ごと読むこと（[Scenario ファイル](#scenario-ファイル) を参照）もできます．
 
 ---
 
@@ -21,16 +22,18 @@
 
 | feature | 追加されるもの | socsim への依存 |
 |---|---|---|
-| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`，`ContinuousGame`，`AggregateGame`，`AnonymousGame`，`CommonActionSpace`，`DescribeGame`），`MatrixGame`，組込みのゲーム（`catalog`，連続の行動の `continuous`），混合戦略（`mixed`），ソルバー（`solve`．`pure_nash_counts`，レプリケータ動学，`ess_verdict`，連続の `best_response_iteration` を含む），学習則の計算（`learn`），`AggregateSpec` と指標用の行動 ID（`metric_action_ids`） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
-| `core` | World（`GameWorld`，`Topology`），規則（学習則と連続の規則 `DampedBestResponse` / `GradientAscent` を含む），利得規則，Matching（`FixedPlayers`，`RoundRobin`，`RandomPairs`，`RandomGroups`，`WholePopulation`），ビュー，`build_world`，集団動学の設定の型（`ImitateBest`，`FermiUpdate`，`ProportionalImitation`，`MoranUpdate`），指標の Mechanism `GameMetrics` とその連続版 `ContinuousMetrics` | `socsim-core` |
+| *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`，`ContinuousGame`，`AggregateGame`，`AnonymousGame`，`CommonActionSpace`，`DescribeGame`），`MatrixGame`，組込みのゲーム（`catalog`，連続の行動の `continuous`），混合戦略（`mixed`），ソルバー（`solve`．`pure_nash_counts`，レプリケータ動学，`ess_verdict`，連続の `best_response_iteration` を含む），学習則の計算（`learn`），`AggregateSpec`，指標用の行動 ID（`metric_action_ids`），`FiniteSpec` / `ContinuousSpec`（実行時に選ぶ組込みのゲーム．Scenario が使う） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
+| `core` | World（`GameWorld`，`Topology`），規則（学習則と連続の規則 `DampedBestResponse` / `GradientAscent` を含む），利得規則，Matching（`FixedPlayers`，`RoundRobin`，`RandomPairs`，`RandomGroups`，`WholePopulation`），ビュー，`build_world`（`InitialActions::Shares` を含む），`uniform_initial_actions`，集団動学の設定の型（`ImitateBest`，`FermiUpdate`，`ProportionalImitation`，`MoranUpdate`），指標の Mechanism `GameMetrics` とその連続版 `ContinuousMetrics` | `socsim-core` |
 | `engine` | `assemble`，`assemble_with_aggregates`，`assemble_with`（どれも `SimulationBuilder` を返す），対戦の評価経路（`Pairwise`，`counting_play()`），集団動学の Mechanism．`core` を含意 | `socsim-core`，`socsim-engine` |
 | `net` | `Topology::network` / `Topology::directed_network` と Matching `NetworkEdges`（[トポロジー](#トポロジーgameworldwith_topology) を参照）．`core` を含意 | `socsim-core`，`socsim-net` |
 | `grid` | `Topology::grid`（`GridSpec`）と Matching `GridNeighborhood`．`core` を含意 | `socsim-core`，`socsim-grid` |
 | `metrics` | `GameMetrics` の列 `game.action_entropy`（[指標](#指標) を参照）．`core` を含意 | `socsim-core`，`socsim-metrics`（既定の feature を切ったもの．依存の無い `stats` モジュールだけ） |
 | `llm` | LLM の決定規則，応答ストア，再生の manifest（[LLM による決定](#llm-による決定) を参照）．`core` を含意．Mechanism `game_llm_decide` と `assemble_with_llm` には `engine` も要る | `socsim-core`，`socsim-llm`（既定の feature だけ．ネットワークなし） |
 | `live` | `live_backend_factory()`（キャッシュなしの Ollama → OpenAI のバックエンド）．`llm` を含意 | `llm` と同じ＋`socsim-llm/live` |
+| `factory` | `GameSimFactory`，`SchedulerChoice`，`NoMatching`（[`GameSimFactory` による組み立て](#gamesimfactory-による組み立て) を参照）．`engine` を含意 | `socsim-core`，`socsim-engine`，`socsim-runner`，`socsim-config` |
+| `config` | `GameTrialFactory`，`RuleRegistry`，`RuleCtor`，`ScenarioConfig`，`ScenarioGame` — Scenario ファイルから読むシミュレーション（[Scenario ファイル](#scenario-ファイル) を参照）．`factory` を含意 | `factory` と同じ＋`toml` crate |
 
-`llm` を有効にしなければ，この crate は `socsim-llm` に依存せず，`metrics` を有効にしなければ `socsim-metrics` に依存せず，`net` / `grid` を有効にしなければ `socsim-net` / `socsim-grid` に依存しません．`socsim-config` と `socsim-runner` には常に依存しません．
+`llm` を有効にしなければ，この crate は `socsim-llm` に依存せず，`metrics` を有効にしなければ `socsim-metrics` に依存せず，`net` / `grid` を有効にしなければ `socsim-net` / `socsim-grid` に依存せず，`factory` を有効にしなければ `socsim-config` と `socsim-runner` に依存しません．
 シミュレーションを走らせるには `core` と `engine` が要ります．
 
 ```toml
@@ -588,7 +591,7 @@ pub fn build_world<G: StageGame, X: ExperimentState>(
     game: G,
     n_agents: usize,
     x: X,
-    initial_held: InitialActions<G::Action>,   // Same(a) | PerAgent(vec)
+    initial_held: InitialActions<G::Action>,   // Same(a) | PerAgent(vec) | Shares(vec)
     rules: &RuleBook<G, X>,
     assign: &Assignment,
     history_len: usize,
@@ -667,6 +670,35 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
   `GameWorld::reported_mixed` で読めます．[混合戦略の報告](#混合戦略の報告) を参照．`DecisionScope::PerEncounter` との組み合わせは拒否されます．
 - **`materialize`** — `true` なら，対戦の表を作らずに評価できるステップでも，`game_play` に対戦の表を作らせます．
   [対戦を実体化しない評価](#対戦を実体化しない評価) を参照．
+
+### 初期行動：`InitialActions` と `uniform_initial_actions`
+
+```rust
+InitialActions::Same(0)                            // every agent holds action 0
+InitialActions::PerAgent(vec![0, 1, 1])            // agent i holds the i-th action
+InitialActions::Shares(vec![(0, 0.9), (1, 0.1)])   // exact shares, laid out at random
+```
+
+`Shares` は，各行動をとるエージェントの人数を最大剰余法で決めます．
+まず各行動に `floor(n * share)` 人を割り当て，残ったエージェントを端数の大きい行動から 1 人ずつ割り当てます．端数が同じなら，先に書いた組が取ります．
+エージェントが 100 人で上の比なら，ちょうど 90 人が行動 0 をとります．
+そのうえで行動を**書いた順**に並べ，`derive_seed(seed, &[0, 2])` で並べ替えます．このストリームは `Assignment::Shuffled` が使う `[0]` とは独立です．
+各比は有限かつ非負で，比の和は $10^{-9}$ の許容差で 1 に一致しなければなりません．各行動はすべての役割について `check_action` を通らなければならず，同じ行動を 2 回書くことはできません．
+これに反すると `GameError::Config` になります（行動が不正なときは `GameError::Action`）．
+
+並べ方は書いた順から始まるので，同じ seed でも，組の順によってどのエージェントがどの行動をとるかが変わります．
+例 `nowak_may` は裏切り者を先に書き，同じストリームで並べ替えます．したがって `Shares(vec![(1, 0.1), (0, 0.9)])` はその初期の格子を正確に再現し，`Shares(vec![(0, 0.9), (1, 0.1)])` は同じ seed で別の格子になります．
+Scenario の `initial_shares` は常に行動を添字の順に並べる（[`[world.population]`](#worldpopulation) を参照）ので，Scenario の経路も例の配置を再現しません．
+どちらの配置が正しいということはありません．比べるときはセルごとではなく，seed をまたいで比べてください．
+
+連続ゲームには，割り当てる行動の添字がありません．
+`uniform_initial_actions(&game, n_agents, seed)` は，各エージェントの行動の各成分を，役割 0 の範囲の閉区間から一様に引きます．エージェントの順，1 人の中では成分の順に，同じストリーム `[0, 2]` から引きます．
+結果は `InitialActions::PerAgent` に渡します．
+
+```rust
+let initial = uniform_initial_actions(&game, 3, seed);   // Vec<Vec<f64>>, one action per agent
+let world = build_world(game, 3, (), InitialActions::PerAgent(initial), &rules, &assign, 4, 100, seed)?;
+```
 
 ---
 
@@ -1891,6 +1923,9 @@ generation,cooperator_share
 Nowak & May は，$1.8 < b < 2$ では割合が 0.318 の周りで揺れると報告しています．この区間の中では，同期の発展は $b$ の値に依りません．
 同じ seed の 2 回の実行は同じ出力を出します．
 
+この例は初期の格子を自分で並べます．1,000 人の裏切り者を先に書き，`derive_seed(seed, &[0, 2])` で並べ替えます．
+同じ配置は `InitialActions::Shares(vec![(1, 0.1), (0, 0.9)])`（裏切り者を先に書く）で得られます．協力者を先に書いた `Shares` と Scenario の `initial_shares` は，同じ seed で別の格子になります（[初期行動](#初期行動initialactions-と-uniform_initial_actions) を参照）．
+
 **`hawk_dove_large`** — よく混ざったタカ・ハトの集団（$V = 2$，$C = 4$）を，`RandomPairs` と $\beta = 1/3$ の `ProportionalImitation` で動かします．初期はタカが半数です．
 ステップの間に保持行動だけを持つ（`history_len = 1`，指標の Mechanism なし）ので，メモリは集団の大きさに比例して増えます．要約を 1 行出力します．
 
@@ -2443,11 +2478,13 @@ meaning = "Public game aggregate for the completed step; present only when the s
 
 ## 決定論性と乱数ストリーム
 
-すべてのストリームは，`build_world` と `assemble` に渡す 1 つの `seed` から派生します．
+すべてのストリームは，`build_world` と `assemble` に渡す 1 つの `seed`（または `GameSimFactory::build` に渡す seed，`GameTrialFactory` の試行の seed）から派生します．
 
 | ラベル | ストリーム |
 |---|---|
 | `derive_seed(seed, &[0])` | World の初期化（`Assignment::Shuffled`） |
+| `derive_seed(seed, &[0, 1])` | Scenario のランダムネットワーク（`topology = "network"`）．`GameSimFactory::topology` に渡すネットワークを自分で生成するときにも，このストリームを推奨する |
+| `derive_seed(seed, &[0, 2])` | `InitialActions::Shares` の配置と `uniform_initial_actions` の乱数 |
 | `derive_seed(seed, &[1])` | エンジン（スケジューラー，およびステップの RNG を通した `Matching`，`decide`，集団動学の乱数） |
 | `derive_seed(seed, &[2])` | `decision_root`．World に保存される．`game_llm_decide` は生成のシードとフォールバックのストリームをここから導く（[シード](#game_llm_decide-の-decision-の流れ) を参照） |
 | `derive_seed(seed, &[3, agent, generation])` | 規則の状態の初期化（`RuleInitContext::init_seed`） |
@@ -3374,3 +3411,714 @@ snapshot を別の直列化で保存する場合も，この性質を保って�
 - 役割によって成分の数が違うゲームはソルバーでは扱えますが，まだ World に組めません．`build_world` がすべての初期行動をすべての役割について検査するからです．
 - `NumberParser` は 1 次元の行動だけを扱います．
 - `replicator_update` は有限ゲームだけで，`moran_update` は連続ゲームでは `Fitness::Linear` を拒否します．
+
+---
+
+## `GameSimFactory` による組み立て
+
+`GameSimFactory`（feature `factory`）は，`build_world_with` と `assemble_with` を再利用できる 1 つの構成にまとめます．
+型がシミュレーションの型を変える部品を記録するので，Matching を設定し忘れるとコンパイルエラーになり，組み立て関数が検出する不整合はすべて `build` が `Result` で報告します．
+factory が持つのは構成であってシミュレーションではありません．`build`，`into_builder`，`build_trial` は `&self` を取り，同じ構成と seed からは常に同じ World，同じ Mechanism，同じエンジンの seed ができます．
+
+```rust
+use socsim_core::WorldState;
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::{
+    AssignGroup, AssignKind, Assignment, FictitiousPlay, FixedPlayers, GameSimFactory,
+    MetricsOptions, TitForTat,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let factory = GameSimFactory::new(PrisonersDilemma::new(5.0, 3.0, 1.0, 0.0)?) // T, R, P, S
+        .agents(2)
+        .matching(FixedPlayers::pairs(&[(0, 1)])) // the type state now has a matching
+        .rule("tit_for_tat", TitForTat::new(0)) // cooperate = action 0 ("C")
+        .rule("fictitious_play", FictitiousPlay::new())
+        .assign(Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("tit_for_tat".into()), count: 1 },
+            AssignGroup { kind: AssignKind::Rule("fictitious_play".into()), count: 1 },
+        ]))
+        .history_len(200)
+        .t_max(200)
+        .metrics(MetricsOptions::new().cooperate_label("C"));
+
+    // `build` takes `&self`: one factory, any number of simulations.
+    for seed in [1, 2] {
+        let mut sim = factory.build(seed)?;
+        sim.run()?;
+        println!("seed {seed}: t = {}, held = {:?}", sim.world().clock().t(), sim.world().held());
+    }
+
+    // A recorder is attached to the builder, not to the factory.
+    let mut sim = factory
+        .into_builder(1)?
+        .recorder(Box::new(InMemoryRecorder::new()))
+        .build();
+    sim.run()?;
+    let recorder = sim
+        .recorder()
+        .as_any()
+        .and_then(|r| r.downcast_ref::<InMemoryRecorder>())
+        .unwrap();
+    let coop: Vec<f64> = recorder
+        .metrics()
+        .iter()
+        .filter(|row| row.key == "game.coop_rate")
+        .map(|row| row.value)
+        .collect();
+    println!("coop_rate: first {:?}, last {:?}, rows {}", coop.first(), coop.last(), coop.len());
+    Ok(())
+}
+```
+
+```text
+seed 1: t = 200, held = [1, 1]
+seed 2: t = 200, held = [1, 1]
+coop_rate: first Some(1.0), last Some(0.0), rows 200
+```
+
+### 型状態
+
+`GameSimFactory<G, X = (), M = NoMatching, P = Pairwise<NormalFormOutcome>, D = NoDynamics>` は，ゲーム `G`，実験状態 `X`，Matching `M`，対戦の評価経路 `P`，集団動学 `D` を記録します．
+`GameSimFactory::new(game)` は `X = ()` から始まり，`GameSimFactory::with_state(game, x)` は利用者の実験状態から始まります．factory から作るシミュレーションは，どれも `x` の複製から始まります．
+型を変えるメソッドは 5 つです．
+
+| メソッド | 置き換えるもの | 要求 |
+|---|---|---|
+| `.matching(m)` | `M`（`NoMatching` から） | `m: Matching<G, X> + Clone + 'static` |
+| `.outcome(o)` | `P` を `Pairwise<O>` に | `o: OutcomeRule<G, X> + Clone + 'static` |
+| `.counting_play()` | `P` を `Counting` に | `G: AnonymousGame` |
+| `.aggregates(len)` | `P` を `WithAggregates<P>` に | `G: AggregateGame`．呼んだ後は `outcome` と `counting_play` を呼べなくなるので，集計値を誤って落とすことはない |
+| `.dynamics(d)` | `D`（`NoDynamics` から） | `d: PopulationDynamics<G, X> + Clone`（`ProportionalImitation` は有限ゲームだけ） |
+
+`build`，`into_builder`，`build_trial` は `M` が `Matching` を実装したときにだけ存在するので，`.matching(..)` を忘れるとコンパイルできません．
+また，どの組み立てもゲームと実験状態の複製から始まるので，`G: Clone` と `X: Clone` も要求します．
+ほかの制約もコンパイラーが確かめます．`.rule(name, r)` は `r: DecisionRule<G, X>` を要求し（連続ゲームで仮想プレイを使うとコンパイルできない），`.metrics(..)` は `G: FiniteGame`，`.continuous_metrics(..)` は `G: ContinuousGame` を要求します．
+
+### 設定と既定値
+
+| 設定 | 既定値 |
+|---|---|
+| `agents(n)` | 必須 |
+| `matching(m)` | 必須（型状態） |
+| `history_len(n)` | 必須．正の値 |
+| `t_max(n)` | 必須 |
+| `rule(name, r)` | なし．各規則は `Arc` に包まれ，factory から作るすべてのシミュレーションで共有される（規則の状態は World にある）．同じ名前を 2 回登録すると `build` が `RuleError::DuplicateKind` で失敗する |
+| `assign(Assignment)` | 規則が 0 個なら全員 Held，1 個なら全員その規則，2 個以上なら必須 |
+| `initial_held(InitialActions)` | 行動が添字のとき（有限ゲームはすべて）`InitialActions::Same(0)`．それ以外（連続ゲーム）は必須 |
+| `topology(Topology)` | なし．エージェント `i` がノードまたはセル `i` |
+| `play_options(PlayOptions)` | `PlayOptions::new()` |
+| `outcome(o)` か `counting_play()`，続けて任意で `aggregates(len)` | 集計値なしの `Pairwise<NormalFormOutcome>` |
+| `dynamics(d)` | `NoDynamics` |
+| `metrics(MetricsOptions)`（有限）/ `continuous_metrics(ContinuousMetricsOptions)`（連続） | 指標なし．後の呼び出しが前の呼び出しを置き換える．指標の Mechanism をさらに足すときは `into_builder` を通す |
+| `scheduler(SchedulerChoice)` | `SchedulerChoice::Sequential`（もう一つの選択肢は `RandomActivation`） |
+
+必須の値が無いと，`build` は `GameError::Config` を返します．文言は設定の名前を含みます（例：`invalid scenario: history_len: the history length is required`）．
+ネットワークのトポロジーは，`.topology(..)` に渡す前に利用者が生成します．ストリームには，Scenario が使うのと同じ `derive_seed(seed, &[0, 1])` を使ってください．
+
+### `build`，`into_builder`，`build_trial`
+
+| メソッド | 返すもの | 用途 |
+|---|---|---|
+| `build(seed)` | エンジンの null recorder つきの `Simulation<GameWorld<G, X>>` | そのまま走らせる |
+| `into_builder(seed)` | すべての Mechanism，スケジューラー，エンジンの seed を設定済みの `SimulationBuilder<GameWorld<G, X>>` | recorder，Environment や Reward の Mechanism，2 つ目の指標の Mechanism を足してから `.build()` を呼ぶ |
+| `build_trial(seed)` | `socsim_runner::Trial<GameWorld<G, X>>` | 利用者の `TrialFactory` から返す |
+
+3 つとも同じ手順を通ります．
+World を `build_world_with` でゲーム・登録した規則・割当て・初期行動から作り，トポロジーを `GameWorld::with_topology` で付け，
+Matching・規則・対戦の評価経路・動学を `assemble_with` と同じコードで検査して Mechanism `game_match`，`game_decide`，動学（あれば），`game_play` にし，指定があれば `game_metrics` を足します．
+エンジンの seed は `derive_seed(seed, &[1])` です．
+メソッドは `&self` を取るので，多数の seed を回すときは seed ごとに `build(seed)` を呼べばよく，複数のスレッドから呼んでもかまいません．
+
+1 つの recorder を同じ factory から作る複数のシミュレーションで共有することはできないので，factory は recorder を持ちません．
+`factory.into_builder(seed)?.recorder(Box::new(recorder)).build()` のように builder に付けてください．
+
+`build_trial` を使うと，`socsim_runner` 用に書く factory から構成全体を再利用できます．
+試行を `run_trial`，`run_trials`，`run_trial_sweep` で走らせるときは World の時計が `scenario.simulation.t_max` に置き直されるので，factory 自身の `t_max` はそこでは使われません．
+
+```rust
+use socsim_config::Scenario;
+use socsim_core::SocsimError;
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::{FixedPlayers, GameSimFactory, GameWorld, TitForTat};
+use socsim_runner::{Trial, TrialFactory};
+
+/// Two tit-for-tat players; one rule, so every agent follows it.
+struct TftPairs {
+    factory: GameSimFactory<PrisonersDilemma, (), FixedPlayers>,
+}
+
+impl TrialFactory<GameWorld<PrisonersDilemma>> for TftPairs {
+    fn build_trial(
+        &self,
+        _scenario: &Scenario,
+        seed: u64,
+    ) -> socsim_core::Result<Trial<GameWorld<PrisonersDilemma>>> {
+        self.factory
+            .build_trial(seed)
+            .map_err(|error| SocsimError::Config(error.to_string()))
+    }
+}
+
+fn tft_pairs() -> Result<TftPairs, socsim_games::GameError> {
+    Ok(TftPairs {
+        factory: GameSimFactory::new(PrisonersDilemma::new(5.0, 3.0, 1.0, 0.0)?)
+            .agents(2)
+            .matching(FixedPlayers::pairs(&[(0, 1)]))
+            .rule("tit_for_tat", TitForTat::new(0))
+            .history_len(10)
+            .t_max(10),
+    })
+}
+```
+
+ゲーム・集団・Mechanism も Scenario から読むときは `GameTrialFactory` を使います（[Scenario ファイル](#scenario-ファイル) を参照）．
+
+### 実行時の検査
+
+`build`（と `into_builder`，`build_trial`）は，組み立て関数が検出する不整合をすべて `Err` で返します．
+
+| 検査 | エラー |
+|---|---|
+| 必須の設定が無い．規則を 2 つ以上登録したのに `assign` が無い | `GameError::Config` |
+| 集団動学があるのに，決定規則に従うエージェントがいる | `GameError::Population` |
+| 役割によって行動の数が違う（連続ゲームでは区間が違う）ゲームに集団動学を付けた | `GameError::Population` |
+| `replicator_update` の $\beta$ が $1/\Delta\pi_{\max}$ を超える．`moran_update` の `Fitness::Linear` で適応度が正でない | `GameError::Population` |
+| 1 ステップに複数の役割を持つエージェントがいるのにステップごとの決定にした（例：3 人以上の `RoundRobin` を `PerStep` で） | Matching が組み立て時に判断できれば `GameError::InvalidMatching`．できなければそのステップが `RuleError::AmbiguousRole` で失敗する |
+| 規則がゲームに対応していない（役割が 2 つでないゲームでの仮想プレイやロジット選択，正でない利得のある Roth–Erev，行動が 2 つでないゲームでのオートマトン） | `GameError::Rule(RuleError::Unsupported(..))` |
+| 同じ規則の名前を 2 回登録した．割当てが登録していない規則を指す | `GameError::Rule(RuleError::DuplicateKind(..))` / `GameError::Rule(RuleError::UnknownKind(..))` |
+| 組込みのゲームが構築時にパラメータを拒否した | `CatalogError`．`?` で `GameError::Catalog` になる |
+
+例：
+
+```text
+invalid population dynamics: imitate_best applies only to held agents, but an active rule is assigned
+invalid population dynamics: replicator_update requires beta <= 1 / 3 (the per-step payoff range), got 1
+rule cannot be used with this game: learning rule requires 2 roles, but the game has 3
+```
+
+Mechanism の順は factory が決めるので，ライブラリモードで集団動学が `game_decide` より前に走ることはありません．
+Scenario でその順に書くと拒否されます（[`[[mechanism]]` の項目](#mechanism-の項目) を参照）．
+
+---
+
+## Scenario ファイル
+
+feature `config` の `GameTrialFactory` は，シミュレーション全体 — ゲーム，集団，トポロジー，Matching，規則，対戦のオプション，集団動学，指標 — を `socsim_config::Scenario` から組み立てます．
+`socsim_runner::TrialFactory` を実装するので，`run_trial`，`run_trials`，`run_trial_sweep` でゲームの Scenario をそのまま走らせられます（[シナリオ全体から試行を組み立てる](library.ja.md#シナリオ全体から試行を組み立てるtrialfactorysocsim-runner) を参照）．
+`GameTrialFactory::build_trial` は Scenario を `GameSimFactory` の構成に読み込み，その `build_trial` を呼びます．
+したがって 2 つの入口は同じ手順を通り，Scenario と，同じ構成を `GameSimFactory` の設定メソッドで書いたものは，各ステップで同じ World と同じ指標の行を作ります．
+
+```toml
+[simulation]
+name        = "ipd_tft_vs_fp"
+module_pack = "library"      # not read by GameTrialFactory
+t_max       = 200
+seed        = 42
+scheduler   = "sequential"
+
+[world]
+n_agents    = 2
+history_len = 200
+
+[world.game]
+kind       = "prisoners_dilemma"
+temptation = 5.0
+reward     = 3.0
+punishment = 1.0
+sucker     = 0.0
+
+[world.population]
+[[world.population.group]]
+rule  = "tit_for_tat"
+count = 1
+[[world.population.group]]
+rule  = "fictitious_play"
+count = 1
+
+[[mechanism]]
+name = "game_match"
+[mechanism.params]
+matching = "fixed_players"
+pairs    = [[0, 1]]
+
+[[mechanism]]
+name = "game_decide"
+[mechanism.params]
+coop_label   = "C"            # read by tit_for_tat
+fp_tie_break = "lowest_index" # read by fictitious_play
+
+[[mechanism]]
+name = "game_play"
+
+[[mechanism]]
+name = "game_metrics"
+[mechanism.params]
+cooperate_label = "C"
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"   # not read by GameTrialFactory
+```
+
+```rust
+use socsim_config::Scenario;
+use socsim_games::{FiniteSpec, GameTrialFactory, RuleRegistry};
+use socsim_runner::{run_trial, run_trials, TrialFactory};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let scenario = Scenario::from_path(std::path::Path::new("ipd.toml"))?;
+    let factory = GameTrialFactory::<FiniteSpec>::new(RuleRegistry::finite_builtins());
+
+    factory.validate(&scenario)?; // run_trial validates as well
+    let result = run_trial(&scenario, &factory, scenario.simulation.seed)?;
+    println!("coop_rate at t = 1: {:?}", result.series["game.coop_rate"].first());
+    println!("final coop_rate: {}", result.final_metrics["game.coop_rate"]);
+
+    let many = run_trials(&scenario, &factory, &[1, 2, 3], true)?;
+    println!("{:?}", many.iter().map(|r| r.seed).collect::<Vec<_>>());
+    Ok(())
+}
+```
+
+```text
+coop_rate at t = 1: Some((1, 1.0))
+final coop_rate: 0
+[1, 2, 3]
+```
+
+`G` は，有限ゲームなら `FiniteSpec`，連続ゲームなら `ContinuousSpec` で，それぞれ規則のレジストリを持ちます（`RuleRegistry::finite_builtins()` / `RuleRegistry::continuous_builtins()`）．
+
+### 書く場所
+
+`Scenario` が持つ節は `[simulation]`，`[world]`，`[[mechanism]]`，`[output]` の 4 つだけで，socsim-config は**それ以外の最上位のテーブルをエラーにせずに無視します**．`[game]` や `[matching]` のテーブルは黙って捨てられます．
+各部品は次の場所に書いてください．
+
+| 部品 | 場所 |
+|---|---|
+| ステップ数，seed，スケジューラー | `[simulation]` の `t_max`，`seed`（`validate` が使う），`scheduler`（`"sequential"` か `"random_activation"`） |
+| 集団の大きさ，履歴の長さ，トポロジー | `[world]` |
+| 段階ゲーム | `[world.game]` |
+| エージェントの組ごとの規則，初期行動 | `[world.population]` |
+| Matching | `[[mechanism]] name = "game_match"` の `params` |
+| 決定の粒度と規則のパラメータ | `game_decide` の `params` |
+| 利得の集計と集計値 | `game_play` の `params` |
+| 集団動学 | `imitate_best`，`fermi_update`，`replicator_update`，`moran_update` のどれかの `params` |
+| 指標 | `game_metrics` の `params` |
+
+`[simulation]` の `name`，`module_pack` と `[output]` は `Scenario` の書式として必須ですが，`GameTrialFactory` は読みません．
+
+### 値：数・個数・ラベル
+
+値はすべて型を確かめて読みます．`socsim_config::Params` のゲッター（[ステップ3](library.ja.md#ステップ3--modulepack-としてまとめる推奨) を参照）と違い，**型の違う値が既定値に戻ることはありません**．下に挙げていないキーはすべてエラーです．
+
+- **数**（number）は TOML の整数か有限の浮動小数です．`temptation = 2` は `2.0` として読みます．
+- **個数**（count）は，TOML の整数か小数部の無い浮動小数で，有限で，非負で，読み込む型（`u64`，`u32`，`usize`）の範囲に収まるときだけ受理します．
+  `16` と `16.0` は受理し，`-1`，`1.5`，`1e30`，`nan`，`"16"`，`true` は拒否します．スイープが個数を浮動小数で書き戻しても，正しく読み戻せます．
+- **ラベル**（label）は ASCII の英数字・`_`・`-` からなる行動のラベルで，役割 0 の行動を指します．
+
+`run_trial_sweep` は既存の整数を整数のまま保ちます．Scenario に `temptation = 5` と書くと，`world.game.temptation` を `4.5` に振るスイープは失敗します．
+振るつもりの数は浮動小数で書いてください（`temptation = 5.0`）．
+
+### `[world]`
+
+| キー | 型 | 既定値 | 備考 |
+|---|---|---|---|
+| `n_agents` | 個数 | 必須（格子では省略可） | 格子なら `grid_rows * grid_cols` と一致しなければならない |
+| `history_len` | 個数 | 必須 | 1 以上 |
+| `topology` | `"none"`，`"grid"`，`"network"` | `"none"` | `"grid"` には feature `grid`，`"network"` には feature `net` が要る |
+| `grid_rows`，`grid_cols` | 個数 | 格子では必須 | |
+| `boundary` | `"fixed"`，`"toroidal"` | 格子では必須 | |
+| `neighborhood` | `"moore"`，`"von_neumann"` | 格子では必須 | |
+| `network_model` | `"erdos_renyi"`，`"watts_strogatz"`，`"barabasi_albert"` | ネットワークでは必須 | 試行ごとに `derive_seed(seed, &[0, 1])` から生成する |
+| `network_p` | $[0, 1]$ の数 | `erdos_renyi` で必須 | |
+| `network_k`，`network_beta` | $2 \le k \le$ `n_agents` $- 1$ の偶数の個数，$[0, 1]$ の数 | `watts_strogatz` で必須 | |
+| `network_m` | $1 \le m \le$ `n_agents` $- 1$ の個数 | `barabasi_albert` で必須 | |
+
+対応する `topology` の無い格子・ネットワークのキーと，別の `network_model` のネットワークのキーはエラーです．
+`socsim-net` のネットワークの生成関数は範囲外の値を黙って丸めますが，読込器はそれを先に拒否します．
+
+### `[world.game]`
+
+`kind` は必須です．
+
+| `kind` | 種別 | キー |
+|---|---|---|
+| `matrix` | 有限 | `labels`（`labels[role][action]`），`payoffs`（どちらも必須） |
+| `prisoners_dilemma` | 有限 | `temptation`，`reward`，`punishment`，`sucker`（4 つとも必須．既定のゲームは無い） |
+| `battle_of_sexes`，`matching_pennies`，`stag_hunt` | 有限 | `a`，`b`（数の 2 × 2 の配列．両方書くか，両方省略して既定のゲームにする） |
+| `rock_paper_scissors` | 有限 | `win`，`loss`（両方書くか，両方省略して既定のゲームにする） |
+| `hawk_dove` | 有限 | `v`，`c`（必須） |
+| `el_farol` | 有限 | `capacity`（個数．必須）．プレイヤーは `n_agents` 人 |
+| `minority` | 有限 | なし．プレイヤーは `n_agents` 人 |
+| `public_goods_finite` | 有限 | `k`（個数），`r`，`cost`（すべて必須） |
+| `cournot` | 連続 | `a`，`b`，`c`，`q_max`（すべて必須）．企業は `n_agents` 社 |
+| `bertrand_differentiated` | 連続 | `a`，`b`，`d`，`c`，`p_max`（すべて必須）．企業は `n_agents` 社 |
+| `public_goods_continuous` | 連続 | `k`（個数），`endowment`，`r`（すべて必須），`social_dilemma`（真偽値．既定 `false`．`true` なら $1 < r < k$ も確かめる） |
+
+パラメータは組込みのゲームの条件を満たさなければなりません（[組込みのゲーム](#組込みのゲームcatalog) と [組込みの連続ゲーム](#組込みの連続ゲーム) を参照）．違反は `world.game` で報告されます．
+`GameTrialFactory<ContinuousSpec>` に有限の `kind` を書く（その逆も）とエラーです．
+行列ゲームの役割の数は任意で，`labels` の要素ごとに 1 つです．`payoffs` は各役割の行動の順に入れ子にし，最も内側に全役割の利得を置きます．
+
+```toml
+[world.game]
+kind    = "matrix"
+labels  = [["C", "D"], ["C", "D"]]
+payoffs = [
+  [[3.0, 3.0], [0.0, 5.0]],   # payoffs[a0][a1] = [payoff of role 0, payoff of role 1]
+  [[5.0, 0.0], [1.0, 1.0]],
+]
+```
+
+`el_farol`，`minority`，`cournot`，`bertrand_differentiated` のプレイヤーの数は `[world] n_agents` で，`[world.game]` に `n` を書くとエラーです．全エージェントが 1 回の対戦に入ります（`matching = "whole_population"`）．
+これらのゲームを集団の一部ずつの組で行う構成（`random_groups(k)` × `minority`）は Scenario では書けません．`GameSimFactory` で組んでください．
+`public_goods_finite` と `public_goods_continuous` の `k` は組の大きさで，`matching = "random_groups"` の `k` と一致しなければなりません．
+
+### `[world.population]`
+
+| キー | 型 | 既定値 | 備考 |
+|---|---|---|---|
+| `assign` | `"ordered"`，`"shuffled"` | `"ordered"` | `"shuffled"` は `derive_seed(seed, &[0])` で並べ替える |
+| `[[world.population.group]]` | テーブルの配列．1 つ以上 | 必須 | 各要素は `rule` と，`count`（個数）か `share`（数）のどちらか一方を持つ |
+| `initial_shares` | ラベルから数へのテーブル | | 有限ゲームだけ |
+| `initial_uniform` | 真偽値 | `false` | 連続ゲームだけ |
+| `initial_action` | ラベル（有限）か数の配列（連続） | 有限ゲームでは行動 0 | |
+
+**組**．`rule` は規則のレジストリに登録した名前か，規則を持たないエージェントを表す `held` です．1 つの規則には組を 1 つしか書けません．
+全部の組が `count` を使う（和は `n_agents`）か，全部の組が `share` を使う（和は $10^{-9}$ の許容差で 1）かのどちらかで，混ぜるとエラーです．
+比は最大剰余法で人数にし，端数が同じなら先に書いた組が取ります．
+`assign = "ordered"` では，組は書いた順にエージェントの ID を取ります（TOML の配列は順序を保ちますが，テーブルのキーは保ちません）．
+
+**初期行動**．`initial_shares`，`initial_uniform`，`initial_action` のうち書けるのは高々 1 つです．
+どれも無ければ，有限ゲームでは全員が行動 0 をとり，連続ゲームではエラーです．
+
+- `initial_shares = { D = 0.1 }`（有限）：ラベルを 1 つだけ省略でき，省略したラベルが残り（$1 - \sum$）を受け取ります．書いた比の和が 1 を超えるとエラーです．
+  これにより，2 行動の Scenario で `world.population.initial_shares.D` だけを振れます．
+  人数は正確に決め（最大剰余法．端数が同じなら添字の小さい行動が取る），行動を**添字の順**に並べてから `derive_seed(seed, &[0, 2])` で並べ替えます．組を行動の順に並べた `InitialActions::Shares` と同じです．
+  例 `nowak_may` は裏切り者を先に並べるので，同じ seed でも Scenario の経路とは初期の格子が違います（[初期行動](#初期行動initialactions-と-uniform_initial_actions) を参照）．
+- `initial_uniform = true`（連続）：各エージェントの行動の各成分を，役割 0 の区間から `uniform_initial_actions` で一様に引きます（ストリーム `[0, 2]`）．
+- `initial_action`：全員に同じラベル（有限）か同じ行動のベクトル（連続）を与えます．
+
+### `[[mechanism]]` の項目
+
+各項目は `name` で区別し，`phase` は無視します．
+
+- `game_match`，`game_decide`，`game_play` は必須です．集団動学（`imitate_best`，`fermi_update`，`replicator_update`，`moran_update`）は高々 1 つ，`game_metrics` は高々 1 つ足せます．
+- 同じ名前は 1 回しか書けず，未知の名前はエラーです．
+- 集団動学は `game_decide` より**後**に書かなければなりません．
+- それ以外の点で項目の順は関係ありません．Mechanism は常に `game_match`，`game_decide`，動学，`game_play`，`game_metrics` の順に走ります．
+
+| Mechanism | キー | 型 | 既定値 |
+|---|---|---|---|
+| `game_match` | `matching` | `"fixed_players"`，`"round_robin"`，`"random_pairs"`，`"random_groups"`，`"whole_population"`，`"grid_neighborhood"`（feature `grid`），`"network_edges"`（feature `net`） | 必須 |
+| | `pairs` | エージェントの ID の組の配列（`[[0, 1], [2, 3]]`） | `fixed_players` で必須 |
+| | `both_orders` | 真偽値 | `false`．`round_robin` だけ |
+| | `k` | 個数 | `random_groups` で必須 |
+| | `include_self` | 真偽値 | `false`．`grid_neighborhood` だけ |
+| `game_decide` | `decision_scope` | `"per_step"`，`"per_agent_role"`，`"per_encounter"` | `"per_step"` |
+| | `report_mixed` | 真偽値 | `false` |
+| | 登録した規則のキー | 次の表を参照 | |
+| `game_play` | `payoff_aggregation` | `"sum"`，`"mean"` | `"sum"` |
+| | `aggregate_history_len` | 個数 | なし．書くとゲームの公開集計値を記録する（`WithAggregates`） |
+| | `materialize` | 真偽値 | `false` |
+| `imitate_best` | `update` | `"synchronous"` | 必須 |
+| | `tie_break` | `"keep_own"`，`"lowest_action"` | `"keep_own"` |
+| `fermi_update` | `update`，`k` | `"synchronous"`，数 | どちらも必須 |
+| `replicator_update` | `update`，`beta` | `"synchronous"`，数 | どちらも必須．有限ゲームだけ |
+| `moran_update` | `update`，`fitness`，`w` | `"synchronous"`，`"linear"` か `"exponential"`，数 | すべて必須 |
+| | `mutation` | 数 | 0 |
+| | `gaussian_sd` | 数 | なし．連続ゲームで `mutation > 0` なら必要で，有限ゲームでは書けない |
+| `game_metrics`（有限） | `cooperate_label`（ラベル），`regret`（真偽値），`mixed_source`（`"played"`，`"played_cumulative"`，`"reported"`），`equilibrium`（`"none"`，`"solve"`），`stop_tol`（数）と `stop_window`（個数．`u32`）は両方書くか両方省略，`population_share`（真偽値），`action_entropy`（真偽値．feature `metrics`） | | `MetricsOptions::new()` の既定値 |
+| `game_metrics`（連続） | `equilibrium`（`"none"`，`"solve"`），`stop_tol` と `stop_window` は両方書くか両方省略 | | `ContinuousMetricsOptions::new()` の既定値 |
+
+別の Matching のキー（例：`matching = "round_robin"` での `pairs`）はエラーです．
+
+規則のパラメータは，接頭辞を付けた名前で `game_decide` に書きます．組込みの規則と，それが読むキーは次のとおりです．
+
+| 規則（`rule = ..`） | 種別 | `game_decide` のキー |
+|---|---|---|
+| `uniform_random` | 有限 | なし |
+| `tit_for_tat` | 有限 | `coop_label`（必須） |
+| `myopic_best_response` | 有限 | `myopic_tie_break`（`"lowest_index"` か `"random"`．既定 `"lowest_index"`），`myopic_first_action`（ラベル．既定は行動 0） |
+| `fictitious_play` | 有限 | `fp_tie_break`（`"lowest_index"` か `"random"`．既定 `"lowest_index"`），`fp_initial_counts`（相手の行動ごとに 1 つの数．既定はすべて 0） |
+| `logit` | 有限 | `logit_lambda`（必須），`logit_estimate`（`"empirical_frequency"` か `"last_opponent"`．既定 `"empirical_frequency"`） |
+| `roth_erev` | 有限 | `roth_erev_phi`，`roth_erev_epsilon`，`roth_erev_initial_propensity`（すべて必須） |
+| `all_c`，`all_d`，`grim`，`wsls` | 有限 | `coop_label`（必須） |
+| `gtft` | 有限 | `coop_label`，`gtft_generosity`（どちらも必須） |
+| `damped_best_response` | 連続 | `br_damping`（必須） |
+| `gradient` | 連続 | `grad_step`（必須） |
+
+規則は試行ごとに 1 回作り，その組の全エージェントで共有します．
+`fixed`，`mixed` と LLM の規則は Scenario では使えません．連続ゲームの Scenario に有限の規則の名前を書くと，未知の規則になります．
+
+### エラー
+
+どのエラーも，直すべき場所を名指しします．
+読込のエラーは，先頭にキーのパスを付けた `GameError::Config` の文言です．`GameTrialFactory` はそれを `SocsimError::Config` としてそのまま渡し，ほかの組み立てのエラーには位置を先頭に付けます．
+
+```text
+world.history_len: expected an integer, found 1.5
+world.population.group[0].count: expected a non-negative integer, found -1
+world.game.temptation: expected a number, found string
+mechanism[game_decide].fp_tiebreak: unknown key (known keys: coop_label, decision_scope, fp_initial_counts, fp_tie_break, gtft_generosity, logit_estimate, logit_lambda, myopic_first_action, myopic_tie_break, report_mixed, roth_erev_epsilon, roth_erev_initial_propensity, roth_erev_phi)
+world.game: catalog condition failed: T > R > P >= S
+mechanism[imitate_best]: a population dynamic must be listed after game_decide
+mechanism[replicator_update]: invalid population dynamics: replicator_update requires beta <= 1 / 16.650000000000002 (the per-step payoff range), got 1
+```
+
+（`SocsimError` の `Display` を通すと，どの文言にも `config error: ` が前に付きます．）組み立てのエラーの位置は，エラーの種類で決まります．
+
+| 組み立てのエラー | 位置 |
+|---|---|
+| `Catalog`，`Matrix` | `world.game` |
+| `AgentCount`，`InvalidHistoryLength` | `world` |
+| `Topology` | `world.topology` |
+| `Action` | `world.population` |
+| `InvalidKinds` | `world.population.group` |
+| `InvalidAggregateHistoryLength` | `mechanism[game_play].aggregate_history_len` |
+| `UnsupportedRoles`，`InvalidMatching` | `mechanism[game_match]` |
+| `Rule`，`ManifestMismatch` | `mechanism[game_decide]` |
+| `Metrics` | `mechanism[game_metrics]` |
+| `Population` | `mechanism[<Scenario に書いた動学の名前>]` |
+
+### 乱数ストリーム
+
+Scenario から読んだシミュレーションの乱数は，すべて `build_trial` に渡す試行の seed から派生します．
+
+| ストリーム | 引くもの |
+|---|---|
+| `derive_seed(seed, &[0])` | `assign = "shuffled"` の並べ替え |
+| `derive_seed(seed, &[0, 1])` | `topology = "network"` のランダムネットワーク |
+| `derive_seed(seed, &[0, 2])` | `initial_shares` の配置と `initial_uniform` の行動 |
+| `derive_seed(seed, &[1])` | エンジン（`Trial::engine_seed`） |
+| `derive_seed(seed, &[2])` | 決定の根 |
+| `derive_seed(seed, &[3, agent, generation])` | 規則の状態の初期値 |
+
+これは `GameSimFactory` と `build_world` / `assemble` のストリーム（[決定論性と乱数ストリーム](#決定論性と乱数ストリーム) を参照）と同じで，そのため 2 つの入口の軌跡が一致します．
+
+### `GameTrialFactory`
+
+| 項目 | 意味 |
+|---|---|
+| `GameTrialFactory::<FiniteSpec>::new(RuleRegistry::finite_builtins())` | 実験状態の無い（`X = ()`）factory．連続ゲームでは `ContinuousSpec` と `RuleRegistry::continuous_builtins()` |
+| `GameTrialFactory::with_state(registry, make_x)` | `make_x: Fn(&Scenario) -> Result<X, GameError>` が作る実験状態から試行を始める factory．`make_x` は試行を作るたびに 1 回呼ばれる |
+| `TrialFactory::build_trial(&scenario, seed)` | Scenario を読んで `seed` の試行を作る．World は `seed` から，Mechanism は決まった順，スケジューラーは `[simulation] scheduler`，`engine_seed = derive_seed(seed, &[1])` |
+| `TrialFactory::validate(&scenario)` | [`validate`](#validate) を参照 |
+
+factory が持つのは `Arc` に包んだ規則のレジストリだけなので，複製は軽く，1 つの factory をすべてのワーカースレッドで使えます．
+スイープでは点ごとに Scenario が変わるので，factory は試行ごとに Scenario を読み直します．
+`TrialFactory` の実装は `G: ScenarioGame` と `X: ExperimentState + Clone` について generic です．`ScenarioGame` は封印されていて，実装するのは `FiniteSpec` と `ContinuousSpec` だけです．
+
+`FiniteSpec` と `ContinuousSpec`（既定のビルド）は組込みのゲームを包む enum です — `FiniteSpec::Matrix(MatrixGame)`，`FiniteSpec::PrisonersDilemmaGame(PrisonersDilemma)`，…，`ContinuousSpec::CournotGame(Cournot)`，…．
+ゲームのメソッドはすべて包んだゲームに委譲するので，`kind` で選んだゲームはそのゲーム自身とまったく同じに振る舞います．
+serde の既定のタグで直列化されます（例：`{"HawkDoveGame": {"v": 2.0, "c": 3.0}}`）．
+`AnonymousGame` を実装しないので，Scenario は常に対ごとの評価経路を使います．
+コンパイラーは，ゲームのトレイトの実装が足りないというエラーで，これらを実装例として挙げません．
+
+### `validate`
+
+`validate(&scenario)` は次を行います．
+
+1. Scenario のすべてのキーを，上の検査とともに読む．
+2. `[[mechanism]]` の項目の並びを確かめる（集団動学が `game_decide` より後にあることを含む）．
+3. どのエージェントも従っていないが，**その規則だけ**が読むパラメータが `game_decide` に書かれている規則を構築する．どの組も `logit` を使っていなくても，`logit_lambda` 無しで `logit_estimate` を書けば失敗する．一方，複数の規則が共有するキー（`coop_label`）を書いても，使っていない規則が必須になることはない．
+4. `scenario.simulation.seed` の試行を 1 つ作って捨てる．これで組み立ての実行時の検査がすべて走る．
+
+`run_trial`，`run_trials`，`run_trial_sweep` は，試行を走らせる前に `validate` を呼びます．
+検査の中には seed に依存するものがあります．ランダムネットワークでは，`replicator_update` の `beta` の上限を決める利得の範囲が，生成したネットワークの次数で決まります．
+したがって `validate` を通った Scenario は `build_trial` で必ず読めますが，別の seed では組み立てに失敗することがあります．その場合もエラーになり，黙って走ることはありません．
+
+### 利用者の規則：`RuleRegistry::register`
+
+`RuleRegistry<G, X>` は規則の名前を構築関数に対応づけます．
+利用者の規則は，それが読む `game_decide` のキーとともに登録します．登録したキーは受理され，それ以外のキーは引き続き未知のキーのエラーになります．
+
+```rust
+use std::sync::Arc;
+
+use socsim_config::{Params, Scenario};
+use socsim_games::{
+    DecisionRule, FiniteGame, FiniteSpec, Fixed, GameError, GameTrialFactory, RuleRegistry,
+};
+
+fn registry() -> Result<RuleRegistry<FiniteSpec, ()>, Box<dyn std::error::Error>> {
+    let mut registry = RuleRegistry::<FiniteSpec, ()>::finite_builtins();
+    registry.register("fixed", &["fixed_label"], |params: &Params, game: &FiniteSpec| {
+        let path = "mechanism[game_decide].fixed_label";
+        let label = params
+            .get_value("fixed_label")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| GameError::Config(format!("{path}: a label is required")))?;
+        let action = (0..game.n_actions(0))
+            .find(|&a| game.action_label(0, a) == label)
+            .ok_or_else(|| GameError::Config(format!("{path}: no action {label:?}")))?;
+        let rule: Arc<dyn DecisionRule<FiniteSpec, ()>> = Arc::new(Fixed::new(action));
+        Ok(rule)
+    })?;
+    Ok(registry)
+}
+```
+
+`game_decide` に `rule = "fixed"` と `fixed_label = "D"` を書くと，その組のエージェントは常に裏切ります．
+綴りを誤った `fixed_lable` は `mechanism[game_decide].fixed_lable: unknown key (known keys: ..., fixed_label, ...)` として拒否されます．
+
+- 構築関数は `game_decide` の `params` のテーブル全体（`socsim_config::Params`）とゲームを受け取ります．`Params` の型付きのゲッターは型の違う値に既定値を返すので，値は `Params::get_value` で読み，型の違う値は自分で拒否してください．エラーの文言は `mechanism[game_decide].<key>` で始めてください．
+- `register` は，登録済みの名前には `RuleError::DuplicateKind` で，予約名 `held` には `RuleError::Unsupported` で失敗します．`names()` は名前を辞書順に返します．
+- 構築関数の型は `RuleCtor<G, X> = Box<dyn Fn(&Params, &G) -> Result<Arc<dyn DecisionRule<G, X>>, GameError> + Send + Sync>` です．
+
+### Scenario を自分のコードで読む：`ScenarioConfig`
+
+`ScenarioConfig::<G, X>::read(&scenario, &registry)` は，何も組み立てずに Scenario を読んで検査するので，ライブラリモードで一部を変えて使えます．
+ゲーム（`game()`），`n_agents()`，`history_len()`，`assignment()` と，seed を与えた `initial_actions(seed)`，`topology(seed)` を返します（ランダムネットワークと一様の初期行動はその seed から引きます）．
+規則と Mechanism は返しません．集団に規則があるときは `.rule(..)` で登録し直してください．
+
+```rust
+use socsim_config::Scenario;
+use socsim_games::{
+    FermiUpdate, FiniteSpec, GameSimFactory, GridNeighborhood, RuleRegistry, ScenarioConfig,
+    Update,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let scenario = Scenario::from_path(std::path::Path::new("spatial.toml"))?;
+    let config = ScenarioConfig::<FiniteSpec>::read(&scenario, &RuleRegistry::finite_builtins())?;
+    let seed = 3;
+    let mut factory = GameSimFactory::new(config.game().clone())
+        .agents(config.n_agents())
+        .history_len(config.history_len())
+        .t_max(scenario.simulation.t_max)
+        .assign(config.assignment().clone())
+        .initial_held(config.initial_actions(seed))
+        .matching(GridNeighborhood::new().include_self(true))
+        .dynamics(FermiUpdate::new(0.1, Update::Synchronous)?); // not the scenario's dynamic
+    if let Some(topology) = config.topology(seed) {
+        factory = factory.topology(topology);
+    }
+    factory.build(seed)?.run()?;
+    Ok(())
+}
+```
+
+### ほかの Scenario
+
+格子上の集団 — 初期の裏切り者が 10 % の空間囚人のジレンマです．
+ゲームを `FiniteSpec::PrisonersDilemmaGame(PrisonersDilemma::weak(1.85)?)` とし，`Topology::grid(..)`，`GridNeighborhood::new().include_self(true)`，`InitialActions::Shares(vec![(0, 0.9), (1, 0.1)])`，`ImitateBest::new(Update::Synchronous)`，`MetricsOptions::new().population_share(true)` を設定した `GameSimFactory` と，ステップごとに同じ World と指標の行を作ります．
+
+```toml
+[simulation]
+name        = "spatial_pd"
+module_pack = "library"
+t_max       = 50
+seed        = 1
+scheduler   = "sequential"
+
+[world]
+history_len  = 1
+topology     = "grid"
+grid_rows    = 100
+grid_cols    = 100
+boundary     = "toroidal"
+neighborhood = "moore"
+
+[world.game]
+kind       = "prisoners_dilemma"
+temptation = 1.85
+reward     = 1.0
+punishment = 0.0
+sucker     = 0.0
+
+[world.population]
+initial_shares = { D = 0.1 }        # C receives the rest, 0.9
+[[world.population.group]]
+rule  = "held"
+share = 1.0
+
+[[mechanism]]
+name = "game_match"
+[mechanism.params]
+matching     = "grid_neighborhood"
+include_self = true
+
+[[mechanism]]
+name = "game_decide"
+
+[[mechanism]]
+name = "imitate_best"
+[mechanism.params]
+update = "synchronous"
+
+[[mechanism]]
+name = "game_play"
+
+[[mechanism]]
+name = "game_metrics"
+[mechanism.params]
+population_share = true
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"
+```
+
+減衰つきの最適応答で一様な初期の生産量から始める 3 社のクールノー競争です．`GameTrialFactory::<ContinuousSpec>::new(RuleRegistry::continuous_builtins())` で読みます．
+
+```toml
+[simulation]
+name        = "cournot3"
+module_pack = "library"
+t_max       = 500
+seed        = 7
+scheduler   = "sequential"
+
+[world]
+n_agents    = 3                   # the three firms
+history_len = 4
+
+[world.game]
+kind  = "cournot"
+a     = 100.0
+b     = 1.0
+c     = 10.0
+q_max = 100.0
+
+[world.population]
+initial_uniform = true            # each firm uniform on [0, q_max], stream [0, 2]
+[[world.population.group]]
+rule  = "damped_best_response"
+count = 3
+
+[[mechanism]]
+name = "game_match"
+[mechanism.params]
+matching = "whole_population"
+
+[[mechanism]]
+name = "game_decide"
+[mechanism.params]
+br_damping = 0.5
+
+[[mechanism]]
+name = "game_play"
+[mechanism.params]
+aggregate_history_len = 4         # records total_output and price
+
+[[mechanism]]
+name = "game_metrics"
+[mechanism.params]
+equilibrium = "solve"
+stop_tol    = 1e-9
+stop_window = 10
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"
+```
+
+`run_trial(&scenario, &factory, 7)` では，収束による停止で 500 ステップのうち 90 ステップで止まり，`game.mean_action.0 = 22.5`，`game.aggregate.total_output = 67.5`，`game.aggregate.price = 32.5` になります．
+
+### 制限
+
+- Scenario で選べるのは，組込みのゲーム・規則・Matching・動学です．利用者定義のゲーム・利得規則・Matching，数え上げの評価経路，`OnInvalidAction::Fallback`，規則 `fixed` と `mixed`，LLM の規則はライブラリモード（`GameSimFactory`）でだけ使えます．利用者の決定規則は `RuleRegistry::register` で登録できます．
+- factory を `GameTrialFactory::with_state` で作らない限り，実験状態は `()` です．
+- 集団動学は `update = "synchronous"` だけを受け付けます．
+- `minority` や `el_farol` と `random_groups(k)` の組合せは書けません（プレイヤーは `n_agents` 人）．
+- ネットワークは無向です（`Topology::network`）．
+- 未知の最上位のテーブルは socsim-config が無視し，報告しません．

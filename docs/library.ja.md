@@ -115,7 +115,25 @@ impl ModulePack<CounterWorld> for DemoPack {
 }
 ```
 
-`Params` はTOMLテーブルをバックエンドとした，型付きでデフォルト値を持つゲッター（`get_f64`, `get_u64`, `get_bool`, `get_str` など）を提供します．コンストラクターは常に適切なデフォルト値を設定してください．
+`Params` はTOMLテーブルをバックエンドとした，型付きでデフォルト値を持つゲッター（`get_f64`, `get_u64`, `get_i64`, `get_bool`, `get_str`）と，`get_table`・`get_value` を提供します．コンストラクターは常に適切なデフォルト値を設定してください．
+
+- `get_table(key) -> Option<Params>` は入れ子のテーブルの複製を返します（キーが無いとき，または値がテーブルでないときは `None`）．`get_value(key) -> Option<&toml::Value>` は変換をせずに生の値を返します．
+- **型の違う値は，型付きのゲッターでは既定値に戻ります**．キーが無いときとまったく同じ扱いです．`get_f64` は TOML の浮動小数だけを読むので，`rate = 2` は既定値になります．`get_u64` と `get_i64` は TOML の整数だけを読むので，`count = 10.0` は既定値になり，`get_u64` は `-1` を `u64::MAX` に変えます．`get_bool` と `get_str` も，ほかの型の値には既定値を返します．こうした値を拒否したいコンストラクターは，`get_value` で読んで型を自分で確かめてください（`socsim-games` の Scenario の読込器はそうしています．[Scenario ファイル](games.ja.md#scenario-ファイル) を参照）．
+
+```rust,ignore
+use socsim_config::Params;
+
+let params = Params::from(toml::from_str::<toml::Table>(r#"
+rate = 2
+[shape]
+alpha = 0.5
+"#)?);
+assert_eq!(params.get_f64("rate", 1.0), 1.0);   // an integer is not a float: the default
+assert_eq!(params.get_value("rate").and_then(|v| v.as_integer()), Some(2));
+let shape = params.get_table("shape").expect("[shape] is a table");
+assert_eq!(shape.get_f64("alpha", 0.0), 0.5);
+assert!(params.get_table("rate").is_none());     // present, but not a table
+```
 
 ---
 

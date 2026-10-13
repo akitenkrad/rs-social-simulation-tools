@@ -1210,10 +1210,121 @@ impl DecisionRule<MatrixGame, ReputationState> for Discriminator {
 `GameWorld` (rule states included) plus the RNG position; rebuild with the same
 rules / matching / outcome and `restore(snapshot)` to continue bit-identically.
 
+**Code — the same game through `GameSimFactory` (feature `factory`).** One
+reusable, type-checked configuration instead of `build_world` + `assemble`;
+`build(seed)` takes `&self`, so loop over seeds. Grounded in
+`crates/socsim-games/tests/factory_typestate.rs`:
+
+```rust
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::{
+    AssignGroup, AssignKind, Assignment, Fixed, FixedPlayers, GameSimFactory, MetricsOptions,
+    TitForTat,
+};
+
+let factory = GameSimFactory::new(PrisonersDilemma::new(5.0, 3.0, 1.0, 0.0)?) // T, R, P, S
+    .agents(2)
+    .matching(FixedPlayers::pairs(&[(0, 1)]))   // required: without it `build` does not compile
+    .rule("tit_for_tat", TitForTat::new(0))
+    .rule("fixed_defect", Fixed::new(1))
+    .assign(Assignment::Ordered(vec![            // required with two or more rules
+        AssignGroup { kind: AssignKind::Rule("tit_for_tat".into()), count: 1 },
+        AssignGroup { kind: AssignKind::Rule("fixed_defect".into()), count: 1 },
+    ]))
+    .history_len(100)
+    .t_max(100)
+    .metrics(MetricsOptions::new().cooperate_label("C"));
+for seed in 0..10 {
+    let mut sim = factory.build(seed)?;          // or .into_builder(seed)?.recorder(..).build()
+    sim.run()?;
+}
+```
+
+**Code — from a scenario file (feature `config`).** `GameTrialFactory` is a
+`socsim_runner::TrialFactory` that reads the game, the population, the matching,
+the rule parameters, the dynamic and the metrics from the scenario; it builds
+through `GameSimFactory`, so the trajectory equals the library-mode one for the
+same configuration and seed:
+
+```rust
+use socsim_config::Scenario;
+use socsim_games::{FiniteSpec, GameTrialFactory, RuleRegistry};
+use socsim_runner::{run_trial, run_trial_sweep, SweepAxis};
+
+let scenario = Scenario::from_path("ipd.toml".as_ref())?;
+let factory = GameTrialFactory::<FiniteSpec>::new(RuleRegistry::finite_builtins());
+let result = run_trial(&scenario, &factory, 7)?;        // validate → build_trial → run
+let points = run_trial_sweep(
+    &scenario,
+    &[SweepAxis { param_key: "world.game.temptation".into(), values: vec![4.0, 6.0] }],
+    &factory, &[0, 1, 2], true,
+)?;
+```
+
+```toml
+[world]
+n_agents    = 2
+history_len = 200
+
+[world.game]                     # the stage game
+kind       = "prisoners_dilemma"
+temptation = 5.0                 # floats: a sweep keeps an existing integer an integer
+reward     = 3.0
+punishment = 1.0
+sucker     = 0.0
+
+[world.population]
+[[world.population.group]]       # an array: listed order = AgentId order
+rule  = "tit_for_tat"
+count = 1
+[[world.population.group]]
+rule  = "fictitious_play"
+count = 1
+
+[[mechanism]]
+name = "game_match"
+[mechanism.params]
+matching = "fixed_players"
+pairs    = [[0, 1]]
+
+[[mechanism]]
+name = "game_decide"             # rule hyperparameters, prefixed per rule
+[mechanism.params]
+coop_label = "C"
+
+[[mechanism]]
+name = "game_play"
+```
+
+(`[simulation]` and `[output]` as for any scenario.) Continuous games use
+`GameTrialFactory::<ContinuousSpec>::new(RuleRegistry::continuous_builtins())`.
+Full key tables, error messages and more scenarios:
+[`docs/games.md` § Scenario files](../games.md#scenario-files).
+
 **Gotchas.**
 - Pass the **same `seed`** to `build_world` and `assemble`. Streams: `[0]` world
-  init (`Assignment::Shuffled`), `[1]` engine, `[2]` `decision_root`, `[3, agent,
-  generation]` rule-state init — use `[4]+` for your own.
+  init (`Assignment::Shuffled`), `[0, 1]` scenario network, `[0, 2]`
+  `InitialActions::Shares` layout / `uniform_initial_actions`, `[1]` engine,
+  `[2]` `decision_root`, `[3, agent, generation]` rule-state init — use `[4]+`
+  for your own. `GameSimFactory` and `GameTrialFactory` use the same streams.
+- **Scenario files are strict.** Wrong types, out-of-range values and unknown
+  keys are errors whose message starts with the key path
+  (`mechanism[game_decide].logit_lambda: …`) — never a silent default. Counts
+  accept `16` and `16.0`, not `1.5` / `-1`. Keys of your own rules must be
+  declared in `RuleRegistry::register(name, keys, ctor)`. Unknown **top-level**
+  tables (`[game]`, `[matching]`) are dropped silently by `socsim-config`:
+  the game goes in `[world.game]`, the matching in `game_match`'s params.
+- In a scenario, a population dynamic must be listed after `game_decide`;
+  `minority` / `el_farol` / `cournot` / `bertrand_differentiated` take their
+  player count from `world.n_agents` (so `random_groups(k)` × `minority` needs
+  library mode); `fixed`, `mixed`, LLM rules, custom games / matchings /
+  outcome rules and the counting play path are library-mode only.
+- `validate` dry-builds for `scenario.simulation.seed` only: on a random
+  network the `replicator_update` β bound depends on the generated degrees, so
+  another seed may still fail (with an error).
+- `InitialActions::Shares` lays out in the **listed order** before the `[0, 2]`
+  shuffle: `Shares(vec![(1, 0.1), (0, 0.9)])` reproduces `examples/nowak_may.rs`,
+  `vec![(0, 0.9), (1, 0.1)]` and a scenario's `initial_shares` do not.
 - Keep rules, matchings and outcome rules stateless (`&self`); per-agent memory
   goes in `X::PolicyState`, everything else in `X`. Custom matching state goes in
   `X` too.

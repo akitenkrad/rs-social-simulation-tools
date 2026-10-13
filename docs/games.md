@@ -22,7 +22,10 @@ replicator dynamics and evolutionary stability (see
 [Solving finite games](#solving-finite-games)). Games with real-valued actions —
 Cournot and Bertrand competition, continuous public goods — have their own
 built-in games, best-response iteration solver, decision rules and metrics (see
-[Continuous games](#continuous-games)).
+[Continuous games](#continuous-games)). A simulation can be configured with the
+type-checked builder `GameSimFactory` (see
+[Building with `GameSimFactory`](#building-with-gamesimfactory)) or read whole
+from a scenario file by `GameTrialFactory` (see [Scenario files](#scenario-files)).
 
 ---
 
@@ -30,19 +33,22 @@ built-in games, best-response iteration solver, decision rules and metrics (see
 
 | Feature | Adds | socsim dependencies |
 |---|---|---|
-| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`, `ContinuousGame`, `AggregateGame`, `AnonymousGame`, `CommonActionSpace`, `DescribeGame`), `MatrixGame`, the built-in games (`catalog`, and `continuous` for continuous actions), mixed strategies (`mixed`), the solvers (`solve`, including `pure_nash_counts`, the replicator dynamics, `ess_verdict` and the continuous `best_response_iteration`), the learning-rule cores (`learn`), `AggregateSpec` and the metric action ids (`metric_action_ids`) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
-| `core` | the world (`GameWorld`, `Topology`), rules (including the learning rules and the continuous rules `DampedBestResponse` / `GradientAscent`), outcome rules, the matchings (`FixedPlayers`, `RoundRobin`, `RandomPairs`, `RandomGroups`, `WholePopulation`), views, `build_world`, the configuration types of the population dynamics (`ImitateBest`, `FermiUpdate`, `ProportionalImitation`, `MoranUpdate`), the metrics mechanism `GameMetrics` and its continuous form `ContinuousMetrics` | `socsim-core` |
+| *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`, `ContinuousGame`, `AggregateGame`, `AnonymousGame`, `CommonActionSpace`, `DescribeGame`), `MatrixGame`, the built-in games (`catalog`, and `continuous` for continuous actions), mixed strategies (`mixed`), the solvers (`solve`, including `pure_nash_counts`, the replicator dynamics, `ess_verdict` and the continuous `best_response_iteration`), the learning-rule cores (`learn`), `AggregateSpec`, the metric action ids (`metric_action_ids`), and `FiniteSpec` / `ContinuousSpec` (the built-in games chosen at run time, used by scenarios) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
+| `core` | the world (`GameWorld`, `Topology`), rules (including the learning rules and the continuous rules `DampedBestResponse` / `GradientAscent`), outcome rules, the matchings (`FixedPlayers`, `RoundRobin`, `RandomPairs`, `RandomGroups`, `WholePopulation`), views, `build_world` (with `InitialActions::Shares`), `uniform_initial_actions`, the configuration types of the population dynamics (`ImitateBest`, `FermiUpdate`, `ProportionalImitation`, `MoranUpdate`), the metrics mechanism `GameMetrics` and its continuous form `ContinuousMetrics` | `socsim-core` |
 | `engine` | `assemble`, `assemble_with_aggregates` and `assemble_with` (all return a `SimulationBuilder`), the play paths (`Pairwise`, `counting_play()`) and the population-dynamics mechanisms; implies `core` | `socsim-core`, `socsim-engine` |
 | `net` | `Topology::network` / `Topology::directed_network` and the matching `NetworkEdges` (see [Topology](#topology-gameworldwith_topology)); implies `core` | `socsim-core`, `socsim-net` |
 | `grid` | `Topology::grid` (`GridSpec`) and the matching `GridNeighborhood`; implies `core` | `socsim-core`, `socsim-grid` |
 | `metrics` | the `game.action_entropy` column of `GameMetrics` (see [Metrics](#metrics)); implies `core` | `socsim-core`, `socsim-metrics` (default features off — only its dependency-free `stats` module) |
 | `llm` | LLM-backed decision rules, the response store and the replay manifest (see [LLM decisions](#llm-decisions-feature-llm)); implies `core`. The `game_llm_decide` mechanism and `assemble_with_llm` also need `engine` | `socsim-core`, `socsim-llm` (default features only — no networking) |
 | `live` | `live_backend_factory()` (the cache-free Ollama → OpenAI backend); implies `llm` | as `llm`, plus `socsim-llm/live` |
+| `factory` | `GameSimFactory`, `SchedulerChoice` and `NoMatching` (see [Building with `GameSimFactory`](#building-with-gamesimfactory)); implies `engine` | `socsim-core`, `socsim-engine`, `socsim-runner`, `socsim-config` |
+| `config` | `GameTrialFactory`, `RuleRegistry`, `RuleCtor`, `ScenarioConfig` and `ScenarioGame` — simulations read from scenario files (see [Scenario files](#scenario-files)); implies `factory` | as `factory`, plus the `toml` crate |
 
 Without `llm`, the crate does not depend on `socsim-llm`, without `metrics`
-it does not depend on `socsim-metrics`, and without `net` / `grid` it does not
-depend on `socsim-net` / `socsim-grid`; it never depends on
-`socsim-config` or `socsim-runner`. A simulation needs `core` and `engine`:
+it does not depend on `socsim-metrics`, without `net` / `grid` it does not
+depend on `socsim-net` / `socsim-grid`, and without `factory` it does not
+depend on `socsim-config` or `socsim-runner`. A simulation needs `core` and
+`engine`:
 
 ```toml
 socsim-games = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-games", features = ["engine"] }
@@ -676,7 +682,7 @@ pub fn build_world<G: StageGame, X: ExperimentState>(
     game: G,
     n_agents: usize,
     x: X,
-    initial_held: InitialActions<G::Action>,   // Same(a) | PerAgent(vec)
+    initial_held: InitialActions<G::Action>,   // Same(a) | PerAgent(vec) | Shares(vec)
     rules: &RuleBook<G, X>,
     assign: &Assignment,
     history_len: usize,
@@ -777,6 +783,47 @@ PlayOptions::new()                                     // Sum + Stop + PerStep
 - **`materialize`** — `true` forces `game_play` to build the play arena even
   when the step could be evaluated without it; see
   [Evaluating without materialising encounters](#evaluating-without-materialising-encounters).
+
+### Initial actions: `InitialActions` and `uniform_initial_actions`
+
+```rust
+InitialActions::Same(0)                            // every agent holds action 0
+InitialActions::PerAgent(vec![0, 1, 1])            // agent i holds the i-th action
+InitialActions::Shares(vec![(0, 0.9), (1, 0.1)])   // exact shares, laid out at random
+```
+
+`Shares` fixes the number of agents holding each action by the largest
+remainder method: every action first receives `floor(n * share)` agents, and
+the agents still unassigned go one each to the actions with the largest
+fractional parts, ties going to the pair listed first. With 100 agents and the
+shares above, exactly 90 agents hold action 0. The actions are then written out
+in the **listed order** and shuffled with `derive_seed(seed, &[0, 2])`, a
+stream independent of the `[0]` used by `Assignment::Shuffled`. Every share
+must be finite and non-negative, the shares must sum to 1 within $10^{-9}$,
+every action must pass `check_action` for every role, and an action may be
+listed only once; a violation is `GameError::Config` (`GameError::Action` for
+an invalid action).
+
+Because the layout starts from the listed order, the order of the pairs decides
+which agents hold which action for a given seed. The `nowak_may` example writes
+its defectors first and shuffles with the same stream, so
+`Shares(vec![(1, 0.1), (0, 0.9)])` reproduces its initial lattice exactly, while
+`Shares(vec![(0, 0.9), (1, 0.1)])` gives a different lattice for the same seed.
+A scenario's `initial_shares` always lists the actions in index order (see
+[`[world.population]`](#worldpopulation)), so the scenario path does not
+reproduce the example's layout either. Neither layout is more correct; compare
+runs across seeds, not cell by cell.
+
+A continuous game has no action indices to share out.
+`uniform_initial_actions(&game, n_agents, seed)` draws every component of every
+agent's action uniformly from the closed interval of role 0's bound, in agent
+order and, within an agent, in component order, from the same stream `[0, 2]`.
+Pass the result to `InitialActions::PerAgent`:
+
+```rust
+let initial = uniform_initial_actions(&game, 3, seed);   // Vec<Vec<f64>>, one action per agent
+let world = build_world(game, 3, (), InitialActions::PerAgent(initial), &rules, &assign, 4, 100, seed)?;
+```
 
 ---
 
@@ -2235,6 +2282,13 @@ May report that it fluctuates around 0.318 for $1.8 < b < 2$; within that
 interval the synchronous evolution does not depend on the exact $b$. Two runs
 with the same seed print identical output.
 
+The example lays out its initial lattice itself: it writes the 1,000 defectors
+first and shuffles with `derive_seed(seed, &[0, 2])`. The same layout comes from
+`InitialActions::Shares(vec![(1, 0.1), (0, 0.9)])` (defectors listed first);
+`Shares` with the cooperators listed first, and a scenario's `initial_shares`,
+give a different lattice for the same seed (see
+[Initial actions](#initial-actions-initialactions-and-uniform_initial_actions)).
+
 **`hawk_dove_large`** — a well-mixed hawk–dove population ($V = 2$, $C = 4$)
 under `RandomPairs` and `ProportionalImitation` with $\beta = 1/3$, half hawks
 at the start. It keeps only the held actions between steps (`history_len = 1`,
@@ -2862,11 +2916,14 @@ crate itself does not depend on runvault.
 
 ## Determinism & RNG streams
 
-Every stream derives from the one `seed` passed to `build_world` and `assemble`:
+Every stream derives from the one `seed` passed to `build_world` and `assemble`
+(or to `GameSimFactory::build`, or the trial seed of `GameTrialFactory`):
 
 | Label | Stream |
 |---|---|
 | `derive_seed(seed, &[0])` | world initialisation (`Assignment::Shuffled`) |
+| `derive_seed(seed, &[0, 1])` | the random network of a scenario (`topology = "network"`); also the recommended stream for a network you generate for `GameSimFactory::topology` |
+| `derive_seed(seed, &[0, 2])` | the layout of `InitialActions::Shares` and the draws of `uniform_initial_actions` |
 | `derive_seed(seed, &[1])` | the engine (scheduler, `Matching`, `decide` and population-dynamics draws via the step RNG) |
 | `derive_seed(seed, &[2])` | `decision_root`, stored in the world; `game_llm_decide` derives its generation seeds and fallback streams from it (see [Seeds](#one-decision-step-of-game_llm_decide)) |
 | `derive_seed(seed, &[3, agent, generation])` | rule-state initialisation (`RuleInitContext::init_seed`) |
@@ -4026,3 +4083,842 @@ if you store snapshots with another serializer.
 - `NumberParser` handles one-dimensional actions only.
 - `replicator_update` is finite only, and `moran_update` rejects
   `Fitness::Linear` for continuous games.
+
+---
+
+## Building with `GameSimFactory`
+
+`GameSimFactory` (feature `factory`) puts `build_world_with` and
+`assemble_with` behind one reusable configuration. Its type records the parts
+that change the type of the simulation, so a missing matching is a compile
+error, and `build` reports through `Result` every inconsistency that the
+assembly functions detect. A factory holds a configuration, not a simulation:
+`build`, `into_builder` and `build_trial` take `&self`, and the same
+configuration and seed always give the same world, the same mechanisms and the
+same engine seed.
+
+```rust
+use socsim_core::WorldState;
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::{
+    AssignGroup, AssignKind, Assignment, FictitiousPlay, FixedPlayers, GameSimFactory,
+    MetricsOptions, TitForTat,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let factory = GameSimFactory::new(PrisonersDilemma::new(5.0, 3.0, 1.0, 0.0)?) // T, R, P, S
+        .agents(2)
+        .matching(FixedPlayers::pairs(&[(0, 1)])) // the type state now has a matching
+        .rule("tit_for_tat", TitForTat::new(0)) // cooperate = action 0 ("C")
+        .rule("fictitious_play", FictitiousPlay::new())
+        .assign(Assignment::Ordered(vec![
+            AssignGroup { kind: AssignKind::Rule("tit_for_tat".into()), count: 1 },
+            AssignGroup { kind: AssignKind::Rule("fictitious_play".into()), count: 1 },
+        ]))
+        .history_len(200)
+        .t_max(200)
+        .metrics(MetricsOptions::new().cooperate_label("C"));
+
+    // `build` takes `&self`: one factory, any number of simulations.
+    for seed in [1, 2] {
+        let mut sim = factory.build(seed)?;
+        sim.run()?;
+        println!("seed {seed}: t = {}, held = {:?}", sim.world().clock().t(), sim.world().held());
+    }
+
+    // A recorder is attached to the builder, not to the factory.
+    let mut sim = factory
+        .into_builder(1)?
+        .recorder(Box::new(InMemoryRecorder::new()))
+        .build();
+    sim.run()?;
+    let recorder = sim
+        .recorder()
+        .as_any()
+        .and_then(|r| r.downcast_ref::<InMemoryRecorder>())
+        .unwrap();
+    let coop: Vec<f64> = recorder
+        .metrics()
+        .iter()
+        .filter(|row| row.key == "game.coop_rate")
+        .map(|row| row.value)
+        .collect();
+    println!("coop_rate: first {:?}, last {:?}, rows {}", coop.first(), coop.last(), coop.len());
+    Ok(())
+}
+```
+
+```text
+seed 1: t = 200, held = [1, 1]
+seed 2: t = 200, held = [1, 1]
+coop_rate: first Some(1.0), last Some(0.0), rows 200
+```
+
+### Type state
+
+`GameSimFactory<G, X = (), M = NoMatching, P = Pairwise<NormalFormOutcome>, D = NoDynamics>`
+records the game `G`, the experiment state `X`, the matching `M`, the play
+path `P` and the population dynamic `D`. `GameSimFactory::new(game)` starts
+with `X = ()`; `GameSimFactory::with_state(game, x)` starts with your own
+experiment state, and every simulation built from the factory starts from a
+clone of `x`. Five methods change the type:
+
+| Method | Replaces | Requires |
+|---|---|---|
+| `.matching(m)` | `M` (from `NoMatching`) | `m: Matching<G, X> + Clone + 'static` |
+| `.outcome(o)` | `P` with `Pairwise<O>` | `o: OutcomeRule<G, X> + Clone + 'static` |
+| `.counting_play()` | `P` with `Counting` | `G: AnonymousGame` |
+| `.aggregates(len)` | `P` with `WithAggregates<P>` | `G: AggregateGame`; afterwards `outcome` and `counting_play` are no longer available, so the aggregates cannot be dropped by mistake |
+| `.dynamics(d)` | `D` (from `NoDynamics`) | `d: PopulationDynamics<G, X> + Clone` (`ProportionalImitation` only for finite games) |
+
+`build`, `into_builder` and `build_trial` exist only once `M` implements
+`Matching`, so forgetting `.matching(..)` does not compile; they also require
+`G: Clone` and `X: Clone`, because every build starts from a clone of the game
+and of the experiment state. The other bounds are checked by the compiler as
+well: `.rule(name, r)` needs `r: DecisionRule<G, X>` (fictitious play with a
+continuous game does not compile), `.metrics(..)` needs `G: FiniteGame` and
+`.continuous_metrics(..)` needs `G: ContinuousGame`.
+
+### Settings and defaults
+
+| Setting | Default |
+|---|---|
+| `agents(n)` | required |
+| `matching(m)` | required (type state) |
+| `history_len(n)` | required, positive |
+| `t_max(n)` | required |
+| `rule(name, r)` | none. Each rule is wrapped in an `Arc` and shared by every simulation built from the factory (rule state lives in the world). Registering a name twice fails at `build` with `RuleError::DuplicateKind` |
+| `assign(Assignment)` | no rule registered: every agent is held; one rule: every agent follows it; two or more rules: required |
+| `initial_held(InitialActions)` | `InitialActions::Same(0)` when the actions are indices (every finite game); required otherwise (continuous games) |
+| `topology(Topology)` | none. Agent `i` is node or cell `i` |
+| `play_options(PlayOptions)` | `PlayOptions::new()` |
+| `outcome(o)` or `counting_play()`, then optionally `aggregates(len)` | `Pairwise<NormalFormOutcome>` without aggregates |
+| `dynamics(d)` | `NoDynamics` |
+| `metrics(MetricsOptions)` (finite) / `continuous_metrics(ContinuousMetricsOptions)` (continuous) | no metrics. A later call replaces an earlier one; add further metrics mechanisms through `into_builder` |
+| `scheduler(SchedulerChoice)` | `SchedulerChoice::Sequential` (the other choice is `RandomActivation`) |
+
+A missing required value is reported by `build` as `GameError::Config`, whose
+message names the setting, for example
+`invalid scenario: history_len: the history length is required`. A network
+topology is generated by you before it is passed to `.topology(..)`; use the
+stream `derive_seed(seed, &[0, 1])`, which is the one a scenario uses.
+
+### `build`, `into_builder` and `build_trial`
+
+| Method | Returns | Use it to |
+|---|---|---|
+| `build(seed)` | `Simulation<GameWorld<G, X>>` with the engine's null recorder | run the simulation as it is |
+| `into_builder(seed)` | `SimulationBuilder<GameWorld<G, X>>` with every mechanism, the scheduler and the engine seed set | add a recorder, environment or reward mechanisms, or a second metrics mechanism, then call `.build()` |
+| `build_trial(seed)` | `socsim_runner::Trial<GameWorld<G, X>>` | return it from your own `TrialFactory` |
+
+All three run one procedure: the world is built by `build_world_with` from the
+game, the registered rules, the assignment and the initial actions; the
+topology is attached with `GameWorld::with_topology`; the matching, the rules,
+the play path and the dynamic are checked and turned into the mechanisms
+`game_match`, `game_decide`, the dynamic (if any) and `game_play` by the same
+code as `assemble_with`; and `game_metrics` is appended when requested. The
+engine seed is `derive_seed(seed, &[1])`. Because the methods take `&self`, a
+multi-seed study calls `build(seed)` once per seed, from several threads if you
+like.
+
+The factory holds no recorder, because a recorder cannot be shared between the
+simulations built from one factory:
+`factory.into_builder(seed)?.recorder(Box::new(recorder)).build()`.
+
+`build_trial` lets a factory you write for `socsim_runner` reuse the whole
+configuration. When the trial is run by `run_trial`, `run_trials` or
+`run_trial_sweep`, the world's clock is reset to `scenario.simulation.t_max`,
+so the factory's own `t_max` is not used there:
+
+```rust
+use socsim_config::Scenario;
+use socsim_core::SocsimError;
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::{FixedPlayers, GameSimFactory, GameWorld, TitForTat};
+use socsim_runner::{Trial, TrialFactory};
+
+/// Two tit-for-tat players; one rule, so every agent follows it.
+struct TftPairs {
+    factory: GameSimFactory<PrisonersDilemma, (), FixedPlayers>,
+}
+
+impl TrialFactory<GameWorld<PrisonersDilemma>> for TftPairs {
+    fn build_trial(
+        &self,
+        _scenario: &Scenario,
+        seed: u64,
+    ) -> socsim_core::Result<Trial<GameWorld<PrisonersDilemma>>> {
+        self.factory
+            .build_trial(seed)
+            .map_err(|error| SocsimError::Config(error.to_string()))
+    }
+}
+
+fn tft_pairs() -> Result<TftPairs, socsim_games::GameError> {
+    Ok(TftPairs {
+        factory: GameSimFactory::new(PrisonersDilemma::new(5.0, 3.0, 1.0, 0.0)?)
+            .agents(2)
+            .matching(FixedPlayers::pairs(&[(0, 1)]))
+            .rule("tit_for_tat", TitForTat::new(0))
+            .history_len(10)
+            .t_max(10),
+    })
+}
+```
+
+To read the game, the population and the mechanisms from the scenario as well,
+use `GameTrialFactory` (see [Scenario files](#scenario-files)).
+
+### Run-time checks
+
+`build` (and `into_builder`, `build_trial`) returns `Err` for every
+inconsistency the assembly functions detect:
+
+| Check | Error |
+|---|---|
+| A required setting is missing, or two or more rules are registered without `assign` | `GameError::Config` |
+| A population dynamic while some agent follows a decision rule | `GameError::Population` |
+| A population dynamic on a game whose roles do not have the same number of actions (or, for a continuous game, the same intervals) | `GameError::Population` |
+| `replicator_update`'s $\beta$ above $1/\Delta\pi_{\max}$, or `moran_update` with `Fitness::Linear` and a non-positive fitness | `GameError::Population` |
+| A per-step decision with an agent that holds several roles in one step (for example `RoundRobin` with three or more agents under `PerStep`) | `GameError::InvalidMatching` when the matching can tell at assembly; otherwise the step fails with `RuleError::AmbiguousRole` |
+| A rule that does not support the game (fictitious play or logit choice with other than two roles, Roth–Erev with a non-positive payoff, automata with other than two actions) | `GameError::Rule(RuleError::Unsupported(..))` |
+| The same rule name registered twice, or an assignment that names an unregistered rule | `GameError::Rule(RuleError::DuplicateKind(..))` / `GameError::Rule(RuleError::UnknownKind(..))` |
+| A built-in game rejects its parameters when it is constructed | `CatalogError`, which `?` turns into `GameError::Catalog` |
+
+For example:
+
+```text
+invalid population dynamics: imitate_best applies only to held agents, but an active rule is assigned
+invalid population dynamics: replicator_update requires beta <= 1 / 3 (the per-step payoff range), got 1
+rule cannot be used with this game: learning rule requires 2 roles, but the game has 3
+```
+
+The order of the mechanisms is fixed by the factory, so a population dynamic
+can never run before `game_decide` in library mode; a scenario that lists them
+the other way round is rejected (see
+[`[[mechanism]]` entries](#mechanism-entries)).
+
+---
+
+## Scenario files
+
+With feature `config`, `GameTrialFactory` builds the whole simulation — the
+game, the population, the topology, the matching, the rules, the play options,
+the population dynamic and the metrics — from a `socsim_config::Scenario`. It
+implements `socsim_runner::TrialFactory`, so `run_trial`, `run_trials` and
+`run_trial_sweep` run game scenarios directly (see
+[Building trials from the whole scenario](library.md#building-trials-from-the-whole-scenario-trialfactory-socsim-runner)).
+`GameTrialFactory::build_trial` reads the scenario into the configuration of a
+`GameSimFactory` and calls its `build_trial`, so the two entry points build
+through one procedure: a scenario and the same configuration written with the
+`GameSimFactory` setting methods give the same world and the same metric rows
+at every step.
+
+```toml
+[simulation]
+name        = "ipd_tft_vs_fp"
+module_pack = "library"      # not read by GameTrialFactory
+t_max       = 200
+seed        = 42
+scheduler   = "sequential"
+
+[world]
+n_agents    = 2
+history_len = 200
+
+[world.game]
+kind       = "prisoners_dilemma"
+temptation = 5.0
+reward     = 3.0
+punishment = 1.0
+sucker     = 0.0
+
+[world.population]
+[[world.population.group]]
+rule  = "tit_for_tat"
+count = 1
+[[world.population.group]]
+rule  = "fictitious_play"
+count = 1
+
+[[mechanism]]
+name = "game_match"
+[mechanism.params]
+matching = "fixed_players"
+pairs    = [[0, 1]]
+
+[[mechanism]]
+name = "game_decide"
+[mechanism.params]
+coop_label   = "C"            # read by tit_for_tat
+fp_tie_break = "lowest_index" # read by fictitious_play
+
+[[mechanism]]
+name = "game_play"
+
+[[mechanism]]
+name = "game_metrics"
+[mechanism.params]
+cooperate_label = "C"
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"   # not read by GameTrialFactory
+```
+
+```rust
+use socsim_config::Scenario;
+use socsim_games::{FiniteSpec, GameTrialFactory, RuleRegistry};
+use socsim_runner::{run_trial, run_trials, TrialFactory};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let scenario = Scenario::from_path(std::path::Path::new("ipd.toml"))?;
+    let factory = GameTrialFactory::<FiniteSpec>::new(RuleRegistry::finite_builtins());
+
+    factory.validate(&scenario)?; // run_trial validates as well
+    let result = run_trial(&scenario, &factory, scenario.simulation.seed)?;
+    println!("coop_rate at t = 1: {:?}", result.series["game.coop_rate"].first());
+    println!("final coop_rate: {}", result.final_metrics["game.coop_rate"]);
+
+    let many = run_trials(&scenario, &factory, &[1, 2, 3], true)?;
+    println!("{:?}", many.iter().map(|r| r.seed).collect::<Vec<_>>());
+    Ok(())
+}
+```
+
+```text
+coop_rate at t = 1: Some((1, 1.0))
+final coop_rate: 0
+[1, 2, 3]
+```
+
+`G` is `FiniteSpec` for the finite games and `ContinuousSpec` for the
+continuous ones, each with its own registry of rules
+(`RuleRegistry::finite_builtins()` / `RuleRegistry::continuous_builtins()`).
+
+### Where things go
+
+A `Scenario` has only four sections — `[simulation]`, `[world]`,
+`[[mechanism]]` and `[output]` — and socsim-config **ignores any other
+top-level table without an error**: a `[game]` or `[matching]` table is
+dropped silently. Put each part in its place:
+
+| Part | Place |
+|---|---|
+| Number of steps, seed, scheduler | `[simulation]` `t_max`, `seed` (used by `validate`), `scheduler` (`"sequential"` or `"random_activation"`) |
+| Population size, history length, topology | `[world]` |
+| Stage game | `[world.game]` |
+| Rule of each group of agents, initial actions | `[world.population]` |
+| Matching | `params` of `[[mechanism]] name = "game_match"` |
+| Decision scope and rule parameters | `params` of `game_decide` |
+| Payoff aggregation and aggregates | `params` of `game_play` |
+| Population dynamic | `params` of `imitate_best`, `fermi_update`, `replicator_update` or `moran_update` |
+| Metrics | `params` of `game_metrics` |
+
+`[simulation] name`, `module_pack` and `[output]` are required by the
+`Scenario` format but not read by `GameTrialFactory`.
+
+### Values: numbers, counts and labels
+
+Every value is read with its type checked. **No value of the wrong type falls
+back to a default** — unlike the getters of `socsim_config::Params` (see
+[Step 3](library.md#step-3--bundle-into-a-modulepack-recommended)) — and every
+key that is not listed below is an error.
+
+- A **number** is a TOML integer or a finite TOML float; `temptation = 2`
+  reads as `2.0`.
+- A **count** is accepted only when it is a TOML integer or a TOML float with
+  no fractional part, is finite, is non-negative, and fits the type it is read
+  into (`u64`, `u32` or `usize`). `16` and `16.0` are accepted; `-1`, `1.5`,
+  `1e30`, `nan`, `"16"` and `true` are rejected. A sweep that writes a count
+  back as a float therefore reads back correctly.
+- A **label** is an action label of ASCII letters, digits, `_` and `-`, and
+  names an action of role 0.
+
+`run_trial_sweep` keeps an existing integer an integer: sweeping
+`world.game.temptation` over `4.5` fails when the scenario wrote
+`temptation = 5`. Write a number you intend to sweep as a float
+(`temptation = 5.0`).
+
+### `[world]`
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `n_agents` | count | required (may be left out on a grid) | on a grid it must equal `grid_rows * grid_cols` |
+| `history_len` | count | required | at least 1 |
+| `topology` | `"none"`, `"grid"` or `"network"` | `"none"` | `"grid"` needs feature `grid`, `"network"` feature `net` |
+| `grid_rows`, `grid_cols` | count | required on a grid | |
+| `boundary` | `"fixed"` or `"toroidal"` | required on a grid | |
+| `neighborhood` | `"moore"` or `"von_neumann"` | required on a grid | |
+| `network_model` | `"erdos_renyi"`, `"watts_strogatz"` or `"barabasi_albert"` | required on a network | generated for each trial from `derive_seed(seed, &[0, 1])` |
+| `network_p` | number in $[0, 1]$ | required by `erdos_renyi` | |
+| `network_k`, `network_beta` | even count with $2 \le k \le$ `n_agents` $- 1$, number in $[0, 1]$ | required by `watts_strogatz` | |
+| `network_m` | count with $1 \le m \le$ `n_agents` $- 1$ | required by `barabasi_albert` | |
+
+A grid or network key without the matching `topology`, and a network key of
+another `network_model`, are errors. The network generators of `socsim-net`
+would silently clamp or round an out-of-range value; the reader rejects it
+instead.
+
+### `[world.game]`
+
+`kind` is required.
+
+| `kind` | Family | Keys |
+|---|---|---|
+| `matrix` | finite | `labels` (`labels[role][action]`), `payoffs` (both required) |
+| `prisoners_dilemma` | finite | `temptation`, `reward`, `punishment`, `sucker` (all four required; there is no default game) |
+| `battle_of_sexes`, `matching_pennies`, `stag_hunt` | finite | `a`, `b` (2 × 2 arrays of numbers; both, or neither for the default game) |
+| `rock_paper_scissors` | finite | `win`, `loss` (both, or neither for the default game) |
+| `hawk_dove` | finite | `v`, `c` (required) |
+| `el_farol` | finite | `capacity` (count, required); the players are `n_agents` |
+| `minority` | finite | none; the players are `n_agents` |
+| `public_goods_finite` | finite | `k` (count), `r`, `cost` (all required) |
+| `cournot` | continuous | `a`, `b`, `c`, `q_max` (all required); the firms are `n_agents` |
+| `bertrand_differentiated` | continuous | `a`, `b`, `d`, `c`, `p_max` (all required); the firms are `n_agents` |
+| `public_goods_continuous` | continuous | `k` (count), `endowment`, `r` (all required), `social_dilemma` (boolean, default `false`; `true` also checks $1 < r < k$) |
+
+The parameters must satisfy the conditions of the built-in games (see
+[Built-in games](#built-in-games-catalog) and
+[Built-in continuous games](#built-in-continuous-games)); a violation is
+reported at `world.game`. A finite `kind` under `GameTrialFactory<ContinuousSpec>`
+(or the reverse) is an error. A matrix game has any number of roles — one per
+entry of `labels` — and nests `payoffs` by the action of each role, innermost
+the payoffs of all roles:
+
+```toml
+[world.game]
+kind    = "matrix"
+labels  = [["C", "D"], ["C", "D"]]
+payoffs = [
+  [[3.0, 3.0], [0.0, 5.0]],   # payoffs[a0][a1] = [payoff of role 0, payoff of role 1]
+  [[5.0, 0.0], [1.0, 1.0]],
+]
+```
+
+For `el_farol`, `minority`, `cournot` and `bertrand_differentiated`, the number
+of players is `[world] n_agents`, and writing `n` in `[world.game]` is an
+error: every agent plays in one encounter (`matching = "whole_population"`).
+A population that plays these games in smaller groups (`random_groups(k)` ×
+`minority`) cannot be written as a scenario; build it with
+`GameSimFactory`. For `public_goods_finite` and `public_goods_continuous`, `k`
+is the group size and must equal the `k` of `matching = "random_groups"`.
+
+### `[world.population]`
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `assign` | `"ordered"` or `"shuffled"` | `"ordered"` | `"shuffled"` shuffles with `derive_seed(seed, &[0])` |
+| `[[world.population.group]]` | array of tables, at least one | required | each has `rule` and either `count` (count) or `share` (number) |
+| `initial_shares` | table from label to number | | finite games only |
+| `initial_uniform` | boolean | `false` | continuous games only |
+| `initial_action` | label (finite) or array of numbers (continuous) | action 0 for finite games | |
+
+**Groups.** `rule` is a name registered in the rule registry, or `held` for
+agents without a rule. A rule may have one group only. Every group uses
+`count` (the counts sum to `n_agents`) or every group uses `share` (the shares
+sum to 1 within $10^{-9}$); mixing them is an error. Shares become counts by the
+largest remainder method, ties going to the group listed first. With
+`assign = "ordered"` the groups take agent ids in the order they are listed
+(an array keeps its order in TOML; the keys of a table do not).
+
+**Initial actions.** At most one of `initial_shares`, `initial_uniform` and
+`initial_action` may be given. Without any, every agent of a finite game holds
+action 0, and a continuous game is an error.
+
+- `initial_shares = { D = 0.1 }` (finite): at most one label may be left out,
+  and it receives the rest ($1 - \sum$); written shares summing to more than 1
+  are an error. This lets a two-action scenario sweep
+  `world.population.initial_shares.D` alone. The counts are exact (largest
+  remainder, ties to the lower action index), and the actions are laid out in
+  **action order** and shuffled with `derive_seed(seed, &[0, 2])` — this is
+  `InitialActions::Shares` with the pairs in action order. The `nowak_may`
+  example lays out its defectors first, so the same seed gives a different
+  initial lattice on the scenario path (see
+  [Initial actions](#initial-actions-initialactions-and-uniform_initial_actions)).
+- `initial_uniform = true` (continuous): every component of every agent's action
+  is drawn uniformly from role 0's interval with `uniform_initial_actions`
+  (stream `[0, 2]`).
+- `initial_action`: one label (finite) or one action vector (continuous) for
+  every agent.
+
+### `[[mechanism]]` entries
+
+Each entry is identified by its `name`; `phase` is ignored.
+
+- `game_match`, `game_decide` and `game_play` are required; at most one
+  population dynamic (`imitate_best`, `fermi_update`, `replicator_update`,
+  `moran_update`) and at most one `game_metrics` may be added.
+- A name may appear once; an unknown name is an error.
+- A population dynamic must be listed **after** `game_decide`.
+- Otherwise the order of the entries does not matter: the mechanisms always run
+  as `game_match`, `game_decide`, the dynamic, `game_play`, `game_metrics`.
+
+| Mechanism | Key | Type | Default |
+|---|---|---|---|
+| `game_match` | `matching` | `"fixed_players"`, `"round_robin"`, `"random_pairs"`, `"random_groups"`, `"whole_population"`, `"grid_neighborhood"` (feature `grid`) or `"network_edges"` (feature `net`) | required |
+| | `pairs` | array of agent-id pairs, `[[0, 1], [2, 3]]` | required by `fixed_players` |
+| | `both_orders` | boolean | `false`; `round_robin` only |
+| | `k` | count | required by `random_groups` |
+| | `include_self` | boolean | `false`; `grid_neighborhood` only |
+| `game_decide` | `decision_scope` | `"per_step"`, `"per_agent_role"` or `"per_encounter"` | `"per_step"` |
+| | `report_mixed` | boolean | `false` |
+| | the keys of the registered rules | see the next table | |
+| `game_play` | `payoff_aggregation` | `"sum"` or `"mean"` | `"sum"` |
+| | `aggregate_history_len` | count | none; when given, the game's public aggregates are recorded (`WithAggregates`) |
+| | `materialize` | boolean | `false` |
+| `imitate_best` | `update` | `"synchronous"` | required |
+| | `tie_break` | `"keep_own"` or `"lowest_action"` | `"keep_own"` |
+| `fermi_update` | `update`, `k` | `"synchronous"`, number | both required |
+| `replicator_update` | `update`, `beta` | `"synchronous"`, number | both required; finite games only |
+| `moran_update` | `update`, `fitness`, `w` | `"synchronous"`, `"linear"` or `"exponential"`, number | all required |
+| | `mutation` | number | 0 |
+| | `gaussian_sd` | number | none; a continuous game with `mutation > 0` needs it, a finite game must not have it |
+| `game_metrics` (finite) | `cooperate_label` (label), `regret` (boolean), `mixed_source` (`"played"`, `"played_cumulative"` or `"reported"`), `equilibrium` (`"none"` or `"solve"`), `stop_tol` (number) and `stop_window` (count, `u32`) together or not at all, `population_share` (boolean), `action_entropy` (boolean, feature `metrics`) | | the defaults of `MetricsOptions::new()` |
+| `game_metrics` (continuous) | `equilibrium` (`"none"` or `"solve"`), `stop_tol` and `stop_window` together | | the defaults of `ContinuousMetricsOptions::new()` |
+
+A matching key that belongs to another matching (`pairs` with
+`matching = "round_robin"`, for example) is an error.
+
+The rule parameters are written in `game_decide`, under prefixed names. The
+built-in rules and the keys they read:
+
+| Rule (`rule = ..`) | Family | Keys in `game_decide` |
+|---|---|---|
+| `uniform_random` | finite | none |
+| `tit_for_tat` | finite | `coop_label` (required) |
+| `myopic_best_response` | finite | `myopic_tie_break` (`"lowest_index"` or `"random"`, default `"lowest_index"`), `myopic_first_action` (label, default action 0) |
+| `fictitious_play` | finite | `fp_tie_break` (`"lowest_index"` or `"random"`, default `"lowest_index"`), `fp_initial_counts` (numbers, one per opponent action, default all zero) |
+| `logit` | finite | `logit_lambda` (required), `logit_estimate` (`"empirical_frequency"` or `"last_opponent"`, default `"empirical_frequency"`) |
+| `roth_erev` | finite | `roth_erev_phi`, `roth_erev_epsilon`, `roth_erev_initial_propensity` (all required) |
+| `all_c`, `all_d`, `grim`, `wsls` | finite | `coop_label` (required) |
+| `gtft` | finite | `coop_label`, `gtft_generosity` (both required) |
+| `damped_best_response` | continuous | `br_damping` (required) |
+| `gradient` | continuous | `grad_step` (required) |
+
+A rule is constructed once per trial and shared by every agent of its group.
+`fixed`, `mixed` and the LLM rules are not available in a scenario; a finite
+rule named in a continuous scenario is an unknown rule.
+
+### Errors
+
+Every error names the place to fix. Reading errors are `GameError::Config`
+messages that start with the path of the key; `GameTrialFactory` passes them
+on as `SocsimError::Config`, and puts the location in front of every other
+build error:
+
+```text
+world.history_len: expected an integer, found 1.5
+world.population.group[0].count: expected a non-negative integer, found -1
+world.game.temptation: expected a number, found string
+mechanism[game_decide].fp_tiebreak: unknown key (known keys: coop_label, decision_scope, fp_initial_counts, fp_tie_break, gtft_generosity, logit_estimate, logit_lambda, myopic_first_action, myopic_tie_break, report_mixed, roth_erev_epsilon, roth_erev_initial_propensity, roth_erev_phi)
+world.game: catalog condition failed: T > R > P >= S
+mechanism[imitate_best]: a population dynamic must be listed after game_decide
+mechanism[replicator_update]: invalid population dynamics: replicator_update requires beta <= 1 / 16.650000000000002 (the per-step payoff range), got 1
+```
+
+(Through `SocsimError`'s `Display`, each message is prefixed with
+`config error: `.) The location of a build error depends on its kind:
+
+| Build error | Location |
+|---|---|
+| `Catalog`, `Matrix` | `world.game` |
+| `AgentCount`, `InvalidHistoryLength` | `world` |
+| `Topology` | `world.topology` |
+| `Action` | `world.population` |
+| `InvalidKinds` | `world.population.group` |
+| `InvalidAggregateHistoryLength` | `mechanism[game_play].aggregate_history_len` |
+| `UnsupportedRoles`, `InvalidMatching` | `mechanism[game_match]` |
+| `Rule`, `ManifestMismatch` | `mechanism[game_decide]` |
+| `Metrics` | `mechanism[game_metrics]` |
+| `Population` | `mechanism[<the dynamic named in the scenario>]` |
+
+### Random streams
+
+Everything random in a simulation read from a scenario derives from the trial
+seed passed to `build_trial`:
+
+| Stream | Draws |
+|---|---|
+| `derive_seed(seed, &[0])` | the shuffle of `assign = "shuffled"` |
+| `derive_seed(seed, &[0, 1])` | the random network of `topology = "network"` |
+| `derive_seed(seed, &[0, 2])` | the layout of `initial_shares` and the actions of `initial_uniform` |
+| `derive_seed(seed, &[1])` | the engine (`Trial::engine_seed`) |
+| `derive_seed(seed, &[2])` | the decision root |
+| `derive_seed(seed, &[3, agent, generation])` | the initial rule states |
+
+These are the streams of `GameSimFactory` and of `build_world` / `assemble`
+(see [Determinism & RNG streams](#determinism--rng-streams)), which is why the
+two entry points coincide.
+
+### `GameTrialFactory`
+
+| Item | Meaning |
+|---|---|
+| `GameTrialFactory::<FiniteSpec>::new(RuleRegistry::finite_builtins())` | a factory without experiment state (`X = ()`); `ContinuousSpec` with `RuleRegistry::continuous_builtins()` for continuous games |
+| `GameTrialFactory::with_state(registry, make_x)` | a factory whose trials start from the experiment state that `make_x: Fn(&Scenario) -> Result<X, GameError>` builds; `make_x` runs once per built trial |
+| `TrialFactory::build_trial(&scenario, seed)` | reads the scenario and builds the trial for `seed`: the world from `seed`, the mechanisms in the fixed order, the scheduler of `[simulation] scheduler`, `engine_seed = derive_seed(seed, &[1])` |
+| `TrialFactory::validate(&scenario)` | see [`validate`](#validate) |
+
+The factory holds only the rule registry, behind an `Arc`, so cloning it is
+cheap and one factory serves every worker thread; it reads the scenario again
+for every trial, as a sweep changes the scenario from point to point. The
+`TrialFactory` implementation is generic over `G: ScenarioGame` and
+`X: ExperimentState + Clone`. `ScenarioGame` is sealed: only `FiniteSpec` and
+`ContinuousSpec` implement it.
+
+`FiniteSpec` and `ContinuousSpec` (default build) are enums that wrap the
+built-in games — `FiniteSpec::Matrix(MatrixGame)`,
+`FiniteSpec::PrisonersDilemmaGame(PrisonersDilemma)`, …,
+`ContinuousSpec::CournotGame(Cournot)`, … — and forward every game method to
+the wrapped game, so a game chosen by `kind` behaves exactly like the game
+itself. They are serialized with serde's default tags, for example
+`{"HawkDoveGame": {"v": 2.0, "c": 3.0}}`. They do not implement
+`AnonymousGame`, so a scenario always uses the pairwise play path. The
+compiler does not list them among the implementers of a game trait in its error
+messages.
+
+### `validate`
+
+`validate(&scenario)`:
+
+1. reads every key of the scenario, with the checks above;
+2. checks the list of `[[mechanism]]` entries, including that a population
+   dynamic is listed after `game_decide`;
+3. constructs every registered rule that no agent follows but whose **own**
+   parameters appear in `game_decide` — writing `logit_estimate` without
+   `logit_lambda` fails even when no group uses `logit`, while a key that
+   several rules share (`coop_label`) does not make an unused rule required;
+4. builds one trial for `scenario.simulation.seed` and discards it, which runs
+   every run-time check of the assembly.
+
+`run_trial`, `run_trials` and `run_trial_sweep` call `validate` before any
+trial runs. Some checks depend on the seed: on a random network, the payoff
+range that bounds `replicator_update`'s `beta` depends on the degrees of the
+generated network. A scenario that passes `validate` is therefore always read
+successfully by `build_trial`, but may still fail to build for another seed
+— with an error, never silently.
+
+### Your own rules: `RuleRegistry::register`
+
+`RuleRegistry<G, X>` maps rule names to constructors. Register your own rule
+with the `game_decide` keys it reads; those keys are then accepted, and any
+other key stays an unknown-key error:
+
+```rust
+use std::sync::Arc;
+
+use socsim_config::{Params, Scenario};
+use socsim_games::{
+    DecisionRule, FiniteGame, FiniteSpec, Fixed, GameError, GameTrialFactory, RuleRegistry,
+};
+
+fn registry() -> Result<RuleRegistry<FiniteSpec, ()>, Box<dyn std::error::Error>> {
+    let mut registry = RuleRegistry::<FiniteSpec, ()>::finite_builtins();
+    registry.register("fixed", &["fixed_label"], |params: &Params, game: &FiniteSpec| {
+        let path = "mechanism[game_decide].fixed_label";
+        let label = params
+            .get_value("fixed_label")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| GameError::Config(format!("{path}: a label is required")))?;
+        let action = (0..game.n_actions(0))
+            .find(|&a| game.action_label(0, a) == label)
+            .ok_or_else(|| GameError::Config(format!("{path}: no action {label:?}")))?;
+        let rule: Arc<dyn DecisionRule<FiniteSpec, ()>> = Arc::new(Fixed::new(action));
+        Ok(rule)
+    })?;
+    Ok(registry)
+}
+```
+
+With `rule = "fixed"` and `fixed_label = "D"` in `game_decide`, the agents of
+that group always defect; a misspelt `fixed_lable` is rejected as
+`mechanism[game_decide].fixed_lable: unknown key (known keys: ..., fixed_label, ...)`.
+
+- The constructor receives the whole `params` table of `game_decide` (as
+  `socsim_config::Params`) and the game; read values with `Params::get_value`
+  and reject a value of the wrong type yourself, since the typed getters of
+  `Params` return their default for it. Start error messages with
+  `mechanism[game_decide].<key>`.
+- `register` fails with `RuleError::DuplicateKind` for a name that is already
+  registered and with `RuleError::Unsupported` for the reserved name `held`.
+  `names()` lists the names in lexicographic order.
+- The type of a constructor is
+  `RuleCtor<G, X> = Box<dyn Fn(&Params, &G) -> Result<Arc<dyn DecisionRule<G, X>>, GameError> + Send + Sync>`.
+
+### Reading a scenario in your own code: `ScenarioConfig`
+
+`ScenarioConfig::<G, X>::read(&scenario, &registry)` reads and checks a
+scenario without building anything, so you can change parts of it in library
+mode. It exposes the game (`game()`), `n_agents()`, `history_len()`,
+`assignment()`, and, for a seed, `initial_actions(seed)` and `topology(seed)`
+(the random network and the uniform initial actions are drawn from that seed).
+The rules and the mechanisms are not exposed; register the rules again with
+`.rule(..)` when the population has any.
+
+```rust
+use socsim_config::Scenario;
+use socsim_games::{
+    FermiUpdate, FiniteSpec, GameSimFactory, GridNeighborhood, RuleRegistry, ScenarioConfig,
+    Update,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let scenario = Scenario::from_path(std::path::Path::new("spatial.toml"))?;
+    let config = ScenarioConfig::<FiniteSpec>::read(&scenario, &RuleRegistry::finite_builtins())?;
+    let seed = 3;
+    let mut factory = GameSimFactory::new(config.game().clone())
+        .agents(config.n_agents())
+        .history_len(config.history_len())
+        .t_max(scenario.simulation.t_max)
+        .assign(config.assignment().clone())
+        .initial_held(config.initial_actions(seed))
+        .matching(GridNeighborhood::new().include_self(true))
+        .dynamics(FermiUpdate::new(0.1, Update::Synchronous)?); // not the scenario's dynamic
+    if let Some(topology) = config.topology(seed) {
+        factory = factory.topology(topology);
+    }
+    factory.build(seed)?.run()?;
+    Ok(())
+}
+```
+
+### More scenarios
+
+A population on a lattice — the spatial prisoner's dilemma with 10 % initial
+defectors. It builds the same worlds and metric rows, step by step, as a
+`GameSimFactory` for the game
+`FiniteSpec::PrisonersDilemmaGame(PrisonersDilemma::weak(1.85)?)` with
+`Topology::grid(..)`, `GridNeighborhood::new().include_self(true)`,
+`InitialActions::Shares(vec![(0, 0.9), (1, 0.1)])`,
+`ImitateBest::new(Update::Synchronous)` and
+`MetricsOptions::new().population_share(true)`:
+
+```toml
+[simulation]
+name        = "spatial_pd"
+module_pack = "library"
+t_max       = 50
+seed        = 1
+scheduler   = "sequential"
+
+[world]
+history_len  = 1
+topology     = "grid"
+grid_rows    = 100
+grid_cols    = 100
+boundary     = "toroidal"
+neighborhood = "moore"
+
+[world.game]
+kind       = "prisoners_dilemma"
+temptation = 1.85
+reward     = 1.0
+punishment = 0.0
+sucker     = 0.0
+
+[world.population]
+initial_shares = { D = 0.1 }        # C receives the rest, 0.9
+[[world.population.group]]
+rule  = "held"
+share = 1.0
+
+[[mechanism]]
+name = "game_match"
+[mechanism.params]
+matching     = "grid_neighborhood"
+include_self = true
+
+[[mechanism]]
+name = "game_decide"
+
+[[mechanism]]
+name = "imitate_best"
+[mechanism.params]
+update = "synchronous"
+
+[[mechanism]]
+name = "game_play"
+
+[[mechanism]]
+name = "game_metrics"
+[mechanism.params]
+population_share = true
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"
+```
+
+Three Cournot firms with damped best responses from uniform initial
+quantities, read with
+`GameTrialFactory::<ContinuousSpec>::new(RuleRegistry::continuous_builtins())`:
+
+```toml
+[simulation]
+name        = "cournot3"
+module_pack = "library"
+t_max       = 500
+seed        = 7
+scheduler   = "sequential"
+
+[world]
+n_agents    = 3                   # the three firms
+history_len = 4
+
+[world.game]
+kind  = "cournot"
+a     = 100.0
+b     = 1.0
+c     = 10.0
+q_max = 100.0
+
+[world.population]
+initial_uniform = true            # each firm uniform on [0, q_max], stream [0, 2]
+[[world.population.group]]
+rule  = "damped_best_response"
+count = 3
+
+[[mechanism]]
+name = "game_match"
+[mechanism.params]
+matching = "whole_population"
+
+[[mechanism]]
+name = "game_decide"
+[mechanism.params]
+br_damping = 0.5
+
+[[mechanism]]
+name = "game_play"
+[mechanism.params]
+aggregate_history_len = 4         # records total_output and price
+
+[[mechanism]]
+name = "game_metrics"
+[mechanism.params]
+equilibrium = "solve"
+stop_tol    = 1e-9
+stop_window = 10
+
+[output]
+log_path = "runs/{name}_{seed}.jsonl"
+```
+
+With `run_trial(&scenario, &factory, 7)` the convergence stop ends the run after
+90 of the 500 steps, at `game.mean_action.0 = 22.5`,
+`game.aggregate.total_output = 67.5` and `game.aggregate.price = 32.5`.
+
+### Limits
+
+- A scenario chooses among the built-in games, rules, matchings and
+  dynamics. A custom game, outcome rule or matching, the counting play path,
+  `OnInvalidAction::Fallback`, the rules `fixed` and `mixed` and the LLM rules
+  are available only in library mode (`GameSimFactory`); register your own
+  decision rules with `RuleRegistry::register`.
+- The experiment state is `()` unless the factory is built with
+  `GameTrialFactory::with_state`.
+- Population dynamics take only `update = "synchronous"`.
+- `random_groups(k)` with `minority` or `el_farol` cannot be written (their
+  players are `n_agents`).
+- Networks are undirected (`Topology::network`).
+- Unknown top-level tables are ignored by socsim-config, not reported.
