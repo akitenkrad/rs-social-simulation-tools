@@ -107,7 +107,7 @@
 //! |---|---|
 //! | `game_match` (required) | `matching`: `"fixed_players"` (with `pairs`, an array of agent-id pairs), `"round_robin"` (with `both_orders`, default `false`), `"random_pairs"`, `"random_groups"` (with `k`), `"whole_population"`, `"grid_neighborhood"` (with `include_self`, default `false`), or `"network_edges"` |
 //! | `game_decide` (required) | `decision_scope` (`"per_step"`, `"per_agent_role"`, or `"per_encounter"`; default `"per_step"`), `report_mixed` (default `false`), and the keys of the registered rules |
-//! | `game_play` (required) | `payoff_aggregation` (`"sum"` or `"mean"`; default `"sum"`), `aggregate_history_len` (count; records the game's aggregates when given), `materialize` (default `false`) |
+//! | `game_play` (required) | `payoff_aggregation` (`"sum"` or `"mean"`; default `"sum"`), `aggregate_history_len` (count; records the game's aggregates when given), `materialize` (default `false`), `counting` (finite anonymous games; default `false`) |
 //! | `imitate_best` | `update` (`"synchronous"`, required), `tie_break` (`"keep_own"` or `"lowest_action"`; default `"keep_own"`) |
 //! | `fermi_update` | `update`, `k` (both required) |
 //! | `replicator_update` (finite games) | `update`, `beta` (both required) |
@@ -137,7 +137,8 @@ mod reader;
 mod rules;
 mod world;
 
-pub use game::ScenarioGame;
+pub use game::{game_family, GameFamily, ScenarioGame};
+pub use mechanisms::SCENARIO_MECHANISM_NAMES;
 pub use rules::{RuleCtor, RuleRegistry};
 
 use std::sync::Arc;
@@ -177,6 +178,7 @@ pub struct ScenarioConfig<G: ScenarioGame, X: ExperimentState = ()> {
     matching: AnyMatching,
     play_options: PlayOptions<G::Action>,
     aggregate_history_len: Option<usize>,
+    counting: Option<<G as SpecGame>::Counting>,
     dynamics: AnyDynamics<<G as SpecGame>::Replicator>,
     metrics: Option<<G as SpecGame>::Metrics>,
 }
@@ -197,7 +199,7 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
         let game = G::read_game(&mut game_reader, n_agents)?;
         game_reader.finish()?;
 
-        let mechanisms = read_mechanisms(&scenario.mechanisms, registry)?;
+        let mechanisms = read_mechanisms(&scenario.mechanisms, registry, &game)?;
 
         let population_reader = world.subtable("population")?;
         let mut population_reader = world.required("population", population_reader)?;
@@ -226,6 +228,7 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
             matching: mechanisms.matching,
             play_options: mechanisms.play_options,
             aggregate_history_len: mechanisms.aggregate_history_len,
+            counting: mechanisms.counting,
             dynamics: mechanisms.dynamics,
             metrics: mechanisms.metrics,
         })
@@ -276,9 +279,15 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
         &self,
         x: X,
         seed: u64,
-    ) -> GameSimFactory<G, X, AnyMatching, AnyPlay, AnyDynamics<<G as SpecGame>::Replicator>>
+    ) -> GameSimFactory<
+        G,
+        X,
+        AnyMatching,
+        AnyPlay<<G as SpecGame>::Counting>,
+        AnyDynamics<<G as SpecGame>::Replicator>,
+    >
     where
-        AnyPlay: PlayPath<G, X>,
+        AnyPlay<<G as SpecGame>::Counting>: PlayPath<G, X>,
         AnyDynamics<<G as SpecGame>::Replicator>: PopulationDynamics<G, X>,
     {
         let mut factory = GameSimFactory::with_state(self.game.clone(), x)
@@ -290,7 +299,10 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
             .assign(self.assignment.clone())
             .initial_held(self.initial_actions(seed))
             .play_options(self.play_options.clone())
-            .play_path(AnyPlay::new(self.aggregate_history_len))
+            .play_path(AnyPlay::new(
+                self.counting.clone(),
+                self.aggregate_history_len,
+            ))
             .dynamics(self.dynamics.clone());
         if let Some(topology) = self.topology(seed) {
             factory = factory.topology(topology);

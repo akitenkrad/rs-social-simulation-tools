@@ -18,6 +18,7 @@ use crate::{
     InitialActions, MatrixError, MatrixGame, MetricsOptions, MixedSource, ProportionalImitation,
     StageGame, Update,
 };
+use socsim_config::Scenario;
 use socsim_runner::Trial;
 
 /// Tolerance of the sum of shares around one.
@@ -41,6 +42,43 @@ const CONTINUOUS_KINDS: &[&str] = &[
     "bertrand_differentiated",
     "public_goods_continuous",
 ];
+
+/// Whether a scenario describes a finite or continuous game.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum GameFamily {
+    /// A game with discrete actions.
+    Finite,
+    /// A game with vector-valued continuous actions.
+    Continuous,
+}
+
+/// Returns the family selected by `world.game.kind`.
+///
+/// Missing keys, wrong value types, and unknown kinds use the same
+/// configuration errors as [`ScenarioConfig::read`].
+pub fn game_family(scenario: &Scenario) -> Result<GameFamily, GameError> {
+    let mut world = ParamReader::new(&scenario.world.0, "world");
+    let game = world.subtable("game")?;
+    let mut game = world.required("game", game)?;
+    let kind = read_kind(&mut game)?;
+    if FINITE_KINDS.contains(&kind) {
+        Ok(GameFamily::Finite)
+    } else if CONTINUOUS_KINDS.contains(&kind) {
+        Ok(GameFamily::Continuous)
+    } else {
+        let mut kinds = Vec::with_capacity(FINITE_KINDS.len() + CONTINUOUS_KINDS.len());
+        kinds.extend_from_slice(FINITE_KINDS);
+        kinds.extend_from_slice(CONTINUOUS_KINDS);
+        Err(game.error(
+            "kind",
+            format!(
+                "unknown game kind {kind:?} (expected one of {})",
+                super::reader::quoted(&kinds)
+            ),
+        ))
+    }
+}
 
 /// A game type that can be read from a scenario: [`FiniteSpec`] or
 /// [`ContinuousSpec`].
@@ -93,6 +131,8 @@ pub(crate) mod sealed {
 
     /// The game-specific reading of a scenario.
     pub trait SpecGame: StageGame + Clone + Debug {
+        /// The count-based play path, or [`Infallible`] when unavailable.
+        type Counting: Clone + Debug + Send + Sync + 'static;
         /// The `replicator_update` dynamic, or [`Infallible`] when the game
         /// does not support it.
         type Replicator: Clone + Debug + Send + Sync + 'static;
@@ -107,6 +147,12 @@ pub(crate) mod sealed {
             reader: &mut ParamReader<'_>,
             game: &Self,
         ) -> Result<InitialSpec<Self>, GameError>;
+
+        /// Reads the optional count-based play path of `game_play`.
+        fn read_counting(
+            reader: &mut ParamReader<'_>,
+            game: &Self,
+        ) -> Result<Option<Self::Counting>, GameError>;
 
         /// Reads the `replicator_update` mechanism (`update` is already read).
         fn read_replicator(
@@ -401,6 +447,7 @@ fn read_initial_shares<G: FiniteGame>(
 
 #[allow(private_interfaces)]
 impl sealed::SpecGame for FiniteSpec {
+    type Counting = super::mechanisms::SpecPlay;
     type Replicator = ProportionalImitation;
     type Metrics = MetricsOptions;
 
@@ -490,6 +537,23 @@ impl sealed::SpecGame for FiniteSpec {
         Ok(InitialSpec::Given(InitialActions::Same(0)))
     }
 
+    fn read_counting(
+        reader: &mut ParamReader<'_>,
+        game: &Self,
+    ) -> Result<Option<Self::Counting>, GameError> {
+        if reader.flag("counting")?.unwrap_or(false) {
+            match game {
+                Self::HawkDoveGame(_)
+                | Self::ElFarolGame(_)
+                | Self::Minority(_)
+                | Self::PublicGoodsFiniteGame(_) => Ok(Some(super::mechanisms::SpecPlay)),
+                _ => Err(reader.error("counting", "counting play requires an anonymous game")),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     fn read_replicator(
         reader: &mut ParamReader<'_>,
         update: Update,
@@ -560,6 +624,7 @@ impl sealed::SpecGame for FiniteSpec {
 
 #[allow(private_interfaces)]
 impl sealed::SpecGame for ContinuousSpec {
+    type Counting = Infallible;
     type Replicator = Infallible;
     type Metrics = ContinuousMetricsOptions;
 
@@ -635,6 +700,18 @@ impl sealed::SpecGame for ContinuousSpec {
         Err(reader.table_error(
             "a continuous game needs initial actions: set initial_uniform = true or initial_action",
         ))
+    }
+
+    fn read_counting(
+        reader: &mut ParamReader<'_>,
+        _game: &Self,
+    ) -> Result<Option<Self::Counting>, GameError> {
+        if reader.has("counting") {
+            reader.value("counting");
+            Err(reader.error("counting", "counting play requires a finite game"))
+        } else {
+            Ok(None)
+        }
     }
 
     fn read_replicator(

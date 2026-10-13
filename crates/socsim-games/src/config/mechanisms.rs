@@ -11,19 +11,20 @@
 use std::convert::Infallible;
 
 use socsim_config::MechanismEntry;
-use socsim_core::{Mechanism, SimRng};
+use socsim_core::{AgentId, Mechanism, SimRng, SocsimError};
 
 use super::game::{read_update, sealed::SpecGame};
 use super::reader::{config_error, quoted, ParamReader};
 use super::rules::{RuleRegistry, DECIDE_PATH};
 use crate::assemble::sealed::{DynamicsBuild, DynamicsCheck, PlayBuild};
 use crate::mechanism::{AggregateCollector, KernelRunner, PayoffRangeSource};
+use crate::outcome::kernel::{play_counting, play_implicit_counting, PayoffAccum};
 use crate::{
     AggregateGame, ArenaWriter, DecisionScope, EncounterBounds, ExperimentState, FermiUpdate,
-    Fitness, FixedPlayers, GameError, GameWorld, ImitateBest, ImitationTie, ImplicitPattern,
-    MatchContext, Matching, MatchingState, MoranUpdate, NoDynamics, NormalFormOutcome, Pairwise,
-    PayoffAggregation, PlayOptions, RandomGroups, RandomPairs, RoundRobin, StageGame,
-    WholePopulation, WithAggregates,
+    FiniteSpec, Fitness, FixedPlayers, GameError, GameWorld, ImitateBest, ImitationTie,
+    ImplicitPattern, MatchContext, Matching, MatchingState, MoranUpdate, NoDynamics,
+    NormalFormOutcome, OutcomeContext, Pairwise, PayoffAggregation, PlayArena, PlayOptions,
+    RandomGroups, RandomPairs, RoundRobin, StageGame, WholePopulation, WithAggregates,
 };
 
 /// A built-in matching chosen at run time.
@@ -96,18 +97,154 @@ impl<G: StageGame, X: ExperimentState> Matching<G, X> for AnyMatching {
     }
 }
 
-/// A play path chosen at run time: pairwise play with the normal-form
-/// outcome, with or without public aggregates.
-#[derive(Clone, Debug)]
-pub(crate) enum AnyPlay {
-    Pairwise(Pairwise<NormalFormOutcome>),
-    WithAggregates(WithAggregates<Pairwise<NormalFormOutcome>>),
+/// The count-based play path of [`FiniteSpec`].
+#[derive(Clone, Copy, Debug)]
+pub struct SpecPlay;
+
+pub(crate) struct SpecCountingRunner;
+
+fn counting_error() -> SocsimError {
+    SocsimError::Mechanism("counting play requires an anonymous game".to_owned())
 }
 
-impl AnyPlay {
+impl<X: ExperimentState> KernelRunner<FiniteSpec, X> for SpecCountingRunner {
+    fn materialized(
+        &self,
+        context: &OutcomeContext<'_, FiniteSpec, X>,
+        arena: &mut PlayArena<usize>,
+        accum: &mut PayoffAccum<'_>,
+    ) -> socsim_core::Result<()> {
+        match context.game() {
+            FiniteSpec::HawkDoveGame(game) => play_counting(game, arena, accum),
+            FiniteSpec::ElFarolGame(game) => play_counting(game, arena, accum),
+            FiniteSpec::Minority(game) => play_counting(game, arena, accum),
+            FiniteSpec::PublicGoodsFiniteGame(game) => play_counting(game, arena, accum),
+            _ => Err(counting_error()),
+        }
+    }
+
+    fn implicit(
+        &self,
+        pattern: ImplicitPattern,
+        context: &OutcomeContext<'_, FiniteSpec, X>,
+        ids: &[AgentId],
+        accum: &mut PayoffAccum<'_>,
+    ) -> socsim_core::Result<()> {
+        match context.game() {
+            FiniteSpec::HawkDoveGame(game) => {
+                play_implicit_counting(pattern, game, context.topology(), ids, context.held, accum)
+            }
+            FiniteSpec::ElFarolGame(game) => {
+                play_implicit_counting(pattern, game, context.topology(), ids, context.held, accum)
+            }
+            FiniteSpec::Minority(game) => {
+                play_implicit_counting(pattern, game, context.topology(), ids, context.held, accum)
+            }
+            FiniteSpec::PublicGoodsFiniteGame(game) => {
+                play_implicit_counting(pattern, game, context.topology(), ids, context.held, accum)
+            }
+            _ => Err(counting_error()),
+        }
+    }
+}
+
+fn spec_payoff_range(game: &FiniteSpec) -> Result<(f64, f64), GameError> {
+    match game {
+        FiniteSpec::HawkDoveGame(game) => crate::mechanism::anonymous_payoff_range(game),
+        FiniteSpec::ElFarolGame(game) => crate::mechanism::anonymous_payoff_range(game),
+        FiniteSpec::Minority(game) => crate::mechanism::anonymous_payoff_range(game),
+        FiniteSpec::PublicGoodsFiniteGame(game) => crate::mechanism::anonymous_payoff_range(game),
+        _ => Err(GameError::Population(
+            "counting play requires an anonymous game".to_owned(),
+        )),
+    }
+}
+
+pub(crate) trait CountingSlot<G: StageGame, X: ExperimentState>:
+    Clone + std::fmt::Debug + Send + Sync + 'static
+{
+    fn permits_implicit(&self) -> bool;
+    fn prepare(
+        &self,
+        world: &mut GameWorld<G, X>,
+    ) -> Result<Option<AggregateCollector<G>>, GameError>;
+    fn into_runner(self) -> Box<dyn KernelRunner<G, X>>;
+    fn payoff_source(&self) -> PayoffRangeSource<G>;
+}
+
+#[diagnostic::do_not_recommend]
+impl<X: ExperimentState> CountingSlot<FiniteSpec, X> for SpecPlay {
+    fn permits_implicit(&self) -> bool {
+        true
+    }
+
+    fn prepare(
+        &self,
+        world: &mut GameWorld<FiniteSpec, X>,
+    ) -> Result<Option<AggregateCollector<FiniteSpec>>, GameError> {
+        let _ = world;
+        Ok(None)
+    }
+
+    fn into_runner(self) -> Box<dyn KernelRunner<FiniteSpec, X>> {
+        Box::new(SpecCountingRunner)
+    }
+
+    fn payoff_source(&self) -> PayoffRangeSource<FiniteSpec> {
+        PayoffRangeSource::Counts(spec_payoff_range)
+    }
+}
+
+impl<G: StageGame, X: ExperimentState> CountingSlot<G, X> for Infallible {
+    fn permits_implicit(&self) -> bool {
+        match *self {}
+    }
+
+    fn prepare(
+        &self,
+        _world: &mut GameWorld<G, X>,
+    ) -> Result<Option<AggregateCollector<G>>, GameError> {
+        match *self {}
+    }
+
+    fn into_runner(self) -> Box<dyn KernelRunner<G, X>> {
+        match self {}
+    }
+
+    fn payoff_source(&self) -> PayoffRangeSource<G> {
+        match *self {}
+    }
+}
+
+/// A play path chosen at run time: ordinary or count-based play, with or
+/// without public aggregates.
+#[derive(Clone, Debug)]
+pub(crate) struct CountingWithAggregates<C> {
+    counting: C,
+    aggregates: WithAggregates<Pairwise<NormalFormOutcome>>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum AnyPlay<C> {
+    Pairwise(Pairwise<NormalFormOutcome>),
+    WithAggregates(WithAggregates<Pairwise<NormalFormOutcome>>),
+    Counting(C),
+    CountingWithAggregates(CountingWithAggregates<C>),
+}
+
+impl<C> AnyPlay<C> {
     /// The play path that records aggregates when `aggregate_history_len` is
     /// set.
-    pub(crate) fn new(aggregate_history_len: Option<usize>) -> Self {
+    pub(crate) fn new(counting: Option<C>, aggregate_history_len: Option<usize>) -> Self {
+        if let Some(counting) = counting {
+            return match aggregate_history_len {
+                Some(len) => Self::CountingWithAggregates(CountingWithAggregates {
+                    counting,
+                    aggregates: Pairwise::new(NormalFormOutcome).with_aggregates(len),
+                }),
+                None => Self::Counting(counting),
+            };
+        }
         let pairwise = Pairwise::new(NormalFormOutcome);
         match aggregate_history_len {
             Some(len) => Self::WithAggregates(pairwise.with_aggregates(len)),
@@ -116,11 +253,20 @@ impl AnyPlay {
     }
 }
 
-impl<G: AggregateGame, X: ExperimentState> PlayBuild<G, X> for AnyPlay {
+impl<G, X, C> PlayBuild<G, X> for AnyPlay<C>
+where
+    G: AggregateGame,
+    X: ExperimentState,
+    C: CountingSlot<G, X>,
+{
     fn permits_implicit(&self) -> bool {
         match self {
             Self::Pairwise(inner) => PlayBuild::<G, X>::permits_implicit(inner),
             Self::WithAggregates(inner) => PlayBuild::<G, X>::permits_implicit(inner),
+            Self::Counting(inner) => CountingSlot::<G, X>::permits_implicit(inner),
+            Self::CountingWithAggregates(inner) => {
+                CountingSlot::<G, X>::permits_implicit(&inner.counting)
+            }
         }
     }
 
@@ -131,6 +277,8 @@ impl<G: AggregateGame, X: ExperimentState> PlayBuild<G, X> for AnyPlay {
         match self {
             Self::Pairwise(inner) => inner.prepare(world),
             Self::WithAggregates(inner) => inner.prepare(world),
+            Self::Counting(inner) => CountingSlot::<G, X>::prepare(inner, world),
+            Self::CountingWithAggregates(inner) => inner.aggregates.prepare(world),
         }
     }
 
@@ -138,6 +286,10 @@ impl<G: AggregateGame, X: ExperimentState> PlayBuild<G, X> for AnyPlay {
         match self {
             Self::Pairwise(inner) => inner.into_runner(),
             Self::WithAggregates(inner) => inner.into_runner(),
+            Self::Counting(inner) => CountingSlot::<G, X>::into_runner(inner),
+            Self::CountingWithAggregates(inner) => {
+                CountingSlot::<G, X>::into_runner(inner.counting)
+            }
         }
     }
 
@@ -145,6 +297,10 @@ impl<G: AggregateGame, X: ExperimentState> PlayBuild<G, X> for AnyPlay {
         match self {
             Self::Pairwise(inner) => PlayBuild::<G, X>::payoff_source(inner),
             Self::WithAggregates(inner) => PlayBuild::<G, X>::payoff_source(inner),
+            Self::Counting(inner) => CountingSlot::<G, X>::payoff_source(inner),
+            Self::CountingWithAggregates(inner) => {
+                CountingSlot::<G, X>::payoff_source(&inner.counting)
+            }
         }
     }
 }
@@ -225,7 +381,7 @@ where
 }
 
 /// The mechanism names a scenario may list.
-const MECHANISMS: &[&str] = &[
+pub const SCENARIO_MECHANISM_NAMES: &[&str] = &[
     "game_match",
     "game_decide",
     "game_play",
@@ -261,6 +417,7 @@ pub(crate) struct MechanismConfig<G: SpecGame> {
     pub(crate) matching: AnyMatching,
     pub(crate) play_options: PlayOptions<G::Action>,
     pub(crate) aggregate_history_len: Option<usize>,
+    pub(crate) counting: Option<G::Counting>,
     pub(crate) dynamics: AnyDynamics<G::Replicator>,
     pub(crate) metrics: Option<G::Metrics>,
     /// The parameters of `game_decide`, passed to the rule constructors.
@@ -280,14 +437,18 @@ fn entry_path(name: &str) -> String {
 pub(crate) fn read_mechanisms<G: SpecGame, X: ExperimentState>(
     entries: &[MechanismEntry],
     registry: &RuleRegistry<G, X>,
+    game: &G,
 ) -> Result<MechanismConfig<G>, GameError> {
     let mut seen: Vec<&str> = Vec::new();
     for entry in entries {
         let name = entry.name.as_str();
-        if !MECHANISMS.contains(&name) {
+        if !SCENARIO_MECHANISM_NAMES.contains(&name) {
             return Err(config_error(
                 &entry_path(name),
-                format!("unknown mechanism (expected one of {})", quoted(MECHANISMS)),
+                format!(
+                    "unknown mechanism (expected one of {})",
+                    quoted(SCENARIO_MECHANISM_NAMES)
+                ),
             ));
         }
         if seen.contains(&name) {
@@ -355,6 +516,7 @@ pub(crate) fn read_mechanisms<G: SpecGame, X: ExperimentState>(
     };
     let aggregate_history_len = play_reader.count_usize("aggregate_history_len")?;
     let materialize = play_reader.flag("materialize")?.unwrap_or(false);
+    let counting = G::read_counting(&mut play_reader, game)?;
     play_reader.finish()?;
 
     let mut dynamics = AnyDynamics::None(NoDynamics);
@@ -383,6 +545,7 @@ pub(crate) fn read_mechanisms<G: SpecGame, X: ExperimentState>(
             .report_mixed(report_mixed)
             .materialize(materialize),
         aggregate_history_len,
+        counting,
         dynamics,
         metrics,
         decide: decide.clone(),

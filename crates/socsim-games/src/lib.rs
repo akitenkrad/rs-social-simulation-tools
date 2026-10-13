@@ -57,7 +57,10 @@ pub use assemble::{
     InitialActions, OnInvalidAction, PayoffAggregation, PlayOptions,
 };
 #[cfg(feature = "config")]
-pub use config::{RuleCtor, RuleRegistry, ScenarioConfig, ScenarioGame};
+pub use config::{
+    game_family, GameFamily, RuleCtor, RuleRegistry, ScenarioConfig, ScenarioGame,
+    SCENARIO_MECHANISM_NAMES,
+};
 #[cfg(feature = "core")]
 pub use error::GameError;
 #[cfg(feature = "config")]
