@@ -28,6 +28,11 @@ pub enum Update {
     /// Every agent's next action is computed from the same pre-update state
     /// and all actions are written together at the end of the step.
     Synchronous,
+    /// Agents are updated one at a time by the dedicated asynchronous
+    /// population step.
+    ///
+    /// Synchronous assembly rejects this schedule; use `assemble_async`.
+    Asynchronous,
 }
 
 /// Tie-breaking policy of [`ImitateBest`].
@@ -611,6 +616,27 @@ pub(crate) fn check_held_only<G: StageGame, X: ExperimentState>(
     Ok(())
 }
 
+#[cfg(feature = "engine")]
+pub(crate) trait DynamicsValidator<G: StageGame, X: ExperimentState> {
+    fn check(
+        &self,
+        check: &crate::assemble::sealed::DynamicsCheck<'_, G, X>,
+    ) -> Result<(), GameError>;
+}
+
+#[cfg(feature = "engine")]
+pub(crate) fn check_dynamics<G, X, D>(
+    dynamics: &D,
+    check: &crate::assemble::sealed::DynamicsCheck<'_, G, X>,
+) -> Result<(), GameError>
+where
+    G: StageGame,
+    X: ExperimentState,
+    D: DynamicsValidator<G, X>,
+{
+    dynamics.check(check)
+}
+
 /// Draws one comparison partner for agent `index`, or `None` when the agent
 /// has no partner. A partner is never the agent itself.
 fn comparison_partner(
@@ -956,9 +982,12 @@ mod build {
 
     type Boxed<G, X> = Box<dyn Mechanism<GameWorld<G, X>>>;
 
-    fn require_synchronous(update: Update) -> Result<(), GameError> {
+    pub(super) fn require_synchronous(update: Update, name: &str) -> Result<(), GameError> {
         match update {
             Update::Synchronous => Ok(()),
+            Update::Asynchronous => Err(GameError::Population(format!(
+                "{name} with Update::Asynchronous must be assembled with assemble_async"
+            ))),
         }
     }
 
@@ -987,15 +1016,8 @@ mod build {
         X: ExperimentState,
     {
         fn prepare(&self, check: &DynamicsCheck<'_, G, X>) -> Result<(), GameError> {
-            require_synchronous(self.update)?;
-            check_held_only(check.world, "imitate_best")?;
-            <G::Action as ActionSpace<G>>::check_common_space(&check.world.game)?;
-            if matches!(check.world.topology, Topology::None) {
-                return Err(GameError::Population(
-                    "imitate_best requires a grid or network topology".to_owned(),
-                ));
-            }
-            Ok(())
+            require_synchronous(self.update, "imitate_best")?;
+            check_dynamics(self, check)
         }
 
         fn into_mechanism(self) -> Option<Boxed<G, X>> {
@@ -1008,6 +1030,24 @@ mod build {
         }
     }
 
+    impl<G, X> DynamicsValidator<G, X> for ImitateBest
+    where
+        G: NormalFormGame + CommonActionSpace,
+        G::Action: ActionSpace<G>,
+        X: ExperimentState,
+    {
+        fn check(&self, check: &DynamicsCheck<'_, G, X>) -> Result<(), GameError> {
+            check_held_only(check.world, "imitate_best")?;
+            <G::Action as ActionSpace<G>>::check_common_space(&check.world.game)?;
+            if matches!(check.world.topology, Topology::None) {
+                return Err(GameError::Population(
+                    "imitate_best requires a grid or network topology".to_owned(),
+                ));
+            }
+            Ok(())
+        }
+    }
+
     impl<G, X> DynamicsBuild<G, X> for FermiUpdate
     where
         G: NormalFormGame + CommonActionSpace,
@@ -1015,9 +1055,8 @@ mod build {
         X: ExperimentState,
     {
         fn prepare(&self, check: &DynamicsCheck<'_, G, X>) -> Result<(), GameError> {
-            require_synchronous(self.update)?;
-            check_held_only(check.world, "fermi_update")?;
-            <G::Action as ActionSpace<G>>::check_common_space(&check.world.game)
+            require_synchronous(self.update, "fermi_update")?;
+            check_dynamics(self, check)
         }
 
         fn into_mechanism(self) -> Option<Boxed<G, X>> {
@@ -1027,13 +1066,41 @@ mod build {
         }
     }
 
+    impl<G, X> DynamicsValidator<G, X> for FermiUpdate
+    where
+        G: NormalFormGame + CommonActionSpace,
+        G::Action: ActionSpace<G>,
+        X: ExperimentState,
+    {
+        fn check(&self, check: &DynamicsCheck<'_, G, X>) -> Result<(), GameError> {
+            check_held_only(check.world, "fermi_update")?;
+            <G::Action as ActionSpace<G>>::check_common_space(&check.world.game)
+        }
+    }
+
     impl<G, X> DynamicsBuild<G, X> for ProportionalImitation
     where
         G: FiniteGame + CommonActionSpace,
         X: ExperimentState,
     {
         fn prepare(&self, check: &DynamicsCheck<'_, G, X>) -> Result<(), GameError> {
-            require_synchronous(self.update)?;
+            require_synchronous(self.update, "replicator_update")?;
+            check_dynamics(self, check)
+        }
+
+        fn into_mechanism(self) -> Option<Boxed<G, X>> {
+            Some(Box::new(CopyMechanism::<G, X, _>::new(
+                ProportionalKernel { beta: self.beta },
+            )))
+        }
+    }
+
+    impl<G, X> DynamicsValidator<G, X> for ProportionalImitation
+    where
+        G: FiniteGame + CommonActionSpace,
+        X: ExperimentState,
+    {
+        fn check(&self, check: &DynamicsCheck<'_, G, X>) -> Result<(), GameError> {
             check_held_only(check.world, "replicator_update")?;
             crate::game::check_common_action_space(&check.world.game)?;
             let single = single_range(check, "replicator_update", finite_payoff_range)?;
@@ -1052,12 +1119,6 @@ mod build {
             }
             Ok(())
         }
-
-        fn into_mechanism(self) -> Option<Boxed<G, X>> {
-            Some(Box::new(CopyMechanism::<G, X, _>::new(
-                ProportionalKernel { beta: self.beta },
-            )))
-        }
     }
 
     impl<G, X> DynamicsBuild<G, X> for MoranUpdate
@@ -1067,7 +1128,7 @@ mod build {
         X: ExperimentState,
     {
         fn prepare(&self, check: &DynamicsCheck<'_, G, X>) -> Result<(), GameError> {
-            require_synchronous(self.update)?;
+            require_synchronous(self.update, "moran_update")?;
             check_held_only(check.world, "moran_update")?;
             <G::Action as ActionSpace<G>>::check_common_space(&check.world.game)?;
             if !matches!(check.world.topology, Topology::None) {
@@ -1112,6 +1173,26 @@ mod build {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "engine")]
+    #[test]
+    fn asynchronous_update_is_rejected_by_every_synchronous_dynamic() {
+        for name in [
+            "imitate_best",
+            "fermi_update",
+            "replicator_update",
+            "moran_update",
+        ] {
+            let error = build::require_synchronous(Update::Asynchronous, name).unwrap_err();
+            let GameError::Population(message) = error else {
+                panic!("expected GameError::Population, got {error:?}");
+            };
+            assert_eq!(
+                message,
+                format!("{name} with Update::Asynchronous must be assembled with assemble_async")
+            );
+        }
+    }
 
     #[test]
     fn compositions_cover_every_count_vector_once() {

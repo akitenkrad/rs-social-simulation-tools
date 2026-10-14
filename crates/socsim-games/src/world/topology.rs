@@ -90,9 +90,17 @@ impl Topology {
 #[derive(Clone, Debug)]
 pub struct NetworkTopology {
     network: NetworkKind,
+    tables: Box<NetworkTables>,
+}
+
+#[cfg(feature = "net")]
+#[derive(Clone, Debug)]
+struct NetworkTables {
     offsets: Vec<usize>,
     neighbors: Vec<socsim_core::AgentId>,
     edges: Vec<(socsim_core::AgentId, socsim_core::AgentId)>,
+    incident_offsets: Vec<usize>,
+    incident_edges: Vec<usize>,
 }
 
 #[cfg(feature = "net")]
@@ -137,26 +145,72 @@ impl NetworkTopology {
         };
         edges.sort_unstable();
         edges.dedup();
+        let mut incident_rows = vec![Vec::new(); node_count];
+        for (edge_index, &(source, target)) in edges.iter().enumerate() {
+            if let Ok(source) = usize::try_from(source.0) {
+                if let Some(row) = incident_rows.get_mut(source) {
+                    row.push(edge_index);
+                }
+            }
+            if target != source {
+                if let Ok(target) = usize::try_from(target.0) {
+                    if let Some(row) = incident_rows.get_mut(target) {
+                        row.push(edge_index);
+                    }
+                }
+            }
+        }
+        let mut incident_offsets = Vec::with_capacity(node_count + 1);
+        let mut incident_edges = Vec::new();
+        incident_offsets.push(0);
+        for row in incident_rows {
+            incident_edges.extend(row);
+            incident_offsets.push(incident_edges.len());
+        }
         Self {
             network,
-            offsets,
-            neighbors,
-            edges,
+            tables: Box::new(NetworkTables {
+                offsets,
+                neighbors,
+                edges,
+                incident_offsets,
+                incident_edges,
+            }),
         }
     }
 
     pub(crate) fn edges(&self) -> &[(socsim_core::AgentId, socsim_core::AgentId)] {
-        &self.edges
+        &self.tables.edges
     }
 
     pub(crate) fn neighbors(&self, id: socsim_core::AgentId) -> &[socsim_core::AgentId] {
         let Ok(index) = usize::try_from(id.0) else {
             return &[];
         };
-        let Some((&start, &end)) = self.offsets.get(index).zip(self.offsets.get(index + 1)) else {
+        let Some((&start, &end)) = self
+            .tables
+            .offsets
+            .get(index)
+            .zip(self.tables.offsets.get(index + 1))
+        else {
             return &[];
         };
-        &self.neighbors[start..end]
+        &self.tables.neighbors[start..end]
+    }
+
+    pub(crate) fn incident_edges(&self, id: socsim_core::AgentId) -> &[usize] {
+        let Ok(index) = usize::try_from(id.0) else {
+            return &[];
+        };
+        let Some((&start, &end)) = self
+            .tables
+            .incident_offsets
+            .get(index)
+            .zip(self.tables.incident_offsets.get(index + 1))
+        else {
+            return &[];
+        };
+        &self.tables.incident_edges[start..end]
     }
 
     fn validate_agents(&self, ids: &[socsim_core::AgentId]) -> Result<(), GameError> {
@@ -173,7 +227,12 @@ impl NetworkTopology {
                 "network vertices must equal the world's agent IDs".to_owned(),
             ));
         }
-        if self.edges.iter().any(|(source, target)| source == target) {
+        if self
+            .tables
+            .edges
+            .iter()
+            .any(|(source, target)| source == target)
+        {
             return Err(GameError::Topology(
                 "network self-loops are not supported".to_owned(),
             ));

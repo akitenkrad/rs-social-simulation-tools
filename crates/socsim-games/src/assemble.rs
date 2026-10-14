@@ -373,6 +373,9 @@ pub(crate) mod sealed {
 
     pub trait PlayBuild<G: StageGame, X: ExperimentState>: Send + Sync + Sized + 'static {
         fn permits_implicit(&self) -> bool;
+        fn into_local_runner(self) -> Option<Box<dyn crate::mechanism::KernelRunner<G, X>>> {
+            None
+        }
         fn prepare(
             &self,
             _world: &mut GameWorld<G, X>,
@@ -397,6 +400,11 @@ pub(crate) mod sealed {
             crate::mechanism::pairwise_runner(self.outcome)
         }
 
+        fn into_local_runner(self) -> Option<Box<dyn crate::mechanism::KernelRunner<G, X>>> {
+            (TypeId::of::<O>() == TypeId::of::<crate::NormalFormOutcome>())
+                .then(|| crate::mechanism::pairwise_runner(self.outcome))
+        }
+
         fn payoff_source(&self) -> PayoffRangeSource<G> {
             if TypeId::of::<O>() == TypeId::of::<crate::NormalFormOutcome>() {
                 PayoffRangeSource::Game
@@ -419,6 +427,10 @@ pub(crate) mod sealed {
             crate::mechanism::counting_runner()
         }
 
+        fn into_local_runner(self) -> Option<Box<dyn crate::mechanism::KernelRunner<G, X>>> {
+            Some(crate::mechanism::counting_runner())
+        }
+
         fn payoff_source(&self) -> PayoffRangeSource<G> {
             PayoffRangeSource::Counts(crate::mechanism::anonymous_payoff_range::<G>)
         }
@@ -432,6 +444,10 @@ pub(crate) mod sealed {
     {
         fn permits_implicit(&self) -> bool {
             self.inner.permits_implicit()
+        }
+
+        fn into_local_runner(self) -> Option<Box<dyn crate::mechanism::KernelRunner<G, X>>> {
+            self.inner.into_local_runner()
         }
 
         fn prepare(

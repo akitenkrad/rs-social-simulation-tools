@@ -4,7 +4,8 @@ use socsim_core::{AgentId, SocsimError};
 
 use crate::{
     AnonymousGame, Credit, EncounterId, EncounterRef, ExperimentState, ImplicitPattern,
-    InternalPlayedActionCounts, OutcomeContext, OutcomeRule, PlayArena, StageGame, Topology,
+    InternalPlayedActionCounts, OutcomeContext, OutcomeRule, PayoffAggregation, PlayArena,
+    StageGame, Topology,
 };
 
 pub(crate) struct PayoffAccum<'a> {
@@ -261,6 +262,208 @@ where
     Ok(())
 }
 
+fn for_each_local_implicit<A, F>(
+    pattern: ImplicitPattern,
+    _topology: &Topology,
+    ids: &[AgentId],
+    held: &[A],
+    index: usize,
+    mut visit: F,
+) -> socsim_core::Result<()>
+where
+    A: Clone,
+    F: FnMut(u32, &[AgentId], Credit, &[A], usize) -> socsim_core::Result<()>,
+{
+    let agent = AgentId(index as u64);
+    let mut actions = Vec::new();
+    let mut emit = |id: u32,
+                    seats: &[AgentId],
+                    credit: Credit,
+                    credited_role: usize|
+     -> socsim_core::Result<()> {
+        actions.clear();
+        for seat in seats {
+            actions.push(
+                held.get(seat.0 as usize)
+                    .cloned()
+                    .ok_or_else(|| SocsimError::Mechanism(format!("unknown agent {}", seat.0)))?,
+            );
+        }
+        visit(id, seats, credit, &actions, credited_role)
+    };
+    match pattern {
+        #[cfg(feature = "grid")]
+        ImplicitPattern::GridCenter { include_self } => {
+            let Topology::Grid(grid) = _topology else {
+                return Err(SocsimError::Mechanism(
+                    "implicit grid matching requires a grid topology".to_owned(),
+                ));
+            };
+            let Some(neighbors) =
+                (index < grid.adjacency().len()).then(|| grid.adjacency().neighbors(index))
+            else {
+                return Err(SocsimError::Mechanism(format!("unknown agent {}", agent.0)));
+            };
+            let preceding = (0..index).try_fold(0_usize, |count, prior| {
+                count
+                    .checked_add(
+                        grid.adjacency().neighbors(prior).len() + usize::from(include_self),
+                    )
+                    .ok_or_else(|| {
+                        SocsimError::Mechanism("encounter count exceeds usize::MAX".to_owned())
+                    })
+            })?;
+            let mut id = u32::try_from(preceding).map_err(|_| {
+                SocsimError::Mechanism("encounter count exceeds u32::MAX".to_owned())
+            })?;
+            for &neighbor in neighbors {
+                emit(id, &[agent, AgentId(neighbor as u64)], Credit::Center, 0)?;
+                id = id.checked_add(1).ok_or_else(|| {
+                    SocsimError::Mechanism("encounter count exceeds u32::MAX".to_owned())
+                })?;
+            }
+            if include_self {
+                emit(id, &[agent, agent], Credit::Center, 0)?;
+            }
+        }
+        #[cfg(not(feature = "grid"))]
+        ImplicitPattern::GridCenter { .. } => {
+            return Err(SocsimError::Mechanism(
+                "implicit grid matching requires the grid feature".to_owned(),
+            ));
+        }
+        #[cfg(feature = "net")]
+        ImplicitPattern::NetworkEdges => {
+            let Topology::Network(network) = _topology else {
+                return Err(SocsimError::Mechanism(
+                    "implicit network matching requires a network topology".to_owned(),
+                ));
+            };
+            for &edge_index in network.incident_edges(agent) {
+                let &(source, target) = network.edges().get(edge_index).ok_or_else(|| {
+                    SocsimError::Mechanism("incident edge index is out of bounds".to_owned())
+                })?;
+                let role = usize::from(target == agent);
+                emit(
+                    u32::try_from(edge_index).map_err(|_| {
+                        SocsimError::Mechanism("encounter count exceeds u32::MAX".to_owned())
+                    })?,
+                    &[source, target],
+                    Credit::All,
+                    role,
+                )?;
+            }
+        }
+        #[cfg(not(feature = "net"))]
+        ImplicitPattern::NetworkEdges => {
+            return Err(SocsimError::Mechanism(
+                "implicit network matching requires the net feature".to_owned(),
+            ));
+        }
+        ImplicitPattern::WholePopulation => {
+            let mut seats = ids.to_vec();
+            seats.sort_unstable();
+            let role = seats
+                .iter()
+                .position(|&seat| seat == agent)
+                .ok_or_else(|| SocsimError::Mechanism(format!("unknown agent {}", agent.0)))?;
+            emit(0, &seats, Credit::All, role)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn aggregate_mean(aggregation: PayoffAggregation, payoff: &mut [f64], n_played: &[u32]) {
+    if aggregation == PayoffAggregation::Mean {
+        for (payoff, &count) in payoff.iter_mut().zip(n_played) {
+            if count != 0 {
+                *payoff /= f64::from(count);
+            }
+        }
+    }
+}
+
+pub(crate) fn local_payoff_pairwise<G, X, O>(
+    pattern: ImplicitPattern,
+    context: &OutcomeContext<'_, G, X>,
+    ids: &[AgentId],
+    outcome: &O,
+    index: usize,
+    aggregation: PayoffAggregation,
+) -> socsim_core::Result<(f64, u32)>
+where
+    G: StageGame,
+    X: ExperimentState,
+    O: OutcomeRule<G, X>,
+{
+    let mut total = 0.0;
+    let mut count = 0_u32;
+    let mut payoffs = Vec::new();
+    for_each_local_implicit(
+        pattern,
+        context.topology(),
+        ids,
+        context.held,
+        index,
+        |id, seats, credit, actions, role| {
+            payoffs.clear();
+            payoffs.resize(seats.len(), 0.0);
+            outcome.outcome(
+                context,
+                EncounterRef {
+                    id: EncounterId(id),
+                    seats,
+                    credit,
+                },
+                actions,
+                &mut payoffs,
+            )?;
+            total += payoffs[role];
+            count = count.checked_add(1).ok_or_else(|| {
+                SocsimError::Mechanism(format!("play count overflowed for agent {index}"))
+            })?;
+            Ok(())
+        },
+    )?;
+    if aggregation == PayoffAggregation::Mean && count != 0 {
+        total /= f64::from(count);
+    }
+    Ok((total, count))
+}
+
+pub(crate) fn local_payoff_counting<G: AnonymousGame>(
+    pattern: ImplicitPattern,
+    game: &G,
+    topology: &Topology,
+    ids: &[AgentId],
+    held: &[usize],
+    index: usize,
+    aggregation: PayoffAggregation,
+) -> socsim_core::Result<(f64, u32)> {
+    let mut total = 0.0;
+    let mut count = 0_u32;
+    let mut scratch = CountingScratch::new(game.n_actions(0));
+    for_each_local_implicit(
+        pattern,
+        topology,
+        ids,
+        held,
+        index,
+        |_id, _seats, _credit, actions, role| {
+            scratch.compute(game, actions)?;
+            total += scratch.payoffs[role];
+            count = count.checked_add(1).ok_or_else(|| {
+                SocsimError::Mechanism(format!("play count overflowed for agent {index}"))
+            })?;
+            Ok(())
+        },
+    )?;
+    if aggregation == PayoffAggregation::Mean && count != 0 {
+        total /= f64::from(count);
+    }
+    Ok((total, count))
+}
+
 pub(crate) fn play_implicit_pairwise<G, X, O>(
     pattern: ImplicitPattern,
     context: &OutcomeContext<'_, G, X>,
@@ -312,4 +515,169 @@ pub(crate) fn play_implicit_counting<G: AnonymousGame>(
             acc.apply(seats, credit, actions, &scratch.payoffs)
         },
     )
+}
+
+#[cfg(all(test, feature = "grid", feature = "net"))]
+mod tests {
+    use rand::Rng;
+    use socsim_core::{AgentId, SimRng};
+    use socsim_net::{DiSocialNetwork, SocialNetwork};
+
+    use super::*;
+    use crate::catalog::PublicGoodsFinite;
+    use crate::{
+        GridBoundary, GridNeighbors, GridSpec, NormalFormOutcome, PayoffAggregation, Topology,
+    };
+
+    fn random_held(n_agents: usize, seed: u64) -> Vec<usize> {
+        let mut rng = SimRng::from_seed(seed);
+        (0..n_agents).map(|_| rng.gen_range(0..2)).collect()
+    }
+
+    fn assert_local_matches_full(
+        game: &PublicGoodsFinite,
+        topology: &Topology,
+        pattern: ImplicitPattern,
+        held: &[usize],
+    ) {
+        let ids: Vec<_> = (0..held.len()).map(|index| AgentId(index as u64)).collect();
+        let x = ();
+        let context = OutcomeContext {
+            t: 1,
+            game,
+            x: &x,
+            held,
+            topology,
+        };
+
+        for aggregation in [PayoffAggregation::Sum, PayoffAggregation::Mean] {
+            let mut pairwise_payoff = vec![0.0; held.len()];
+            let mut pairwise_played = vec![0; held.len()];
+            play_implicit_pairwise(
+                pattern,
+                &context,
+                &ids,
+                &NormalFormOutcome,
+                &mut PayoffAccum::new(&mut pairwise_payoff, &mut pairwise_played, None),
+            )
+            .unwrap();
+            aggregate_mean(aggregation, &mut pairwise_payoff, &pairwise_played);
+
+            let mut counting_payoff = vec![0.0; held.len()];
+            let mut counting_played = vec![0; held.len()];
+            play_implicit_counting(
+                pattern,
+                game,
+                topology,
+                &ids,
+                held,
+                &mut PayoffAccum::new(&mut counting_payoff, &mut counting_played, None),
+            )
+            .unwrap();
+            aggregate_mean(aggregation, &mut counting_payoff, &counting_played);
+
+            for index in 0..held.len() {
+                assert_eq!(
+                    local_payoff_pairwise(
+                        pattern,
+                        &context,
+                        &ids,
+                        &NormalFormOutcome,
+                        index,
+                        aggregation,
+                    )
+                    .unwrap(),
+                    (pairwise_payoff[index], pairwise_played[index]),
+                    "pairwise agent {index}, aggregation {aggregation:?}"
+                );
+                assert_eq!(
+                    local_payoff_counting(pattern, game, topology, &ids, held, index, aggregation,)
+                        .unwrap(),
+                    (counting_payoff[index], counting_played[index]),
+                    "counting agent {index}, aggregation {aggregation:?}"
+                );
+            }
+        }
+    }
+
+    fn assert_grid(boundary: GridBoundary, neighborhood: GridNeighbors, include_self: bool) {
+        let rows = 4;
+        let cols = 5;
+        let topology = Topology::grid(GridSpec {
+            rows,
+            cols,
+            boundary,
+            neighborhood,
+        })
+        .unwrap();
+        let held = random_held(rows * cols, 17);
+        assert_local_matches_full(
+            &PublicGoodsFinite::new(2, 1.7, 0.9).unwrap(),
+            &topology,
+            ImplicitPattern::GridCenter { include_self },
+            &held,
+        );
+    }
+
+    #[test]
+    fn local_payoff_matches_full_for_fixed_moore_grid_with_self_play() {
+        assert_grid(GridBoundary::Fixed, GridNeighbors::Moore, true);
+    }
+
+    #[test]
+    fn local_payoff_matches_full_for_toroidal_moore_grid_with_self_play() {
+        assert_grid(GridBoundary::Toroidal, GridNeighbors::Moore, true);
+    }
+
+    #[test]
+    fn local_payoff_matches_full_for_von_neumann_grid_without_self_play() {
+        assert_grid(GridBoundary::Fixed, GridNeighbors::VonNeumann, false);
+    }
+
+    #[test]
+    fn local_payoff_matches_full_for_undirected_network() {
+        let n_agents = 7;
+        let mut network = SocialNetwork::empty();
+        for index in 0..n_agents {
+            network.add_node(AgentId(index as u64));
+        }
+        for (source, target) in [(4, 1), (0, 4), (6, 2), (1, 3), (5, 0), (2, 5)] {
+            network.add_edge(AgentId(source), AgentId(target));
+        }
+        assert_local_matches_full(
+            &PublicGoodsFinite::new(2, 1.7, 0.9).unwrap(),
+            &Topology::network(network),
+            ImplicitPattern::NetworkEdges,
+            &random_held(n_agents, 23),
+        );
+    }
+
+    #[test]
+    fn local_payoff_matches_full_for_directed_network_including_incoming_arcs() {
+        let n_agents = 7;
+        let mut network = DiSocialNetwork::empty();
+        for index in 0..n_agents {
+            network.add_node(AgentId(index as u64));
+        }
+        for (source, target) in [(4, 1), (0, 4), (6, 2), (1, 3), (5, 0), (2, 0)] {
+            network.add_edge(AgentId(source), AgentId(target));
+        }
+        assert_local_matches_full(
+            &PublicGoodsFinite::new(2, 1.7, 0.9).unwrap(),
+            &Topology::directed_network(network),
+            ImplicitPattern::NetworkEdges,
+            &random_held(n_agents, 29),
+        );
+    }
+
+    #[test]
+    fn local_payoff_matches_full_for_whole_population() {
+        let n_agents = 8;
+        assert_local_matches_full(
+            &PublicGoodsFinite::new(n_agents, 3.0, 1.0).unwrap(),
+            &Topology::None,
+            ImplicitPattern::WholePopulation,
+            &random_held(n_agents, 31),
+        );
+    }
 }
