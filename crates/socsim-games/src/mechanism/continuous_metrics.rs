@@ -91,6 +91,14 @@ impl Default for ContinuousMetricsOptions {
 /// `action_sd.r<r>-<d>`. A column whose value is undefined in a step (for
 /// example because no seat was played) is omitted from that step's row.
 ///
+/// The per-role columns are intended for games whose action dimensions differ
+/// by role. A world for such a game cannot currently be constructed through
+/// the supported construction paths (`build_world`, `assemble*`, or
+/// scenarios), because initial and fallback actions must be valid for every
+/// role. The per-role columns are therefore not recorded through those paths.
+/// Worlds that bypass the checks through deserialization or
+/// `Simulation::restore` are unsupported.
+///
 /// The columns are the same on the materialized and the implicit play path
 /// (see [`PlayOptions::materialize`](crate::PlayOptions::materialize)).
 #[derive(Clone, Debug)]
@@ -221,6 +229,13 @@ impl<G: ContinuousGame> ContinuousMetrics<G> {
     /// other segment is literal. Braces never share a segment with literal
     /// text, so the patterns can be copied unchanged into the
     /// `[[metric_patterns]]` of a runvault `runvault.toml`.
+    ///
+    /// The per-role patterns describe columns for games whose action
+    /// dimensions differ by role. A world for such a game cannot currently be
+    /// constructed through the supported construction paths (`build_world`,
+    /// `assemble*`, or scenarios), so the columns are not recorded there.
+    /// Worlds that bypass the initial- and fallback-action checks through
+    /// deserialization or `Simulation::restore` are unsupported.
     pub fn describe(&self) -> Vec<(String, String)> {
         let (mean, sd) = if self.pooled {
             (

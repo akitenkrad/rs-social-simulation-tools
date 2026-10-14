@@ -54,6 +54,14 @@ form
 It writes no shares, `coop_rate`, `regret`, `action_entropy` or
 `population_share`.
 
+The per-role columns are not recorded today. A continuous game whose roles have
+different numbers of components cannot be built into a world: `build_world`
+checks every initial action against every role, and assembly checks every
+fallback action against every role. The per-role columns therefore appear only
+in `describe()`. A world that bypasses these checks, for example one obtained by
+deserializing a `GameWorld` or loaded with `Simulation::restore`, is not
+supported.
+
 ## 2. Theory & source
 
 With $S_t$ the seats of step $t$, $a_s$ the action in seat $s$ and $r(s)$ its

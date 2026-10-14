@@ -221,6 +221,11 @@ path = "tests/determinism_continuous.rs"
 required-features = ["core", "engine"]
 
 [[test]]
+name = "continuous_role_dimensions"
+path = "tests/continuous_role_dimensions.rs"
+required-features = ["core", "engine"]
+
+[[test]]
 name = "snapshot_resume_continuous"
 path = "tests/snapshot_resume_continuous.rs"
 required-features = ["core", "engine"]

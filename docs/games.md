@@ -2883,7 +2883,8 @@ therefore copy them unchanged into its `runvault.toml`: a pattern with a `{…}`
 segment is a `[[metric_patterns]]` entry, a plain name a `[metrics."<name>"]`
 entry. `ContinuousMetrics::describe()` follows the same rule, so its per-role
 columns `game.mean_action.r<r>-<d>` are described as
-`game.mean_action.{role_component}`. The
+`game.mean_action.{role_component}` (no world that can be assembled today
+records them; see [Metrics: `ContinuousMetrics`](#metrics-continuousmetrics)). The
 example program in [Action ids](#action-ids-metric_action_ids) prints exactly
 that:
 
@@ -3940,6 +3941,14 @@ column is left out of the row and a non-finite value stops the step. The
 shares, `coop_rate`, `regret`, `action_entropy` and `population_share` of
 `GameMetrics` have no continuous counterpart.
 
+**Per-role columns are not recorded today.** A continuous game whose roles have
+different numbers of components cannot be built into a world: `build_world`
+checks every initial action against every role, and assembly checks every
+fallback action against every role. The per-role columns therefore appear only
+in `describe()`. A world that bypasses these checks, for example one obtained by
+deserializing a `GameWorld` or loaded with `Simulation::restore`, is not
+supported.
+
 **The convergence stop is per agent.** After each step `game_metrics` builds
 one vector by concatenating, in `AgentId` order, the action each agent played
 in the step; an agent that did not play keeps its previous value (its held
@@ -4079,7 +4088,12 @@ if you store snapshots with another serializer.
   `best_response` or a `BestResponseOracle`.
 - Games whose roles have different numbers of components work with the
   solvers, but cannot be built into a world yet: `build_world` checks every
-  initial action against every role.
+  initial action against every role, and assembly checks every fallback action
+  against every role. The per-role columns `game.mean_action.r<r>-<d>` and
+  `game.action_sd.r<r>-<d>` of `ContinuousMetrics` are therefore not recorded
+  today. A world that bypasses these checks, for example one obtained by
+  deserializing a `GameWorld` or loaded with `Simulation::restore`, is not
+  supported.
 - `NumberParser` handles one-dimensional actions only.
 - `replicator_update` is finite only, and `moran_update` rejects
   `Fitness::Linear` for continuous games.

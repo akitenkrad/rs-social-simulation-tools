@@ -2447,7 +2447,7 @@ feature のもとでは既定で有効で（`MetricsOptions::action_entropy(fals
 パターンでは，`.` で区切った 1 つの区切り全体を `{…}` と書いたものが列名の区切りちょうど 1 つに当たります．`{…}` と文字が 1 つの区切りに混ざることはありません．
 そのため [runvault](https://github.com/akitenkrad/rs-runvault) で実行を記録するリポジトリは，これをそのまま `runvault.toml` に写せます．
 `{…}` の区切りを含むパターンは `[[metric_patterns]]` に，そのままの名前は `[metrics."<name>"]` に書きます．
-`ContinuousMetrics::describe()` も同じ規則に従うので，役割ごとの列 `game.mean_action.r<r>-<d>` は `game.mean_action.{role_component}` と説明されます．
+`ContinuousMetrics::describe()` も同じ規則に従うので，役割ごとの列 `game.mean_action.r<r>-<d>` は `game.mean_action.{role_component}` と説明されます（今組み立てられる World ではこの列は記録されません．[指標：`ContinuousMetrics`](#指標continuousmetrics) を参照）．
 [行動 ID](#行動-idmetric_action_ids) の例のプログラムがちょうどそれを出力します．
 
 ```toml
@@ -3303,6 +3303,8 @@ let metrics = ContinuousMetrics::new(           // before `game` moves into buil
 有限ゲームと同じく，値の定まらない列は行に含めず，有限でない値はステップを止めます．
 `GameMetrics` の割合，`coop_rate`，`regret`，`action_entropy`，`population_share` に当たる連続の列はありません．
 
+**役割ごとの列は今は記録されません．** 役割によって成分の数が違う連続ゲームは World に組めないからです．`build_world` はすべての初期行動を，組み立てはすべての fallback の行動を，すべての役割について検査します．そのため役割ごとの列は `describe()` にだけ現れます．これらの検査を通らずに作った World（たとえば `GameWorld` を逆直列化したものや，`Simulation::restore` で読み込んだもの）には対応していません．
+
 **収束による停止はエージェントごとです．** `game_metrics` は毎ステップ，各エージェントがそのステップで出した行動を `AgentId` 順につないだベクトルを作ります．対戦しなかったエージェントは前の値を保ちます（最初のステップでは保持行動）．
 前のステップからどの成分も `tol` 以上変わっていなければカウンタを 1 増やし，そうでなければ 0 に戻します．`window` に達したら，その行を記録してから停止を要求します．
 割合で判定する有限ゲームの停止と違い，平均行動が落ち着いていても個々のエージェントが動いている集団は止まり**ません**．
@@ -3408,7 +3410,7 @@ snapshot を別の直列化で保存する場合も，この性質を保って�
 ### 現時点の制限
 
 - 数値の最適応答は，`NumericBr::Unimodal1D` を宣言した 1 次元の行動だけを扱います．多次元のゲームには解析的な `best_response` か `BestResponseOracle` が要ります．
-- 役割によって成分の数が違うゲームはソルバーでは扱えますが，まだ World に組めません．`build_world` がすべての初期行動をすべての役割について検査するからです．
+- 役割によって成分の数が違うゲームはソルバーでは扱えますが，まだ World に組めません．`build_world` がすべての初期行動を，組み立てがすべての fallback の行動を，すべての役割について検査するからです．そのため `ContinuousMetrics` の役割ごとの列 `game.mean_action.r<r>-<d>`，`game.action_sd.r<r>-<d>` は今は記録されません．これらの検査を通らずに作った World（たとえば `GameWorld` を逆直列化したものや，`Simulation::restore` で読み込んだもの）には対応していません．
 - `NumberParser` は 1 次元の行動だけを扱います．
 - `replicator_update` は有限ゲームだけで，`moran_update` は連続ゲームでは `Fitness::Linear` を拒否します．
 

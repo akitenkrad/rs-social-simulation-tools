@@ -533,6 +533,12 @@ where
 {
 }
 
+/// Builds a game world with decision-rule kinds taken from `rules`.
+///
+/// Every initial held action must pass [`StageGame::check_action`] for every
+/// role, including actions held by agents assigned a decision rule. Therefore,
+/// this function cannot build a world for a continuous game whose action
+/// dimensions differ by role.
 #[allow(clippy::too_many_arguments)]
 pub fn build_world<G, X>(
     game: G,
@@ -562,6 +568,12 @@ where
     )
 }
 
+/// Builds a game world with decision-rule kinds taken from `catalog`.
+///
+/// Every initial held action must pass [`StageGame::check_action`] for every
+/// role, including actions held by agents assigned a decision rule. Therefore,
+/// this function cannot build a world for a continuous game whose action
+/// dimensions differ by role.
 #[allow(clippy::too_many_arguments)]
 pub fn build_world_with<G, X>(
     game: G,

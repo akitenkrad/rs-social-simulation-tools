@@ -449,6 +449,8 @@ impl ContinuousGame for Mixed1And2 {
 fn roles_with_different_dimensions_are_reported_per_role() {
     let game = Mixed1And2;
     let metrics = ContinuousMetrics::new(&game, ContinuousMetricsOptions::new()).unwrap();
+    // That supported construction paths cannot reach these columns is covered
+    // by the regression tests in `continuous_role_dimensions.rs`.
     let names: Vec<_> = metrics
         .describe()
         .into_iter()
@@ -481,11 +483,10 @@ fn describe_patterns_cover_the_per_role_column_names() {
         ])),
     )
     .unwrap();
-    // `build_world` checks every held action against every role, so a world
-    // whose roles differ in dimension cannot be assembled and these columns
-    // cannot be recorded here. The names are the per-role form the mechanism
-    // writes, `mean_action.r<r>-<d>` and `action_sd.r<r>-<d>` in the `game`
-    // table, for role 0 with one component and role 1 with two.
+    // That supported construction paths cannot reach these columns is covered
+    // by the regression tests in `continuous_role_dimensions.rs`. The names
+    // below are the per-role form for role 0 with one component and role 1 with
+    // two.
     let names = [
         "game.mean_action.r0-0",
         "game.mean_action.r1-0",
