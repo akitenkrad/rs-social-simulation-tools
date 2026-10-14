@@ -68,7 +68,7 @@ fn random_regular(n_agents: usize, degree: usize, seed: u64) -> socsim_net::Soci
             .collect();
         stubs.shuffle(&mut rng);
         let mut edges = std::collections::BTreeSet::new();
-        let simple = stubs.chunks_exact(2).all(|pair| {
+        let simple = stubs.as_chunks::<2>().0.iter().all(|pair| {
             let (a, b) = (pair[0].min(pair[1]), pair[0].max(pair[1]));
             a != b && edges.insert((a, b))
         });
@@ -80,7 +80,7 @@ fn random_regular(n_agents: usize, degree: usize, seed: u64) -> socsim_net::Soci
             network.add_node(AgentId(agent as u64));
         }
         // Insert edges in pairing order, not sorted order.
-        for pair in stubs.chunks_exact(2) {
+        for pair in stubs.as_chunks::<2>().0 {
             network.add_edge(AgentId(pair[0] as u64), AgentId(pair[1] as u64));
         }
         return network;

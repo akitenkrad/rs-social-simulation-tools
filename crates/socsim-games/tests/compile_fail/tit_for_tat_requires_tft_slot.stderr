@@ -11,14 +11,11 @@ help: the trait `Slot<TftState>` is not implemented for `StateWithoutTftSlot`
    |
  5 | struct StateWithoutTftSlot;
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^
-help: the following other types implement trait `Slot<T>`
+help: the trait `Slot<TftState>` is implemented for `BuiltinPolicyState`
   --> src/world/state.rs
    |
-   | impl Slot<Stateless> for BuiltinPolicyState {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `BuiltinPolicyState` implements `Slot<socsim_games::Stateless>`
-...
    | impl Slot<TftState> for BuiltinPolicyState {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `BuiltinPolicyState` implements `Slot<TftState>`
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = note: required for `socsim_games::TitForTat` to implement `DecisionRule<MatrixGame, ExperimentWithoutTftSlot>`
 note: required by a bound in `require_rule`
   --> tests/compile_fail/tit_for_tat_requires_tft_slot.rs:16:20

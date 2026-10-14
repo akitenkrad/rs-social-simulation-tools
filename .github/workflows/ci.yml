@@ -38,7 +38,7 @@ jobs:
       # Pin the toolchain: the trybuild compile-fail tests compare rustc's
       # diagnostics verbatim, and those change between releases. Raise this
       # together with the local toolchain and the blessed `.stderr` files.
-      - uses: dtolnay/rust-toolchain@1.94.0
+      - uses: dtolnay/rust-toolchain@1.99.0
 
       - uses: Swatinem/rust-cache@v2
 

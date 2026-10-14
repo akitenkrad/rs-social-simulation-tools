@@ -496,9 +496,7 @@ fn support_pair_count(rows: usize, columns: usize) -> u128 {
             .unwrap_or(u128::MAX)
     }
 
-    support_count(rows)
-        .checked_mul(support_count(columns))
-        .map_or(u128::MAX, |count| count)
+    support_count(rows).saturating_mul(support_count(columns))
 }
 
 #[cfg(test)]

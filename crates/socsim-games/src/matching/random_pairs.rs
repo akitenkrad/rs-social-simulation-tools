@@ -53,7 +53,7 @@ impl<G: StageGame, X: ExperimentState> Matching<G, X> for RandomPairs {
     ) -> socsim_core::Result<()> {
         let mut ids = ctx.ids().to_vec();
         ids.shuffle(rng);
-        for pair in ids.chunks_exact(2) {
+        for pair in ids.as_chunks::<2>().0 {
             out.push(pair, Credit::All)?;
         }
         Ok(())

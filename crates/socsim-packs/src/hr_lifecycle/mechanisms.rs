@@ -587,7 +587,7 @@ impl Mechanism<HrWorld> for SocializationMechanism {
         &[Phase::PostStep]
     }
     fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, HrWorld>) -> Result<()> {
-        let new_hires: Vec<_> = ctx.world.new_hires_this_step.drain(..).collect();
+        let new_hires = std::mem::take(&mut ctx.world.new_hires_this_step);
 
         for id in new_hires {
             if let Some(emp) = ctx.world.employees.get_mut(&id) {
