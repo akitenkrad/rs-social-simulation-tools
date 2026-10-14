@@ -10,9 +10,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use rand::Rng;
-use socsim_core::{
-    AgentId, Mechanism, Phase, Result, SimClock, SimRng, StepContext, WorldState,
-};
+use socsim_core::{AgentId, Mechanism, Phase, Result, SimClock, SimRng, StepContext, WorldState};
 use socsim_engine::{SequentialScheduler, Simulation, SimulationBuilder};
 use socsim_marl::{
     ActionApplier, DiscretePolicyNet, MarlTrainer, NetConfig, ObsEncoder, PolicyMechanism,
@@ -121,7 +119,10 @@ fn build_env(
         .seed(seed)
         .add_mechanism(Box::new(ContextMechanism))
         .add_mechanism(Box::new(PolicyMechanism::collecting(
-            policy, SignEncoder, SignApplier, buffer,
+            policy,
+            SignEncoder,
+            SignApplier,
+            buffer,
         )))
         .build()
 }
@@ -138,11 +139,7 @@ fn train_run(seed: u64) -> Vec<socsim_marl::EpisodeStat> {
     let net = Rc::new(RefCell::new(DiscretePolicyNet::new(cfg, &mut rng).unwrap()));
     let mut trainer = MarlTrainer::new(net);
     trainer
-        .train(
-            &TrainConfig { episodes: 80, seed },
-            build_env,
-            &SignReward,
-        )
+        .train(&TrainConfig { episodes: 80, seed }, build_env, &SignReward)
         .unwrap()
 }
 

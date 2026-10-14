@@ -79,9 +79,11 @@ impl<B: Backend> PolicyModel<B> {
 /// (zero bias).  burn's `Linear` stores its weight as `[d_in, d_out]`.
 fn init_linear(d_in: usize, d_out: usize, rng: &mut SimRng, device: &Dev) -> Linear<Be> {
     let bound = (6.0 / (d_in + d_out) as f64).sqrt() as f32;
-    let w: Vec<f32> = (0..d_in * d_out).map(|_| rng.gen_range(-bound..bound)).collect();
-    let weight = Tensor::<Be, 1>::from_data(TensorData::from(w.as_slice()), device)
-        .reshape([d_in, d_out]);
+    let w: Vec<f32> = (0..d_in * d_out)
+        .map(|_| rng.gen_range(-bound..bound))
+        .collect();
+    let weight =
+        Tensor::<Be, 1>::from_data(TensorData::from(w.as_slice()), device).reshape([d_in, d_out]);
     let bias = Tensor::<Be, 1>::zeros([d_out], device);
     Linear {
         weight: Param::from_tensor(weight),
@@ -167,15 +169,16 @@ impl DiscretePolicyNet {
         let device = &self.device;
         let obs_t = Tensor::<Be, 1>::from_data(TensorData::from(obs_flat.as_slice()), device)
             .reshape([n, self.cfg.obs_dim]);
-        let actions_t = Tensor::<Be, 1, Int>::from_data(TensorData::from(actions.as_slice()), device)
-            .reshape([n, 1]);
+        let actions_t =
+            Tensor::<Be, 1, Int>::from_data(TensorData::from(actions.as_slice()), device)
+                .reshape([n, 1]);
         let adv_t = Tensor::<Be, 1>::from_data(TensorData::from(adv.as_slice()), device);
 
         // Take ownership of the model so the optimiser can return an updated one.
         let model = self.model.take().expect("model present");
         let logits = model.forward(obs_t); // (n, A)
         let log_probs = activation::log_softmax(logits, 1); // (n, A)
-        // log π(a_t | s_t): gather the chosen action's log-prob per row → (n,).
+                                                            // log π(a_t | s_t): gather the chosen action's log-prob per row → (n,).
         let chosen = log_probs.gather(1, actions_t).reshape([n]);
         // Policy-gradient loss: −E[ log π(a|s) · A ].
         let loss = (chosen * adv_t).mean().neg();

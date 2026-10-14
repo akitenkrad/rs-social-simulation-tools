@@ -54,9 +54,7 @@ impl TrajectoryBuffer {
     /// decisions are discarded.
     pub fn take_episode(&mut self) -> Vec<Vec<Transition>> {
         self.pending.clear();
-        std::mem::take(&mut self.episodes)
-            .into_values()
-            .collect()
+        std::mem::take(&mut self.episodes).into_values().collect()
     }
 
     /// Forget all pending and completed state.

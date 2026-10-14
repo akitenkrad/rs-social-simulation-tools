@@ -386,9 +386,7 @@ impl NeighborsIter {
                     }
                     let in_shape = match nbhd {
                         Neighborhood::Moore => true,
-                        Neighborhood::VonNeumann => {
-                            dr.unsigned_abs() + dc.unsigned_abs() <= 1
-                        }
+                        Neighborhood::VonNeumann => dr.unsigned_abs() + dc.unsigned_abs() <= 1,
                     };
                     if !in_shape {
                         continue;
@@ -921,9 +919,7 @@ mod tests {
         let g = Grid::new(5, 5, Boundary::Toroidal);
         for nbhd in [Neighborhood::Moore, Neighborhood::VonNeumann] {
             assert!(!g.neighbors(2, 2, nbhd).contains(&(2, 2)));
-            assert!(!g
-                .neighbors_radius(1, 1, nbhd, 3)
-                .contains(&(1, 1)));
+            assert!(!g.neighbors_radius(1, 1, nbhd, 3).contains(&(1, 1)));
         }
     }
 
@@ -1147,10 +1143,7 @@ mod tests {
         idx.place(AgentId(5), 2, 1).unwrap();
         // Remaining vacant: (0,0),(0,2),(2,0),(2,2) — all distance 2.
         // Deterministic tie-break by row-major order → (0, 0).
-        assert_eq!(
-            idx.nearest_vacant((1, 1), Metric::Manhattan),
-            Some((0, 0))
-        );
+        assert_eq!(idx.nearest_vacant((1, 1), Metric::Manhattan), Some((0, 0)));
     }
 
     #[test]
@@ -1216,7 +1209,14 @@ mod tests {
                 let mut buf = Vec::new();
                 for &(r, c) in &cells {
                     g.neighbors_into(r, c, nbhd, &mut buf);
-                    assert_eq!(buf, g.neighbors(r, c, nbhd), "cell {:?} {:?} {:?}", (r, c), boundary, nbhd);
+                    assert_eq!(
+                        buf,
+                        g.neighbors(r, c, nbhd),
+                        "cell {:?} {:?} {:?}",
+                        (r, c),
+                        boundary,
+                        nbhd
+                    );
                 }
             }
         }
@@ -1241,7 +1241,14 @@ mod tests {
             for nbhd in [Neighborhood::Moore, Neighborhood::VonNeumann] {
                 for &(r, c) in &cells {
                     let got: Vec<(usize, usize)> = g.neighbors_iter(r, c, nbhd).collect();
-                    assert_eq!(got, g.neighbors(r, c, nbhd), "cell {:?} {:?} {:?}", (r, c), boundary, nbhd);
+                    assert_eq!(
+                        got,
+                        g.neighbors(r, c, nbhd),
+                        "cell {:?} {:?} {:?}",
+                        (r, c),
+                        boundary,
+                        nbhd
+                    );
                 }
             }
         }

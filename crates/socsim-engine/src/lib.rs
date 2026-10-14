@@ -412,9 +412,7 @@ impl<W: WorldState> SimulationBuilder<W> {
                 .scheduler
                 .unwrap_or_else(|| Box::new(SequentialScheduler)),
             rng: SimRng::from_seed(self.seed),
-            recorder: self
-                .recorder
-                .unwrap_or_else(|| Box::new(NullRecorder)),
+            recorder: self.recorder.unwrap_or_else(|| Box::new(NullRecorder)),
             scratch: Blackboard::new(),
             stop_requested: false,
         }

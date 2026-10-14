@@ -39,8 +39,13 @@ jobs:
       # diagnostics verbatim, and those change between releases. Raise this
       # together with the local toolchain and the blessed `.stderr` files.
       - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
 
       - name: Test
         # `shell: bash` runs with `-o pipefail` (the default shell does not),
