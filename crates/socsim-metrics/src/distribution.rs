@@ -21,7 +21,7 @@ const KL_EPSILON: f64 = 1e-12;
 /// Both inputs are treated as unnormalized weights (counts or shares) and are
 /// **normalized internally** to probability distributions summing to `1`
 /// (negative weights are ignored, treated as `0`).  To avoid `log(0)` and
-/// division-by-zero, a small epsilon ([`KL_EPSILON`] = `1e-12`) is added to
+/// division-by-zero, a small epsilon (`KL_EPSILON` = `1e-12`) is added to
 /// every probability *after* normalization and the smoothed `q` is
 /// renormalized; the smoothing is negligible for well-populated bins and only
 /// matters when a class has zero mass under `p` or `q`.

@@ -83,7 +83,7 @@ impl VoiceDecisionLlmMechanism {
 
     /// Construct from an already-wired [`LiveClient`].  Intended for tests:
     /// build a [`socsim_llm::mock::ScriptedClient`], wrap it with
-    /// [`wrap_client`], and pass it in.
+    /// [`socsim_llm::wrap_client`], and pass it in.
     pub fn from_client(client: LiveClient, cfg: LlmConfig) -> Self {
         Self {
             client,

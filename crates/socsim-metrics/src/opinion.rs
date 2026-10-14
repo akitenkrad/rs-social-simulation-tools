@@ -1,14 +1,12 @@
 //! Opinion-world metric adapters (feature `core`).
 //!
-//! Bridges the [`stats`](crate::stats) primitives to any world that exposes the
+//! Bridges the [`stats`] primitives to any world that exposes the
 //! [`ScalarOpinions`] capability, plus a generic [`MetricsMechanism`] that
 //! records named extractors every `PostStep`.  Everything here is read-only:
 //! the helpers borrow `&W`, and the mechanism only writes to the
 //! [`Recorder`](socsim_core::Recorder).
 
-use socsim_core::{
-    AgentId, Mechanism, Phase, Result, ScalarOpinions, StepContext, WorldState,
-};
+use socsim_core::{AgentId, Mechanism, Phase, Result, ScalarOpinions, StepContext, WorldState};
 
 use crate::stats;
 

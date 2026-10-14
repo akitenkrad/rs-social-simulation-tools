@@ -1,8 +1,8 @@
 //! Group-dynamics mechanisms.
 //!
 //! This module ships the **group-conformity** family, operating over any world
-//! implementing [`GroupMembership`](socsim_core::GroupMembership) +
-//! [`ScalarOpinions`](socsim_core::ScalarOpinions):
+//! implementing [`GroupMembership`] +
+//! [`ScalarOpinions`]:
 //!
 //! - [`GroupConformityMechanism`] — a *synchronous* DeGroot-style update where
 //!   every agent moves a fraction α of the way toward the **mean opinion of its
@@ -265,7 +265,10 @@ mod tests {
         // Opinions converge toward the mean: spread shrinks toward zero.
         let spread1 = spread_within(&world.opinions, &group, 0);
         assert!(spread1 < spread0, "spread did not shrink");
-        assert!(spread1 < 1e-6, "expected within-group consensus, spread = {spread1}");
+        assert!(
+            spread1 < 1e-6,
+            "expected within-group consensus, spread = {spread1}"
+        );
         assert!(world.opinions.iter().all(|&x| (x - mean0).abs() < 1e-6));
     }
 

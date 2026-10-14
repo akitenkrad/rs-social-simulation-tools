@@ -13,8 +13,8 @@
 //! model.  Metrics therefore have **no calibration impact** — swapping a
 //! model's hand-rolled `variance` for [`stats::variance`] cannot change its
 //! trajectory, only how that trajectory is *summarised*.  The one mechanism
-//! type exposed here, [`MetricsMechanism`](opinion::MetricsMechanism), runs in
-//! the `PostStep` phase and only *records* via the [`Recorder`] — it never
+//! type exposed here, `MetricsMechanism`, runs in
+//! the `PostStep` phase and only *records* via the `Recorder` — it never
 //! touches the world.
 //!
 //! # Feature tiers
@@ -25,14 +25,13 @@
 //! | Feature   | Module                       | Pulls in       | What you get |
 //! |-----------|------------------------------|----------------|--------------|
 //! | *(none)*  | [`stats`], [`distribution`], [`agreement`] | nothing | pure numeric primitives over `&[f64]` / `&[u32]`, KL divergence & chi-square homogeneity, ordinal distribution-matching (Wasserstein/NEMD/MD/SDD), and contingency-table agreement (tetrachoric, κ, ICC, Cramér's V, prop-test) |
-//! | `core`    | [`opinion`]   | `socsim-core`  | capability-trait extractors + `MetricsMechanism<W>` |
-//! | `network` | [`network`]   | + `socsim-net` | degree / clustering / component / cascade metrics |
-//! | `spatial` | [`spatial`]   | + `socsim-grid`| Schelling-style segregation metrics |
+//! | `core`    | `opinion`   | `socsim-core`  | capability-trait extractors + `MetricsMechanism<W>` |
+//! | `network` | `network`   | + `socsim-net` | degree / clustering / component / cascade metrics |
+//! | `spatial` | `spatial`   | + `socsim-grid`| Schelling-style segregation metrics |
 //!
 //! `network` and `spatial` both imply `core`.  Building with **no features**
 //! compiles only [`stats`], which has **zero dependencies**.
 //!
-//! [`Recorder`]: socsim_core::Recorder
 
 pub mod agreement;
 pub mod distribution;

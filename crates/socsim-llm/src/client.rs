@@ -407,8 +407,8 @@ pub trait LlmClient {
     /// that cannot expose log-probabilities (e.g. the in-memory test clients,
     /// or a cloud model that does not return them) reports it rather than
     /// silently producing a logprob-free response.  Backends that support it
-    /// (e.g. [`OllamaClient`](crate::OllamaClient),
-    /// [`OpenAiClient`](crate::OpenAiClient)) override this.
+    /// (e.g. `OllamaClient`,
+    /// `OpenAiClient`) override this.
     ///
     /// The number of alternatives requested is `config.top_logprobs`, falling
     /// back to a sane default (20) when unset.

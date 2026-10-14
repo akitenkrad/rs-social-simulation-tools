@@ -13,7 +13,7 @@
 //! The two external-crate dependencies used there (`statrs` for the standard
 //! normal and chi-square distributions) are replaced with the self-contained
 //! [`std_normal_cdf`] / [`std_normal_inverse_cdf`] helpers below and the
-//! [`chi_square_sf`](crate::distribution::chi_square_sf) already in this crate.
+//! [`chi_square_sf`] already in this crate.
 //!
 //! 2×2 cells are always passed row-major from the top-left as
 //! `(n00, n01, n10, n11)` where `n00 = (row 0, col 0)`, etc.

@@ -5,13 +5,13 @@
 //! scenario, this crate
 //! provides reusable *building blocks* that operate over any world implementing
 //! the capability traits from `socsim-core`
-//! ([`ScalarOpinions`](socsim_core::ScalarOpinions),
+//! ([`ScalarOpinions`],
 //! [`BinaryState`](socsim_core::BinaryState),
 //! [`CultureVectors`](socsim_core::CultureVectors), each paired with
 //! [`Neighbors`](socsim_core::Neighbors); the per-agent threshold path additionally
 //! reads [`ActivationThreshold`](socsim_core::ActivationThreshold); and
 //! [`GroupMembership`](socsim_core::GroupMembership) paired with
-//! [`ScalarOpinions`](socsim_core::ScalarOpinions)).
+//! [`ScalarOpinions`]).
 //!
 //! The catalog is split into four Cargo **feature families** (all on by
 //! default): `opinion-dynamics`, `contagion`, `cultural` and `group-dynamics`.

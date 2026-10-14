@@ -2,8 +2,8 @@
 //!
 //! This module ships the **bounded-confidence** family and two **polarising**
 //! variants, all operating over any world implementing
-//! [`ScalarOpinions`](socsim_core::ScalarOpinions) +
-//! [`Neighbors`](socsim_core::Neighbors):
+//! [`ScalarOpinions`] +
+//! [`Neighbors`]:
 //!
 //! - [`HegselmannKrauseMechanism`] — Hegselmann–Krause (2002, generalised
 //!   2005): a *synchronous* update where every agent moves to the (chosen) mean
@@ -45,7 +45,7 @@ pub const ATTITUDE_MAX: f64 = crate::updates::ATTITUDE_MAX;
 ///    signed gap `x_j − x_i` falls in the per-side window `[−ε_l, ε_r]` (the
 ///    confidence set `I(i)`);
 /// 3. aggregates them with the configured [`MeanOperator`] via
-///    [`apply_mean`](crate::means::apply_mean);
+///    [`apply_mean`];
 /// 4. batch-writes the new opinions.
 ///
 /// Because every new opinion is computed from the *same* start-of-step

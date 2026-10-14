@@ -97,7 +97,10 @@ pub fn cascade_size<F>(net: &SocialNetwork, is_active: F) -> usize
 where
     F: Fn(AgentId) -> bool,
 {
-    node_ids(net).into_iter().filter(|&id| is_active(id)).count()
+    node_ids(net)
+        .into_iter()
+        .filter(|&id| is_active(id))
+        .count()
 }
 
 /// Fraction of all nodes that are **reachable from any active seed** via BFS,

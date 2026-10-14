@@ -25,8 +25,8 @@
 //! | Feature | Pulls in | Enables |
 //! |---|---|---|
 //! | (default) | nothing | [`LlmClient`] trait, [`PromptCache`], [`CachingClient`], metadata, in-memory test clients |
-//! | `ollama` | `ureq` | [`OllamaClient`] (`/api/chat`) |
-//! | `openai` | `ureq` | [`OpenAiClient`] (`/v1/chat/completions`) |
+//! | `ollama` | `ureq` | `OllamaClient` (`/api/chat`) |
+//! | `openai` | `ureq` | `OpenAiClient` (`/v1/chat/completions`) |
 //! | `live`   | both | [`FallbackClient`] over the two live backends |
 //!
 //! # Example (network-free)

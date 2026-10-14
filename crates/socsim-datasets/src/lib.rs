@@ -12,7 +12,7 @@
 //!   / [`Source`] records — DOI, source URL, citation, license, and the list of
 //!   files (with their `sha256` / `expect_rows` for verification) for each
 //!   dataset.
-//! - **Acquisition** ([`acquire`], behind the optional `acquire` feature):
+//! - **Acquisition** (`acquire`, behind the optional `acquire` feature):
 //!   download from source URLs, atomic-write into a local cache, verify
 //!   `sha256` + row counts, and a Rust port of the pipe-delimited raw -> CSV
 //!   converter.

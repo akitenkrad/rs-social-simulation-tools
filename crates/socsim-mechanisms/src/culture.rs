@@ -1,8 +1,8 @@
 //! Axelrod (1997) cultural-dissemination mechanism.
 //!
 //! Operates over any world implementing
-//! [`CultureVectors`](socsim_core::CultureVectors) +
-//! [`Neighbors`](socsim_core::Neighbors).  Each agent holds an `F`-feature
+//! [`CultureVectors`] +
+//! [`Neighbors`].  Each agent holds an `F`-feature
 //! categorical culture vector; interaction makes culturally similar neighbours
 //! converge while leaving dissimilar ones apart, producing stable cultural
 //! regions.

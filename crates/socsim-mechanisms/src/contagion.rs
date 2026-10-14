@@ -1,8 +1,8 @@
 //! Network-contagion mechanisms (binary state diffusion).
 //!
 //! Both mechanisms operate over any world implementing
-//! [`BinaryState`](socsim_core::BinaryState) +
-//! [`Neighbors`](socsim_core::Neighbors), advancing a binary
+//! [`BinaryState`] +
+//! [`Neighbors`], advancing a binary
 //! active/informed/infected flag along the topology in **synchronous rounds**:
 //! the active set is snapshotted at the start of the step, every inactive agent
 //! is evaluated against that snapshot, and newly-activated agents are batch
@@ -15,7 +15,7 @@
 //!   neighbours reaches θ.
 //! - [`PerAgentThresholdContagionMechanism`] — the Granovetter (1978)
 //!   **heterogeneous**-threshold variant: each agent uses its *own* θ_i, read
-//!   from the world's [`ActivationThreshold`](socsim_core::ActivationThreshold)
+//!   from the world's [`ActivationThreshold`]
 //!   capability, instead of a shared global θ.
 //!
 //! All call [`StepContext::request_stop`] on **saturation** (a round in which
