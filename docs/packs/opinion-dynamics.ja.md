@@ -126,7 +126,7 @@ metrics  = ["clusters", "variance", "spread", "mean"]
 別のモデルを研究するには，Interaction メカニズムを差し替えます — たとえば `hegselmann_krause` ブロックを `deffuant`（`mu`，`pairs_per_step` を追加），`social_judgement`（`alpha`，`rejection`，`repulsion`），または `lorenz` ブロックに置き換えます．合意→分裂の遷移を探るには，ε をスイープします．
 
 ```sh
-socsim sweep scenarios/op.toml --axis hegselmann_krause.epsilon=0.05..0.4:8 --seeds 0..20
+socsim sweep scenarios/op.toml --param hegselmann_krause.epsilon=0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40 --seeds 0..20
 ```
 
 ### ライブラリ

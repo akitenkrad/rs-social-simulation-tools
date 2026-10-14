@@ -162,7 +162,7 @@ To study a different model, swap the Interaction mechanism — e.g. replace the
 explore the consensus→fragmentation transition, sweep ε:
 
 ```sh
-socsim sweep scenarios/op.toml --axis hegselmann_krause.epsilon=0.05..0.4:8 --seeds 0..20
+socsim sweep scenarios/op.toml --param hegselmann_krause.epsilon=0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40 --seeds 0..20
 ```
 
 ### Library
