@@ -434,6 +434,10 @@ impl<G: StageGame, X: ExperimentState, M, P, D> GameSimFactory<G, X, M, P, D> {
     /// [`assemble_with`](crate::assemble_with). A factory holds at most one
     /// metrics mechanism; when more are needed, add them with
     /// `into_builder(seed)?.add_mechanism(..)`.
+    ///
+    /// The payoff timing in `options` is set by the factory: `AfterUpdate`
+    /// after [`async_dynamics`](Self::async_dynamics) and `BeforeUpdate`
+    /// otherwise, so the column descriptions match how the factory updates.
     pub fn metrics(mut self, options: MetricsOptions) -> Self
     where
         G: FiniteGame,
@@ -454,6 +458,10 @@ impl<G: StageGame, X: ExperimentState, M, P, D> GameSimFactory<G, X, M, P, D> {
     /// The metrics are constructed for the game at every build and run after
     /// `game_play`. A factory holds at most one metrics mechanism; when more
     /// are needed, add them with `into_builder(seed)?.add_mechanism(..)`.
+    ///
+    /// The payoff timing in `options` is set by the factory: `AfterUpdate`
+    /// after [`async_dynamics`](Self::async_dynamics) and `BeforeUpdate`
+    /// otherwise, so the column descriptions match how the factory updates.
     pub fn continuous_metrics(mut self, options: ContinuousMetricsOptions) -> Self
     where
         G: ContinuousGame,

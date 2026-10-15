@@ -823,6 +823,23 @@ fn payoff_bounded_dynamics_reject_user_defined_outcome_rules_and_scan_counting_p
 }
 
 #[test]
+fn moran_rejects_asynchronous_update_without_pointing_to_assemble_async() {
+    let moran = socsim_games::MoranUpdate::new(
+        socsim_games::Fitness::Exponential { w: 1.0 },
+        0.0,
+        socsim_games::Update::Asynchronous,
+    )
+    .unwrap();
+    match assemble_hawk_dove(moran, PlayOptions::new()) {
+        Err(GameError::Population(message)) => assert_eq!(
+            message,
+            "moran_update supports only Update::Synchronous; it has no asynchronous form"
+        ),
+        other => panic!("expected a population error, got {:?}", other.err()),
+    }
+}
+
+#[test]
 fn linear_moran_fitness_must_be_positive_at_the_lowest_attainable_payoff() {
     let update = socsim_games::Update::Synchronous;
     let moran = |w| {

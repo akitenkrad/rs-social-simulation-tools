@@ -1164,7 +1164,12 @@ mod build {
         X: ExperimentState,
     {
         fn prepare(&self, check: &DynamicsCheck<'_, G, X>) -> Result<(), GameError> {
-            require_synchronous(self.update, "moran_update")?;
+            if self.update == Update::Asynchronous {
+                return Err(GameError::Population(
+                    "moran_update supports only Update::Synchronous; it has no asynchronous form"
+                        .to_owned(),
+                ));
+            }
             check_held_only(check.world, "moran_update")?;
             <G::Action as ActionSpace<G>>::check_common_space(&check.world.game)?;
             if !matches!(check.world.topology, Topology::None) {
