@@ -48,8 +48,8 @@ pub mod factory;
 
 #[cfg(feature = "engine")]
 pub use assemble::{
-    assemble, assemble_with, assemble_with_aggregates, counting_play, Counting, NoDynamics,
-    Pairwise, PlayPath, PopulationDynamics, WithAggregates,
+    assemble, assemble_async, assemble_with, assemble_with_aggregates, counting_play, Counting,
+    NoDynamics, Pairwise, PlayPath, PopulationDynamics, WithAggregates,
 };
 #[cfg(feature = "core")]
 pub use assemble::{
@@ -76,6 +76,8 @@ pub use matching::{
     EncounterBounds, FixedPlayers, ImplicitPattern, MatchContext, Matching, MatchingState,
     RandomGroups, RandomPairs, RoundRobin, WholePopulation,
 };
+#[cfg(feature = "engine")]
+pub use mechanism::{AsyncActivation, AsyncPopulationStep};
 #[cfg(feature = "core")]
 pub use mechanism::{
     ContinuousEquilibrium, ContinuousMetrics, ContinuousMetricsOptions, EquilibriumTarget,

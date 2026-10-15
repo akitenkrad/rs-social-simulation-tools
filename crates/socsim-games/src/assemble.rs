@@ -373,6 +373,9 @@ pub(crate) mod sealed {
 
     pub trait PlayBuild<G: StageGame, X: ExperimentState>: Send + Sync + Sized + 'static {
         fn permits_implicit(&self) -> bool;
+        fn supports_local_payoff(&self) -> bool {
+            false
+        }
         fn into_local_runner(self) -> Option<Box<dyn crate::mechanism::KernelRunner<G, X>>> {
             None
         }
@@ -393,6 +396,10 @@ pub(crate) mod sealed {
         O: OutcomeRule<G, X> + 'static,
     {
         fn permits_implicit(&self) -> bool {
+            TypeId::of::<O>() == TypeId::of::<crate::NormalFormOutcome>()
+        }
+
+        fn supports_local_payoff(&self) -> bool {
             TypeId::of::<O>() == TypeId::of::<crate::NormalFormOutcome>()
         }
 
@@ -423,6 +430,10 @@ pub(crate) mod sealed {
             true
         }
 
+        fn supports_local_payoff(&self) -> bool {
+            true
+        }
+
         fn into_runner(self) -> Box<dyn crate::mechanism::KernelRunner<G, X>> {
             crate::mechanism::counting_runner()
         }
@@ -444,6 +455,10 @@ pub(crate) mod sealed {
     {
         fn permits_implicit(&self) -> bool {
             self.inner.permits_implicit()
+        }
+
+        fn supports_local_payoff(&self) -> bool {
+            self.inner.supports_local_payoff()
         }
 
         fn into_local_runner(self) -> Option<Box<dyn crate::mechanism::KernelRunner<G, X>>> {
@@ -808,6 +823,47 @@ where
     assemble_internal(world, matching, rules, play, dynamics, opts, seed)
 }
 
+/// Assembles an in-place asynchronous population simulation.
+///
+/// The returned builder contains only the `async_population_step` mechanism;
+/// it does not register matching, decision, or ordinary play mechanisms.
+/// Callers may add a scheduler, recorder, and observation mechanisms before
+/// building. The engine is seeded with `derive_seed(seed, &[1])`.
+///
+/// Assembly requires every agent to be held, an implicit grid, network, or
+/// whole-population matching, per-step decisions, a non-materialized normal
+/// form or counting play path with local-payoff support, and an asynchronous
+/// copying dynamic whose ordinary population checks pass.
+#[cfg(feature = "engine")]
+#[allow(private_bounds)]
+#[allow(clippy::too_many_arguments)]
+pub fn assemble_async<G, X, M, P, D>(
+    world: GameWorld<G, X>,
+    matching: M,
+    play: P,
+    step: crate::AsyncPopulationStep<D>,
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+) -> Result<socsim_engine::SimulationBuilder<GameWorld<G, X>>, GameError>
+where
+    G: crate::NormalFormGame,
+    G::Action: crate::mechanism::ActionSpace<G>,
+    X: ExperimentState,
+    M: Matching<G, X> + 'static,
+    P: PlayPath<G, X>,
+    D: crate::mechanism::AsyncDynamics<G, X>,
+{
+    let parts = assemble_async_parts(world, matching, play, step, opts, seed)?;
+    Ok(parts
+        .mechanisms
+        .into_iter()
+        .fold(
+            socsim_engine::SimulationBuilder::new(parts.world),
+            |builder, mechanism| builder.add_mechanism(mechanism),
+        )
+        .seed(parts.engine_seed))
+}
+
 #[cfg(feature = "engine")]
 #[allow(clippy::too_many_arguments)]
 fn assemble_internal<G, X, M, P, D>(
@@ -849,6 +905,118 @@ pub(crate) struct AssembledParts<G: StageGame, X: ExperimentState> {
     pub(crate) mechanisms: Vec<Box<dyn socsim_core::Mechanism<GameWorld<G, X>>>>,
     /// The engine seed, `derive_seed(seed, &[1])`.
     pub(crate) engine_seed: u64,
+}
+
+/// Validates and builds the parts of an asynchronous population simulation.
+#[cfg(feature = "engine")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn assemble_async_parts<G, X, M, P, D>(
+    mut world: GameWorld<G, X>,
+    matching: M,
+    play: P,
+    step: crate::AsyncPopulationStep<D>,
+    opts: PlayOptions<G::Action>,
+    seed: u64,
+) -> Result<AssembledParts<G, X>, GameError>
+where
+    G: crate::NormalFormGame,
+    G::Action: crate::mechanism::ActionSpace<G>,
+    X: ExperimentState,
+    M: Matching<G, X> + 'static,
+    P: PlayPath<G, X>,
+    D: crate::mechanism::AsyncDynamics<G, X>,
+{
+    if !matching.supports_roles(world.game.n_roles()) {
+        return Err(GameError::UnsupportedRoles {
+            n_roles: world.game.n_roles(),
+        });
+    }
+    crate::mechanism::check_held_only(&world, "async_population_step")?;
+    let implicit = matching.implicit().ok_or_else(|| {
+        GameError::Population(
+            "async_population_step requires a matching with an implicit pattern (grid neighborhood, network edges or whole population); matchings that change partners every step are not supported".to_owned(),
+        )
+    })?;
+    if opts.decision_scope != DecisionScope::PerStep {
+        return Err(GameError::Population(
+            "async_population_step requires DecisionScope::PerStep".to_owned(),
+        ));
+    }
+    if opts.materialize {
+        return Err(GameError::Population(
+            "async_population_step does not materialize encounters; PlayOptions::materialize(true) is not supported".to_owned(),
+        ));
+    }
+    if opts.report_mixed {
+        return Err(GameError::Population(
+            "async_population_step does not support report_mixed".to_owned(),
+        ));
+    }
+    if !sealed::PlayBuild::permits_implicit(&play) {
+        return Err(GameError::Population(
+            "async_population_step requires the NormalFormOutcome or counting play path".to_owned(),
+        ));
+    }
+    if !sealed::PlayBuild::supports_local_payoff(&play) {
+        return Err(GameError::Population(
+            "async_population_step requires the NormalFormOutcome or counting play path".to_owned(),
+        ));
+    }
+    if matches!(opts.on_invalid_action, OnInvalidAction::Fallback(_)) {
+        return Err(GameError::Population(
+            "async_population_step does not use on_invalid_action; fallback is not supported"
+                .to_owned(),
+        ));
+    }
+
+    let context = MatchContext {
+        t: world.clock.t(),
+        decision_scope: opts.decision_scope,
+        ids: &world.ids,
+        game: &world.game,
+        topology: &world.topology,
+        held: &world.held,
+        history: &world.step_history,
+        x: &world.x,
+    };
+    matching.check(&context)?;
+    let encounter_bounds = matching.encounter_bounds(&context);
+    world.matching_state = matching.init_state(&context);
+    let payoff_source = sealed::PlayBuild::payoff_source(&play);
+    crate::mechanism::AsyncDynamics::prepare(
+        &step.dynamics,
+        &sealed::DynamicsCheck {
+            world: &world,
+            encounter_bounds,
+            aggregation: opts.aggregation,
+            payoff_source,
+        },
+    )?;
+    let aggregate = sealed::PlayBuild::prepare(&play, &mut world)?;
+    let runner = sealed::PlayBuild::into_local_runner(play).ok_or_else(|| {
+        GameError::Population(
+            "async_population_step requires the NormalFormOutcome or counting play path".to_owned(),
+        )
+    })?;
+    let n_agents = world.ids.len();
+    let activation = step.activation_mode();
+    let log_updates = step.updates_logged();
+    let kernel = crate::mechanism::AsyncDynamics::into_kernel(step.dynamics);
+    let mechanism = crate::mechanism::AsyncPopulationMechanism::new(
+        kernel,
+        runner,
+        implicit,
+        opts.aggregation,
+        aggregate,
+        activation,
+        log_updates,
+        n_agents,
+    );
+    Ok(AssembledParts {
+        world,
+        mechanisms: vec![Box::new(mechanism)],
+        engine_seed: derive_seed(seed, &[1]),
+    })
 }
 
 /// Validates the configuration and builds the parts of a game simulation.

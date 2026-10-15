@@ -201,6 +201,11 @@ path = "tests/sync_symmetry.rs"
 required-features = ["core", "engine", "metrics", "net", "grid"]
 
 [[test]]
+name = "async_population"
+path = "tests/async_population.rs"
+required-features = ["core", "engine", "metrics", "net", "grid"]
+
+[[test]]
 name = "moran_fixation"
 path = "tests/moran_fixation.rs"
 required-features = ["core", "engine"]

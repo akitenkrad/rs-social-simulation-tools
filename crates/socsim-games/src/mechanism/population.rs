@@ -82,6 +82,10 @@ impl ImitateBest {
     pub fn update(&self) -> Update {
         self.update
     }
+
+    pub(crate) fn tie_policy(&self) -> ImitationTie {
+        self.tie_break
+    }
 }
 
 /// Pairwise-comparison dynamic with the Fermi function.
@@ -308,6 +312,9 @@ pub(crate) mod sealed {
 
         /// Orders actions for deterministic tie-breaking.
         fn tie_cmp(left: &Self, right: &Self) -> Ordering;
+
+        /// Converts an action to the stable event payload representation.
+        fn event_value(action: &Self) -> serde_json::Value;
     }
 
     impl<G: FiniteGame> ActionSpace<G> for usize {
@@ -342,6 +349,10 @@ pub(crate) mod sealed {
 
         fn tie_cmp(left: &Self, right: &Self) -> Ordering {
             left.cmp(right)
+        }
+
+        fn event_value(action: &Self) -> serde_json::Value {
+            serde_json::json!(action)
         }
     }
 
@@ -413,6 +424,10 @@ pub(crate) mod sealed {
                 }
             }
             left.len().cmp(&right.len())
+        }
+
+        fn event_value(action: &Self) -> serde_json::Value {
+            serde_json::json!(action)
         }
     }
 }
@@ -702,7 +717,7 @@ fn fermi_probability(z: f64) -> f64 {
     }
 }
 
-fn check_payoffs(payoffs: &[f64], name: &str) -> socsim_core::Result<()> {
+pub(crate) fn check_payoffs(payoffs: &[f64], name: &str) -> socsim_core::Result<()> {
     if let Some(index) = payoffs.iter().position(|payoff| !payoff.is_finite()) {
         return Err(SocsimError::Mechanism(format!(
             "{name} found a non-finite payoff for agent {index}"
@@ -730,6 +745,15 @@ pub(crate) trait CopyKernel<G: StageGame>: Send + Sync + 'static {
 pub(crate) struct ImitateBestKernel<G> {
     tie_break: ImitationTie,
     marker: PhantomData<fn() -> G>,
+}
+
+impl<G> ImitateBestKernel<G> {
+    pub(crate) fn new(tie_break: ImitationTie) -> Self {
+        Self {
+            tie_break,
+            marker: PhantomData,
+        }
+    }
 }
 
 impl<G> CopyKernel<G> for ImitateBestKernel<G>
@@ -781,6 +805,12 @@ pub(crate) struct FermiKernel {
     k: f64,
 }
 
+impl FermiKernel {
+    pub(crate) fn new(k: f64) -> Self {
+        Self { k }
+    }
+}
+
 impl<G: NormalFormGame> CopyKernel<G> for FermiKernel {
     fn name(&self) -> &'static str {
         "fermi_update"
@@ -804,6 +834,12 @@ impl<G: NormalFormGame> CopyKernel<G> for FermiKernel {
 
 pub(crate) struct ProportionalKernel {
     beta: f64,
+}
+
+impl ProportionalKernel {
+    pub(crate) fn new(beta: f64) -> Self {
+        Self { beta }
+    }
 }
 
 impl<G: StageGame> CopyKernel<G> for ProportionalKernel {
