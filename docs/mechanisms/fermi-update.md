@@ -97,7 +97,7 @@ describes the step just played (see
 | Parameter | Default | Kind | Notes |
 |---|---|---|---|
 | `k: f64` | — (required) | tunable | The noise $K$. Must be finite and `> 0`, else `FermiUpdate::new` returns `GameError::Population`. No upper bound. |
-| `update: Update` | — (required) | structural | `Update::Synchronous`, the only schedule; it has no default. |
+| `update: Update` | — (required) | structural | `Update::Synchronous` here; it has no default so that adding schedules cannot change an existing configuration. `Update::Asynchronous` is rejected by `assemble_with` and is used only through `assemble_async`, which runs this rule as [`async_population_step`](async-population-step.md). |
 
 ## 8. How to apply
 

@@ -34,8 +34,8 @@ from a scenario file by `GameTrialFactory` (see [Scenario files](#scenario-files
 | Feature | Adds | socsim dependencies |
 |---|---|---|
 | *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`, `ContinuousGame`, `AggregateGame`, `AnonymousGame`, `CommonActionSpace`, `DescribeGame`), `MatrixGame`, the built-in games (`catalog`, and `continuous` for continuous actions), mixed strategies (`mixed`), the solvers (`solve`, including `pure_nash_counts`, the replicator dynamics, `ess_verdict` and the continuous `best_response_iteration`), the learning-rule cores (`learn`), `AggregateSpec`, the metric action ids (`metric_action_ids`), and `FiniteSpec` / `ContinuousSpec` (the built-in games chosen at run time, used by scenarios) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
-| `core` | the world (`GameWorld`, `Topology`), rules (including the learning rules and the continuous rules `DampedBestResponse` / `GradientAscent`), outcome rules, the matchings (`FixedPlayers`, `RoundRobin`, `RandomPairs`, `RandomGroups`, `WholePopulation`), views, `build_world` (with `InitialActions::Shares`), `uniform_initial_actions`, the configuration types of the population dynamics (`ImitateBest`, `FermiUpdate`, `ProportionalImitation`, `MoranUpdate`), the metrics mechanism `GameMetrics` and its continuous form `ContinuousMetrics` | `socsim-core` |
-| `engine` | `assemble`, `assemble_with_aggregates` and `assemble_with` (all return a `SimulationBuilder`), the play paths (`Pairwise`, `counting_play()`) and the population-dynamics mechanisms; implies `core` | `socsim-core`, `socsim-engine` |
+| `core` | the world (`GameWorld`, `Topology`), rules (including the learning rules and the continuous rules `DampedBestResponse` / `GradientAscent`), outcome rules, the matchings (`FixedPlayers`, `RoundRobin`, `RandomPairs`, `RandomGroups`, `WholePopulation`), views, `build_world` (with `InitialActions::Shares`), `uniform_initial_actions`, the configuration types of the population dynamics (`ImitateBest`, `FermiUpdate`, `ProportionalImitation`, `MoranUpdate`, `Update`), the metrics mechanism `GameMetrics` and its continuous form `ContinuousMetrics` (with `PayoffTiming`) | `socsim-core` |
+| `engine` | `assemble`, `assemble_with_aggregates`, `assemble_with` and `assemble_async` (all return a `SimulationBuilder`), the play paths (`Pairwise`, `counting_play()`), the population-dynamics mechanisms, and `AsyncPopulationStep` / `AsyncActivation`; implies `core` | `socsim-core`, `socsim-engine` |
 | `net` | `Topology::network` / `Topology::directed_network` and the matching `NetworkEdges` (see [Topology](#topology-gameworldwith_topology)); implies `core` | `socsim-core`, `socsim-net` |
 | `grid` | `Topology::grid` (`GridSpec`) and the matching `GridNeighborhood`; implies `core` | `socsim-core`, `socsim-grid` |
 | `metrics` | the `game.action_entropy` column of `GameMetrics` (see [Metrics](#metrics)); implies `core` | `socsim-core`, `socsim-metrics` (default features off — only its dependency-free `stats` module) |
@@ -1864,7 +1864,9 @@ imitation of better-paid agents or by reproduction in proportion to fitness.
 `socsim-games` models this with **held** agents (agents without a decision
 rule, `AssignKind::Held`) and one **population dynamic**: a mechanism that, in
 Reward, rewrites the held actions from the payoffs the step has just produced.
-Pass it as the `dynamics` argument of `assemble_with`.
+Pass it as the `dynamics` argument of `assemble_with`. For an update in which
+the agents change their actions one at a time, build the simulation with
+`assemble_async` instead (see [Asynchronous update](#asynchronous-update)).
 
 A well-mixed hawk–dove population: 1 000 agents are paired at random every step
 and update by proportional imitation. Starting from 30 % hawks, the hawk share
@@ -1978,17 +1980,249 @@ An agent without neighbours keeps its action and draws nothing.
 
 ### Synchronous update
 
-Every constructor takes the update schedule as a required argument; the only
-schedule is `Update::Synchronous`, and it has no default value, so that adding
-further schedules can never change the meaning of an existing configuration.
+Every constructor takes the update schedule as a required argument,
+`Update::Synchronous` or `Update::Asynchronous`. It has no default value, so
+that adding further schedules can never change the meaning of an existing
+configuration. `assemble_with` accepts only `Synchronous` and rejects a dynamic
+constructed with `Asynchronous`:
+
+```text
+invalid population dynamics: fermi_update with Update::Asynchronous must be assembled with assemble_async
+```
+
 Under `Synchronous` every agent's next action is computed from the **same
 pre-update state** into a buffer, and all actions are written together at the
 end of the step: no agent sees another agent's new action within the step.
 Applied in place, one agent after the other, the same rule would make the
 result depend on the order of the agents and would break the symmetry of a
-symmetric lattice configuration. `moran_update` writes exactly one held action
-per step, after both the parent and the dying agent have been drawn from the
-pre-update state.
+symmetric lattice configuration; that is a different model, the
+[asynchronous update](#asynchronous-update) below. `moran_update` writes exactly
+one held action per step, after both the parent and the dying agent have been
+drawn from the pre-update state.
+
+### Asynchronous update
+
+Huberman & Glance (1993) showed that the cooperative clusters of Nowak & May's
+spatial prisoner's dilemma depend on every cell updating at the same instant:
+when the cells update one at a time, in random order, a single defector can
+take over the whole lattice. `assemble_async` builds this model. It takes no
+`RuleBook` (every agent is held) and no separate dynamic; an
+`AsyncPopulationStep` wraps one of the three copying dynamics, constructed with
+`Update::Asynchronous`:
+
+```rust
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::{
+    assemble_async, build_world, AssignGroup, AssignKind, Assignment, AsyncActivation,
+    AsyncPopulationStep, FermiUpdate, GameMetrics, GridBoundary, GridNeighborhood, GridNeighbors,
+    GridSpec, InitialActions, MetricsOptions, NormalFormOutcome, Pairwise, PayoffTiming,
+    PlayOptions, RuleBook, Topology, Update,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    let side = 50;
+    let n = side * side;
+    let seed = 5;
+    let game = PrisonersDilemma::weak(1.3).unwrap();
+    let metrics = GameMetrics::new(
+        &game,
+        MetricsOptions::new()
+            .population_share(true)
+            .payoff_timing(PayoffTiming::AfterUpdate), // describe() says "after every update"
+    )
+    .unwrap();
+
+    let rules = RuleBook::new(); // no rules: every agent is Held
+    let held = Assignment::Ordered(vec![AssignGroup { kind: AssignKind::Held, count: n }]);
+    let initial = InitialActions::Shares(vec![(0, 0.5), (1, 0.5)]); // half C, half D
+    let world = build_world(game, n, (), initial, &rules, &held, 1, 100, seed)
+        .unwrap()
+        .with_topology(
+            Topology::grid(GridSpec {
+                rows: side,
+                cols: side,
+                boundary: GridBoundary::Toroidal,
+                neighborhood: GridNeighbors::Moore,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+    let mut sim = assemble_async(
+        world,
+        GridNeighborhood::new().include_self(true), // an implicit pattern
+        Pairwise::new(NormalFormOutcome),
+        AsyncPopulationStep::new(FermiUpdate::new(0.1, Update::Asynchronous).unwrap())
+            .activation(AsyncActivation::UniformWithReplacement), // N draws with replacement
+        PlayOptions::new(),
+        seed,
+    )
+    .unwrap()
+    .add_mechanism(Box::new(metrics))
+    .recorder(Box::new(InMemoryRecorder::new()))
+    .build();
+    sim.run().unwrap();
+
+    let recorder = sim.recorder().as_any().unwrap().downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| {
+        [1, 10, 100].contains(&row.t)
+            && (row.key == "game.played_share.a0" || row.key == "game.population_share.a0")
+    }) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+}
+```
+
+```text
+t=1 game.played_share.a0 = 0.4008
+t=1 game.population_share.a0 = 0.4008
+t=10 game.played_share.a0 = 0.2756
+t=10 game.population_share.a0 = 0.2756
+t=100 game.played_share.a0 = 0.3848
+t=100 game.population_share.a0 = 0.3848
+```
+
+The two columns are equal at every step here, unlike in the synchronous
+hawk–dove example above (see [What `PostStep` sees](#what-poststep-sees)).
+
+**One activation at a time.** `assemble_async` registers a single mechanism,
+[`async_population_step`](mechanisms/async-population-step.md), in place of
+`game_match`, `game_decide`, `game_play` and the dynamic. In PreStep it clears
+the step's play state as `game_match` does (empty play arena, zero payoffs and
+play counts). In Reward it activates agents one at a time, and for each
+activated agent $i$ it
+
+1. recomputes from the current `held` the payoffs the rule will read — those of
+   $i$ and its topology neighbours, or of every agent under `WholePopulation` —
+   in the mechanism's own scratch space, not in the world;
+2. applies the rule of `imitate_best`, `fermi_update` or `replicator_update` to
+   $i$ and writes $i$'s new action to `held` immediately, so the next activated
+   agent already plays against it;
+3. with `log_updates(true)`, records the event `game.async_update` if $i$'s
+   action changed.
+
+After the last activation it evaluates the whole step once more from the final
+`held` and writes the payoffs, play counts, step history and aggregate row,
+through the same code as `game_play`'s
+[implicit path](#evaluating-without-materialising-encounters); `world.plays()`
+stays empty. The local payoffs are summed in the same order as that path, so
+the rule sees, bit for bit, the payoffs a full recomputation would give.
+
+**Activation order: `AsyncActivation`.**
+
+| Variant | Activations per step | Who is activated | Randomness |
+|---|---|---|---|
+| `AgentOrder` (default) | $N$ | every agent once, in the scheduler's order (`StepContext::agent_order`): ascending `AgentId` under the sequential scheduler, a new random permutation every step under `RandomActivationScheduler` | the scheduler's permutation |
+| `UniformWithReplacement` | $N$ | for each activation one agent drawn uniformly from all $N$, so an agent can be drawn twice or not at all | one `gen_range(0..N)` before each activation |
+
+Huberman & Glance update with replacement — at each micro-step one randomly
+chosen agent updates, and a generation of $N$ micro-steps holds on average one
+update per agent — so reproduce them with `UniformWithReplacement`.
+`UniformWithReplacement` ignores the scheduler's order; keep the sequential
+scheduler (the default), since `RandomActivationScheduler` would draw a
+permutation that is never used. `AgentOrder` under the sequential scheduler is
+a deterministic sweep in index order, which by itself breaks the symmetry of a
+symmetric lattice.
+
+**What the records mean.** Under `Synchronous` the step's payoffs,
+`played_share`, `coop_rate` and step history describe the actions played
+**before** the update. Under `async_population_step` they describe play
+recomputed from the actions held **after every update of the step**. The values
+come from the same code, but they mean different things, and `game_metrics`
+cannot tell which assembly it is observing. Say it with
+`MetricsOptions::payoff_timing(PayoffTiming::AfterUpdate)` (for a continuous
+game, `ContinuousMetricsOptions::payoff_timing`): it changes only the meanings
+that `describe()` returns for `game.played_share.{action}`,
+`game.mean_payoff`, `game.payoff_sd` and `game.coop_rate` (continuous:
+`game.mean_action.*`, `game.action_sd.*`, `game.mean_payoff`,
+`game.payoff_sd`), never a recorded value. The default is
+`PayoffTiming::BeforeUpdate`; `assemble_async` does not change it, while
+[`GameSimFactory::async_dynamics`](#type-state) sets `AfterUpdate` for you.
+`game.population_share.a<k>` means the same in both: the actions held at the
+end of the step.
+
+**What it accepts.** `assemble_async` checks, in this order, and fails at the
+first violation:
+
+| Condition | Error |
+|---|---|
+| the matching supports the game's role count | `GameError::UnsupportedRoles` |
+| every agent is held | `async_population_step applies only to held agents, but an active rule is assigned` |
+| the matching has an implicit pattern (`GridNeighborhood`, `NetworkEdges`, `WholePopulation`) | `async_population_step requires a matching with an implicit pattern (grid neighborhood, network edges or whole population); matchings that change partners every step are not supported` |
+| `DecisionScope::PerStep` | `async_population_step requires DecisionScope::PerStep` |
+| `materialize(false)` | `async_population_step does not materialize encounters; PlayOptions::materialize(true) is not supported` |
+| `report_mixed(false)` | `async_population_step does not support report_mixed` |
+| the play path is `Pairwise::new(NormalFormOutcome)` or `counting_play()`, with or without aggregates | `async_population_step requires the NormalFormOutcome or counting play path` |
+| `OnInvalidAction::Stop` | `async_population_step does not use on_invalid_action; fallback is not supported` |
+| the matching's own check (for example `GridNeighborhood` needs a grid) | the matching's error, unchanged |
+| the dynamic was constructed with `Update::Asynchronous` | `assemble_async requires Update::Asynchronous, got Synchronous` |
+| the dynamic's [assembly conditions](#conditions-checked-at-assembly): common action space, the topology of `imitate_best`, the bound on $\beta$ | the same messages as under `assemble_with` |
+
+Every message except the matching's is a `GameError::Population` and displays
+with the prefix `invalid population dynamics: `. `MoranUpdate` does not fit
+`AsyncPopulationStep` (`assemble_async` with it does not compile): a Moran step
+is one birth–death event drawn from everyone's fitness and has no "new action
+of the activated agent". Matchings that change partners every step
+(`RandomPairs`, `RandomGroups`) are not supported, because the payoffs a rule
+reads would have to be redefined for partners that change within the step.
+`ImitateBest` and `FermiUpdate` also accept a continuous game. The asynchronous
+update is library-only: scenario files and the `normal-form` pack accept only
+`update = "synchronous"`.
+
+`assemble_async` returns a `SimulationBuilder` seeded with
+`derive_seed(seed, &[1])`; add the scheduler, the recorder and `game_metrics`
+yourself, as with `assemble_with`. With `log_updates(true)` each changed action
+is recorded as the event `game.async_update` with the payload
+`{"agent": <AgentId>, "order": <activation index in the step, from 0>, "from": <action>, "to": <action>}`
+(a finite action as its index, a continuous one as an array of numbers).
+
+**Example: `huberman_glance`.** The program
+`crates/socsim-games/examples/huberman_glance.rs` runs Huberman & Glance's
+Fig. 1: a 99 × 99 lattice with fixed boundaries, Moore neighbours and
+self-play, `PrisonersDilemma::weak(1.85)`, a single defector in the centre,
+`ImitateBest` with `KeepOwn`. It prints the cooperator share
+(`game.population_share.a0`) after each generation as CSV, with `--update
+async` (`UniformWithReplacement`, the default) or `--update sync`
+(`assemble_with`, the Nowak–May control):
+
+```sh
+cargo run -q -p socsim-games --features core,engine,grid --example huberman_glance -- --update async --steps 217 --seed 1
+```
+
+```text
+generation,cooperator_share
+1,0.9969390878481788
+2,0.987756351392715
+3,0.9732680338740944
+...
+118,0.0008162432404856647
+119,0.00010203040506070809
+120,0
+...
+217,0
+```
+
+```sh
+cargo run -q -p socsim-games --features core,engine,grid --example huberman_glance -- --update sync --steps 217 --seed 1
+```
+
+```text
+generation,cooperator_share
+1,0.9990817263544536
+2,0.9974492398734823
+3,0.995816753392511
+...
+216,0.37751249872461995
+217,0.39995918783797574
+```
+
+Asynchronously, every agent defects from generation 120 on (seed 1); with
+seeds 0 to 4 all defection is reached at generations 119, 120, 79, 129 and
+134. Synchronously, the defectors spread in a symmetric pattern and 3 920
+cooperators remain at generation 217. **This result is limited to $b > 1.8$.**
+At or below $b = 1.8$, cooperation persists even under the asynchronous update;
+$b = 1.85$ lies in the interval $1.8 < b < 2$ of Nowak & May's spatial chaos.
 
 ### What `PostStep` sees
 
@@ -2008,6 +2242,16 @@ the update) and in denominator (seats and agents): an agent seated in nine
 encounters counts nine times in `played_share` and once in `population_share`,
 and an agent seated in none counts only in `population_share`. See
 [Columns](#columns).
+
+After `async_population_step` there is a single time: `payoffs()`,
+`n_played()`, the step history and `held()` all describe the actions held after
+every update of the step, and `plays()` is empty. `played_share` and
+`population_share` are then counted from the same actions and differ only in
+their denominators — seats and agents. Where every agent holds the same number
+of seats (`WholePopulation`, a torus, a regular network) the two columns are
+equal, as in the example of [Asynchronous update](#asynchronous-update); on a
+lattice with fixed boundaries the border agents hold fewer seats and the two
+differ slightly. Do not read the difference as an effect of the update.
 
 ### Conditions checked at assembly
 
@@ -2339,6 +2583,7 @@ before the game moves into `build_world` — and returns
 | `stop(tol, window)` | off | requests the end of the run once the action shares stop changing; `tol` finite and `> 0`, `window ≥ 1`, else `GameError::Metrics` |
 | `action_entropy(on)` | on | feature `metrics` only: adds or removes `game.action_entropy` |
 | `population_share(on)` | off | adds `game.population_share.a<k>`; every role must have the same number of actions, else `GameError::Metrics` |
+| `payoff_timing(PayoffTiming)` | `BeforeUpdate` | changes only the meanings returned by `describe()`; `AfterUpdate` says that the played shares, payoffs and cooperation rate come from the actions held after every update of the step (see [Asynchronous update](#asynchronous-update)) |
 
 A two-agent prisoner's dilemma, Tit-for-Tat against an unconditional defector:
 
@@ -2910,6 +3155,13 @@ pattern = "game.aggregate.{name}"
 meaning = "Public game aggregate for the completed step; present only when the simulation was assembled with aggregates."
 ```
 
+With `MetricsOptions::payoff_timing(PayoffTiming::AfterUpdate)` the patterns
+stay the same and the meanings of `game.played_share.{action}`,
+`game.mean_payoff`, `game.payoff_sd` and `game.coop_rate` say that they come
+from "the actions held after every update of the step (asynchronous update)";
+use it for a simulation built by `assemble_async` (see
+[Asynchronous update](#asynchronous-update)).
+
 Add `unit`, `direction` and the pattern's `axes` by hand if you want them. The
 crate itself does not depend on runvault.
 
@@ -2953,6 +3205,15 @@ when no mutation happens. `DampedBestResponse` and `GradientAscent` draw
 nothing. `RandomPairs` and `RandomGroups` draw one shuffle
 per step in Decision; the other built-in matchings draw nothing. The dynamics
 keep no state outside the world, so a snapshot resumes them exactly.
+
+`async_population_step` draws from the same engine stream in Reward, one
+activation after the other. Under `AsyncActivation::UniformWithReplacement`
+each activation first draws the agent (`gen_range(0..N)`) and then the rule's
+values (as above: a partner and one `f64` for `fermi_update` and
+`replicator_update`, nothing for `imitate_best`); the $N$ agents are not drawn
+in advance. Under `AgentOrder` it draws only the rule's values and follows the
+scheduler's order. Its scratch payoffs are recomputed at every activation, so
+it too resumes exactly from a snapshot.
 
 ---
 
@@ -3919,6 +4180,7 @@ let metrics = ContinuousMetrics::new(           // before `game` moves into buil
 | `new()` / `default()` | — | no equilibrium distance, no stop |
 | `equilibrium(ContinuousEquilibrium)` | `None` | `Solve`: run `best_response_iteration` once in `new`, from the interval midpoints with the default options, and fail unless it is `Converged`. `Given(profile)`: use this profile (one finite action of the right length per role). Either adds `game.eq_distance` |
 | `stop(tol, window)` | off | end the run once no agent's action changes by `tol` or more for `window` consecutive steps; `tol` finite and `> 0`, `window ≥ 1` |
+| `payoff_timing(PayoffTiming)` | `BeforeUpdate` | as for `MetricsOptions`: `AfterUpdate` changes only the meanings of `mean_action`, `action_sd`, `mean_payoff` and `payoff_sd` returned by `describe()` |
 
 `ContinuousMetrics::new` returns `GameError::Metrics` for invalid bounds or
 options, a given profile of the wrong shape, or a solve that does not converge.
@@ -3979,6 +4241,9 @@ $\beta \le 1/\Delta\pi$ needs the payoff range over every action profile.
 | `imitate_best` | copies the action vector of the best-paid agent. Where the finite rule breaks ties by the lowest action index, the continuous rule takes the **lexicographically smallest action vector** (components compared with `f64::total_cmp`, a shorter vector first) |
 | `fermi_update` | copies the partner's action vector unchanged |
 | `moran_update` | `Fitness::Linear` is rejected (its positivity check needs the payoff range over every profile) — use `Fitness::Exponential`. A mutant is the parent's action plus independent Gaussian noise on every component, clamped to the bounds |
+
+`imitate_best` and `fermi_update` with continuous actions can also be updated
+asynchronously (see [Asynchronous update](#asynchronous-update)).
 
 The Gaussian mutation is configured on the Moran process:
 
@@ -4176,7 +4441,7 @@ records the game `G`, the experiment state `X`, the matching `M`, the play
 path `P` and the population dynamic `D`. `GameSimFactory::new(game)` starts
 with `X = ()`; `GameSimFactory::with_state(game, x)` starts with your own
 experiment state, and every simulation built from the factory starts from a
-clone of `x`. Five methods change the type:
+clone of `x`. Six methods change the type:
 
 | Method | Replaces | Requires |
 |---|---|---|
@@ -4184,7 +4449,8 @@ clone of `x`. Five methods change the type:
 | `.outcome(o)` | `P` with `Pairwise<O>` | `o: OutcomeRule<G, X> + Clone + 'static` |
 | `.counting_play()` | `P` with `Counting` | `G: AnonymousGame` |
 | `.aggregates(len)` | `P` with `WithAggregates<P>` | `G: AggregateGame`; afterwards `outcome` and `counting_play` are no longer available, so the aggregates cannot be dropped by mistake |
-| `.dynamics(d)` | `D` (from `NoDynamics`) | `d: PopulationDynamics<G, X> + Clone` (`ProportionalImitation` only for finite games) |
+| `.dynamics(d)` | `D` | `d: PopulationDynamics<G, X> + Clone` (`ProportionalImitation` only for finite games) |
+| `.async_dynamics(step)` | `D` with `AsyncPopulationStep<D2>` | `step` wraps `ImitateBest`, `FermiUpdate` or `ProportionalImitation` built with `Update::Asynchronous` (see [Asynchronous update](#asynchronous-update)) |
 
 `build`, `into_builder` and `build_trial` exist only once `M` implements
 `Matching`, so forgetting `.matching(..)` does not compile; they also require
@@ -4193,6 +4459,58 @@ and of the experiment state. The other bounds are checked by the compiler as
 well: `.rule(name, r)` needs `r: DecisionRule<G, X>` (fictitious play with a
 continuous game does not compile), `.metrics(..)` needs `G: FiniteGame` and
 `.continuous_metrics(..)` needs `G: ContinuousGame`.
+
+`.dynamics(..)` and `.async_dynamics(..)` replace each other: the one called
+last decides how the factory assembles. After `.async_dynamics(step)`, `build`,
+`into_builder` and `build_trial` run the checks of `assemble_async` and
+register `async_population_step` alone instead of `game_match`, `game_decide`,
+the dynamic and `game_play`; the registered rules are not used, and every
+agent must be held. The factory also sets the payoff timing of the metrics to
+`PayoffTiming::AfterUpdate` — overriding any timing given in the options of
+`.metrics(..)` or `.continuous_metrics(..)` — and to `BeforeUpdate` on the
+synchronous path. A scenario cannot select the asynchronous update.
+
+```rust
+use socsim_core::WorldState;
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::{
+    AsyncActivation, AsyncPopulationStep, GameSimFactory, GridBoundary, GridNeighborhood,
+    GridNeighbors, GridSpec, ImitateBest, InitialActions, MetricsOptions, Topology, Update,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let side = 99;
+    let mut initial = vec![0; side * side]; // action 0 = C
+    initial[49 * side + 49] = 1; // one D in the centre
+    let factory = GameSimFactory::new(PrisonersDilemma::weak(1.85)?)
+        .agents(side * side) // no rule registered: every agent is held
+        .matching(GridNeighborhood::new().include_self(true))
+        .topology(Topology::grid(GridSpec {
+            rows: side,
+            cols: side,
+            boundary: GridBoundary::Fixed,
+            neighborhood: GridNeighbors::Moore,
+        })?)
+        .initial_held(InitialActions::PerAgent(initial))
+        .history_len(1)
+        .t_max(217)
+        .async_dynamics(
+            AsyncPopulationStep::new(ImitateBest::new(Update::Asynchronous))
+                .activation(AsyncActivation::UniformWithReplacement),
+        )
+        .metrics(MetricsOptions::new().population_share(true)); // AfterUpdate is set by the factory
+
+    let mut sim = factory.build(1)?;
+    sim.run()?;
+    let cooperators = sim.world().held().iter().filter(|&&a| a == 0).count();
+    println!("t = {}, cooperators = {cooperators}", sim.world().clock().t());
+    Ok(())
+}
+```
+
+```text
+t = 217, cooperators = 0
+```
 
 ### Settings and defaults
 
@@ -4208,8 +4526,8 @@ continuous game does not compile), `.metrics(..)` needs `G: FiniteGame` and
 | `topology(Topology)` | none. Agent `i` is node or cell `i` |
 | `play_options(PlayOptions)` | `PlayOptions::new()` |
 | `outcome(o)` or `counting_play()`, then optionally `aggregates(len)` | `Pairwise<NormalFormOutcome>` without aggregates |
-| `dynamics(d)` | `NoDynamics` |
-| `metrics(MetricsOptions)` (finite) / `continuous_metrics(ContinuousMetricsOptions)` (continuous) | no metrics. A later call replaces an earlier one; add further metrics mechanisms through `into_builder` |
+| `dynamics(d)` or `async_dynamics(step)` | `NoDynamics`. A later call of either replaces an earlier one |
+| `metrics(MetricsOptions)` (finite) / `continuous_metrics(ContinuousMetricsOptions)` (continuous) | no metrics. A later call replaces an earlier one; add further metrics mechanisms through `into_builder`. The payoff timing is set by the factory (`AfterUpdate` after `async_dynamics`, `BeforeUpdate` otherwise) |
 | `scheduler(SchedulerChoice)` | `SchedulerChoice::Sequential` (the other choice is `RandomActivation`) |
 
 A missing required value is reported by `build` as `GameError::Config`, whose
@@ -4293,6 +4611,7 @@ inconsistency the assembly functions detect:
 |---|---|
 | A required setting is missing, or two or more rules are registered without `assign` | `GameError::Config` |
 | A population dynamic while some agent follows a decision rule | `GameError::Population` |
+| After `async_dynamics`, a configuration that `assemble_async` rejects (see [Asynchronous update](#asynchronous-update)) | the error of `assemble_async` |
 | A population dynamic on a game whose roles do not have the same number of actions (or, for a continuous game, the same intervals) | `GameError::Population` |
 | `replicator_update`'s $\beta$ above $1/\Delta\pi_{\max}$, or `moran_update` with `Fitness::Linear` and a non-positive fitness | `GameError::Population` |
 | A per-step decision with an agent that holds several roles in one step (for example `RoundRobin` with three or more agents under `PerStep`) | `GameError::InvalidMatching` when the matching can tell at assembly; otherwise the step fails with `RuleError::AmbiguousRole` |

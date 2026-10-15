@@ -1547,6 +1547,46 @@ let mut sim = assemble_with(
 .build();
 ```
 
+**Code — asynchronous update (Huberman & Glance 1993).** Grounded in
+`examples/huberman_glance.rs` and `tests/huberman_glance.rs`. Agents update one
+at a time, in place: use `assemble_async` instead of `assemble_with` — no
+`RuleBook`, and the dynamic (built with `Update::Asynchronous`) is wrapped in an
+`AsyncPopulationStep`. It registers the single mechanism
+`async_population_step`, which recomputes the payoffs each activated agent
+compares from the current `held`, writes its new action immediately, and
+records the step once from the final `held`:
+
+```rust
+let metrics = GameMetrics::new(
+    &game,
+    MetricsOptions::new()
+        .population_share(true)
+        .payoff_timing(PayoffTiming::AfterUpdate), // records = play after every update
+)?;
+// ... build_world + with_topology as above (every agent held) ...
+let mut sim = assemble_async(
+    world,
+    GridNeighborhood::new().include_self(true),          // implicit matchings only
+    Pairwise::new(NormalFormOutcome),                    // or counting_play()
+    AsyncPopulationStep::new(
+        ImitateBest::new(Update::Asynchronous).tie_break(ImitationTie::KeepOwn),
+    )
+    .activation(AsyncActivation::UniformWithReplacement), // N draws with replacement
+    PlayOptions::new(),
+    seed,
+)?
+.scheduler(Box::new(SequentialScheduler))               // order unused by UniformWithReplacement
+.add_mechanism(Box::new(metrics))
+.build();
+```
+
+With `GameSimFactory`, call `.async_dynamics(step)` instead of `.dynamics(d)`
+(the last of the two wins); the factory then sets `PayoffTiming::AfterUpdate`
+on its metrics itself. On the 99 × 99 fixed lattice with one central defector
+and `PrisonersDilemma::weak(1.85)`, seed 1 reaches all defection at generation
+120, while the synchronous control keeps 3 920 cooperators at generation 217 —
+a result that holds only for `b > 1.8`.
+
 **Choosing the pieces.**
 
 | Want | Matching | Dynamic | Topology |
@@ -1555,11 +1595,21 @@ let mut sim = assemble_with(
 | Games on networks | `NetworkEdges::new()` | `FermiUpdate::new(k, ..)?` | `Topology::network` |
 | Well-mixed replicator-like | `RandomPairs::new()` / `RandomGroups::new(k)?` | `ProportionalImitation::new(beta, ..)?` | none |
 | Fixation probabilities | `RandomPairs::new()` | `MoranUpdate::new(Fitness::Linear { w }, mutation, ..)?` | none (required) |
+| Asynchronous spatial PD (Huberman & Glance 1993) | `GridNeighborhood::new().include_self(true)` | `assemble_async` + `AsyncPopulationStep::new(ImitateBest::new(Update::Asynchronous)).activation(AsyncActivation::UniformWithReplacement)` | `Topology::grid` (required) |
 | n-player anonymous game (El Farol, minority, public goods) | `WholePopulation::new()` / `RandomGroups::new(k)?` + play `counting_play()` | any copy dynamic except `ImitateBest` without topology | optional |
 
 **Gotchas.**
-- `Update::Synchronous` is a required constructor argument (no default).
-  Everything is synchronous: next actions come from the pre-update state.
+- `Update` is a required constructor argument (no default). Under
+  `assemble_with` it must be `Update::Synchronous`: next actions come from the
+  pre-update state. `Update::Asynchronous` works only through
+  `assemble_async`, which accepts only `GridNeighborhood` / `NetworkEdges` /
+  `WholePopulation`, `PerStep`, no `materialize` / `report_mixed` /
+  `Fallback`, the `NormalFormOutcome` or counting play path, and not
+  `MoranUpdate`; it is library-only (no scenario / CLI).
+- Asynchronous records describe play after every update of the step, so
+  `played_share` and `population_share` come from the same `held` (equal when
+  every agent has the same seat count) — do not read their gap as an update
+  effect, and set `PayoffTiming::AfterUpdate` on `game_metrics`.
 - Any agent with a decision rule makes `assemble_with` fail
   (`GameError::Population`). Mixing learning rules with imitation is not
   supported.
@@ -1586,9 +1636,12 @@ let mut sim = assemble_with(
 - Run the examples: `cargo run --release -p socsim-games --features
   core,engine,grid --example nowak_may -- --steps 200 --seed 1` (CSV
   `generation,cooperator_share`) and `cargo run --release -p socsim-games
-  --features core,engine --example hawk_dove_large -- --n 1000000 --steps 10`.
-  Details: [`docs/games.md` § Population dynamics](../games.md#population-dynamics)
-  and `docs/mechanisms/{imitate-best,fermi-update,replicator-update,moran-update}.md`.
+  --features core,engine --example hawk_dove_large -- --n 1000000 --steps 10`,
+  and `cargo run -q -p socsim-games --features core,engine,grid --example
+  huberman_glance -- --update async --steps 217 --seed 1`.
+  Details: [`docs/games.md` § Population dynamics](../games.md#population-dynamics),
+  [§ Asynchronous update](../games.md#asynchronous-update)
+  and `docs/mechanisms/{imitate-best,fermi-update,replicator-update,moran-update,async-population-step}.md`.
 
 ---
 

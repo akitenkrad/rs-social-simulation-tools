@@ -23,8 +23,8 @@
 | feature | 追加されるもの | socsim への依存 |
 |---|---|---|
 | *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`，`ContinuousGame`，`AggregateGame`，`AnonymousGame`，`CommonActionSpace`，`DescribeGame`），`MatrixGame`，組込みのゲーム（`catalog`，連続の行動の `continuous`），混合戦略（`mixed`），ソルバー（`solve`．`pure_nash_counts`，レプリケータ動学，`ess_verdict`，連続の `best_response_iteration` を含む），学習則の計算（`learn`），`AggregateSpec`，指標用の行動 ID（`metric_action_ids`），`FiniteSpec` / `ContinuousSpec`（実行時に選ぶ組込みのゲーム．Scenario が使う） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
-| `core` | World（`GameWorld`，`Topology`），規則（学習則と連続の規則 `DampedBestResponse` / `GradientAscent` を含む），利得規則，Matching（`FixedPlayers`，`RoundRobin`，`RandomPairs`，`RandomGroups`，`WholePopulation`），ビュー，`build_world`（`InitialActions::Shares` を含む），`uniform_initial_actions`，集団動学の設定の型（`ImitateBest`，`FermiUpdate`，`ProportionalImitation`，`MoranUpdate`），指標の Mechanism `GameMetrics` とその連続版 `ContinuousMetrics` | `socsim-core` |
-| `engine` | `assemble`，`assemble_with_aggregates`，`assemble_with`（どれも `SimulationBuilder` を返す），対戦の評価経路（`Pairwise`，`counting_play()`），集団動学の Mechanism．`core` を含意 | `socsim-core`，`socsim-engine` |
+| `core` | World（`GameWorld`，`Topology`），規則（学習則と連続の規則 `DampedBestResponse` / `GradientAscent` を含む），利得規則，Matching（`FixedPlayers`，`RoundRobin`，`RandomPairs`，`RandomGroups`，`WholePopulation`），ビュー，`build_world`（`InitialActions::Shares` を含む），`uniform_initial_actions`，集団動学の設定の型（`ImitateBest`，`FermiUpdate`，`ProportionalImitation`，`MoranUpdate`，`Update`），指標の Mechanism `GameMetrics` とその連続版 `ContinuousMetrics`（`PayoffTiming` を含む） | `socsim-core` |
+| `engine` | `assemble`，`assemble_with_aggregates`，`assemble_with`，`assemble_async`（どれも `SimulationBuilder` を返す），対戦の評価経路（`Pairwise`，`counting_play()`），集団動学の Mechanism，`AsyncPopulationStep` と `AsyncActivation`．`core` を含意 | `socsim-core`，`socsim-engine` |
 | `net` | `Topology::network` / `Topology::directed_network` と Matching `NetworkEdges`（[トポロジー](#トポロジーgameworldwith_topology) を参照）．`core` を含意 | `socsim-core`，`socsim-net` |
 | `grid` | `Topology::grid`（`GridSpec`）と Matching `GridNeighborhood`．`core` を含意 | `socsim-core`，`socsim-grid` |
 | `metrics` | `GameMetrics` の列 `game.action_entropy`（[指標](#指標) を参照）．`core` を含意 | `socsim-core`，`socsim-metrics`（既定の feature を切ったもの．依存の無い `stats` モジュールだけ） |
@@ -1596,6 +1596,7 @@ LLM の決定が無いステップでは何も記録しません．
 `socsim-games` はこれを，**Held** のエージェント（決定規則を持たないエージェント．`AssignKind::Held`）と 1 つの**集団動学**で表します．
 集団動学は，Reward でそのステップの利得から保持行動を書き換える Mechanism です．
 `assemble_with` の引数 `dynamics` に渡します．
+エージェントが 1 人ずつ行動を変える更新にするときは，代わりに `assemble_async` で組み立てます（[非同期更新](#非同期更新) を参照）．
 
 よく混ざったタカ・ハトの集団の例です．1 000 人が毎ステップ無作為に組になり，比例模倣で更新します．
 タカ 30 % から始めると，タカの割合は進化的に安定な割合 $V/C = 0.5$ へ向かいます．
@@ -1690,12 +1691,200 @@ $\pi_i$ はエージェント $i$ のそのステップの利得で，`PayoffAgg
 
 ### 同期更新
 
-どのコンストラクタも更新の方式を必須の引数として受け取ります．方式は `Update::Synchronous` だけで，既定値はありません．
+どのコンストラクタも更新の方式を必須の引数として受け取ります．方式は `Update::Synchronous` か `Update::Asynchronous` で，既定値はありません．
 方式を後から足しても，既存の設定の意味が変わらないようにするためです．
+`assemble_with` は `Synchronous` だけを受け付け，`Asynchronous` で作った動学を拒否します．
+
+```text
+invalid population dynamics: fermi_update with Update::Asynchronous must be assembled with assemble_async
+```
+
 `Synchronous` では，全エージェントの次の行動を**同じ更新前の状態**から計算して一時バッファに書き，ステップの終わりにまとめて確定します．
 ステップの中で，ほかのエージェントの新しい行動が見えることはありません．
 同じ規則を 1 人ずつその場で書き換える形で適用すると，結果がエージェントの順に依存し，対称な格子の配置の対称性も崩れます．
+それは別のモデルで，次の [非同期更新](#非同期更新) で扱います．
 `moran_update` は 1 ステップに保持行動をちょうど 1 つ書きます．親と死ぬエージェントはどちらも更新前の状態から引きます．
+
+### 非同期更新
+
+Huberman & Glance（1993）は，Nowak & May の空間囚人のジレンマで協力者の塊が残るのは，全セルが同じ瞬間に更新するからだと示しました．
+セルが 1 つずつ無作為な順に更新すると，1 人の裏切り者が格子全体を占めることがあります．
+`assemble_async` はこのモデルを組み立てます．`RuleBook` は受け取らず（全エージェントが Held），動学も別の引数にはしません．
+`Update::Asynchronous` で作った 3 つの写しの動学のどれかを `AsyncPopulationStep` で包んで渡します．
+
+```rust
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::{
+    assemble_async, build_world, AssignGroup, AssignKind, Assignment, AsyncActivation,
+    AsyncPopulationStep, FermiUpdate, GameMetrics, GridBoundary, GridNeighborhood, GridNeighbors,
+    GridSpec, InitialActions, MetricsOptions, NormalFormOutcome, Pairwise, PayoffTiming,
+    PlayOptions, RuleBook, Topology, Update,
+};
+use socsim_log::InMemoryRecorder;
+
+fn main() {
+    let side = 50;
+    let n = side * side;
+    let seed = 5;
+    let game = PrisonersDilemma::weak(1.3).unwrap();
+    let metrics = GameMetrics::new(
+        &game,
+        MetricsOptions::new()
+            .population_share(true)
+            .payoff_timing(PayoffTiming::AfterUpdate), // describe() says "after every update"
+    )
+    .unwrap();
+
+    let rules = RuleBook::new(); // no rules: every agent is Held
+    let held = Assignment::Ordered(vec![AssignGroup { kind: AssignKind::Held, count: n }]);
+    let initial = InitialActions::Shares(vec![(0, 0.5), (1, 0.5)]); // half C, half D
+    let world = build_world(game, n, (), initial, &rules, &held, 1, 100, seed)
+        .unwrap()
+        .with_topology(
+            Topology::grid(GridSpec {
+                rows: side,
+                cols: side,
+                boundary: GridBoundary::Toroidal,
+                neighborhood: GridNeighbors::Moore,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+    let mut sim = assemble_async(
+        world,
+        GridNeighborhood::new().include_self(true), // an implicit pattern
+        Pairwise::new(NormalFormOutcome),
+        AsyncPopulationStep::new(FermiUpdate::new(0.1, Update::Asynchronous).unwrap())
+            .activation(AsyncActivation::UniformWithReplacement), // N draws with replacement
+        PlayOptions::new(),
+        seed,
+    )
+    .unwrap()
+    .add_mechanism(Box::new(metrics))
+    .recorder(Box::new(InMemoryRecorder::new()))
+    .build();
+    sim.run().unwrap();
+
+    let recorder = sim.recorder().as_any().unwrap().downcast_ref::<InMemoryRecorder>().unwrap();
+    for row in recorder.metrics().iter().filter(|row| {
+        [1, 10, 100].contains(&row.t)
+            && (row.key == "game.played_share.a0" || row.key == "game.population_share.a0")
+    }) {
+        println!("t={} {} = {}", row.t, row.key, row.value);
+    }
+}
+```
+
+```text
+t=1 game.played_share.a0 = 0.4008
+t=1 game.population_share.a0 = 0.4008
+t=10 game.played_share.a0 = 0.2756
+t=10 game.population_share.a0 = 0.2756
+t=100 game.played_share.a0 = 0.3848
+t=100 game.population_share.a0 = 0.3848
+```
+
+ここでは 2 つの列がどのステップでも等しくなります．上の同期のタカ・ハトの例とは違います（[`PostStep` で見えるもの](#poststep-で見えるもの) を参照）．
+
+**1 回に 1 人ずつ．** `assemble_async` は，`game_match`，`game_decide`，`game_play` と動学の代わりに，[`async_population_step`](mechanisms/async-population-step.ja.md) という Mechanism を 1 つだけ登録します．
+PreStep では `game_match` と同じようにそのステップの対戦の状態を消します（対戦の表を空にし，利得と対戦数を 0 にします）．
+Reward ではエージェントを 1 人ずつ活性化し，活性化したエージェント $i$ ごとに次を行います．
+
+1. 規則が読む利得を，その時点の `held` から計算し直します．$i$ とそのトポロジーの近傍の利得で，`WholePopulation` では全エージェントの利得です．書く先は World ではなく Mechanism の作業領域です．
+2. $i$ に `imitate_best`，`fermi_update`，`replicator_update` の規則を当て，$i$ の新しい行動をただちに `held` に書きます．次に活性化するエージェントは，もうその行動を相手に対戦します．
+3. `log_updates(true)` のときは，$i$ の行動が変わったらイベント `game.async_update` を記録します．
+
+最後の活性化の後，最終的な `held` からステップ全体をもう一度評価し，利得，対戦数，ステップ履歴，集計値の行を書きます．
+書くコードは `game_play` の [対戦を実体化しない経路](#対戦を実体化しない評価) と同じで，`world.plays()` は空のままです．
+局所の利得はその経路と同じ順に足すので，規則が見る利得は全体を計算し直した利得とビット単位で同じです．
+
+**活性化の順：`AsyncActivation`．**
+
+| 変種 | 1 ステップの活性化の回数 | 活性化するエージェント | 乱数 |
+|---|---|---|---|
+| `AgentOrder`（既定） | $N$ | 全エージェントを 1 回ずつ，スケジューラーの順（`StepContext::agent_order`）に．順次のスケジューラーでは `AgentId` の昇順，`RandomActivationScheduler` では毎ステップ新しい無作為な置換 | スケジューラーの置換 |
+| `UniformWithReplacement` | $N$ | 活性化のたびに $N$ 人から一様に 1 人を引く．同じエージェントが 2 回引かれることも，1 回も引かれないこともある | 活性化の前に `gen_range(0..N)` を 1 回 |
+
+Huberman & Glance の更新は復元抽出です．各ミクロステップで無作為に選んだ 1 人が更新し，$N$ ミクロステップの 1 世代でエージェント 1 人あたり平均 1 回の更新になります．
+したがって再現には `UniformWithReplacement` を使います．
+`UniformWithReplacement` はスケジューラーの順を使いません．`RandomActivationScheduler` は使われない置換を引くだけなので，順次のスケジューラー（既定）のままにしてください．
+順次のスケジューラーでの `AgentOrder` は添字の順の決定的な掃引で，それだけで対称な格子の対称性を崩します．
+
+**記録の意味．** `Synchronous` では，そのステップの利得，`played_share`，`coop_rate`，ステップ履歴は，更新**前**に打った行動を表します．
+`async_population_step` では，それらは**そのステップの全更新の後**に保持している行動で対戦し直した結果を表します．
+値を作るコードは同じでも意味が違い，`game_metrics` はどの組み立てを観測しているかを知りません．
+`MetricsOptions::payoff_timing(PayoffTiming::AfterUpdate)`（連続ゲームでは `ContinuousMetricsOptions::payoff_timing`）で伝えてください．
+これは `describe()` が `game.played_share.{action}`，`game.mean_payoff`，`game.payoff_sd`，`game.coop_rate`（連続では `game.mean_action.*`，`game.action_sd.*`，`game.mean_payoff`，`game.payoff_sd`）について返す意味だけを変え，記録する値は変えません．
+既定は `PayoffTiming::BeforeUpdate` です．`assemble_async` はこれを変えませんが，[`GameSimFactory::async_dynamics`](#型状態) は `AfterUpdate` を自動で付けます．
+`game.population_share.a<k>` の意味はどちらでも同じで，ステップの終わりに保持している行動です．
+
+**受け付ける構成．** `assemble_async` は次の順に検査し，最初に違反したところで失敗します．
+
+| 条件 | エラー |
+|---|---|
+| Matching がゲームの役割の数に対応している | `GameError::UnsupportedRoles` |
+| 全エージェントが Held | `async_population_step applies only to held agents, but an active rule is assigned` |
+| Matching が対戦を実体化しないパターンを持つ（`GridNeighborhood`，`NetworkEdges`，`WholePopulation`） | `async_population_step requires a matching with an implicit pattern (grid neighborhood, network edges or whole population); matchings that change partners every step are not supported` |
+| `DecisionScope::PerStep` | `async_population_step requires DecisionScope::PerStep` |
+| `materialize(false)` | `async_population_step does not materialize encounters; PlayOptions::materialize(true) is not supported` |
+| `report_mixed(false)` | `async_population_step does not support report_mixed` |
+| 対戦の評価経路が `Pairwise::new(NormalFormOutcome)` か `counting_play()`（集計値の有無は問わない） | `async_population_step requires the NormalFormOutcome or counting play path` |
+| `OnInvalidAction::Stop` | `async_population_step does not use on_invalid_action; fallback is not supported` |
+| Matching 自身の検査（例えば `GridNeighborhood` は格子を要する） | Matching のエラーのまま |
+| 動学を `Update::Asynchronous` で作った | `assemble_async requires Update::Asynchronous, got Synchronous` |
+| 動学の [組み立て時の検査](#組み立て時の検査)：共通の行動の集合，`imitate_best` のトポロジー，$\beta$ の上限 | `assemble_with` と同じ文言 |
+
+Matching のもの以外はどれも `GameError::Population` で，表示には接頭辞 `invalid population dynamics: ` が付きます．
+`MoranUpdate` は `AsyncPopulationStep` に合いません（渡すとコンパイルできません）．
+モランの 1 ステップは全員の適応度から引く 1 回の出生と死亡で，«活性化したエージェントの新しい行動» という単位を持たないからです．
+毎ステップ相手が変わる Matching（`RandomPairs`，`RandomGroups`）も対象外です．ステップの途中で相手が変わると，規則が読む利得を定義し直す必要があるからです．
+`ImitateBest` と `FermiUpdate` は連続ゲームも受け付けます．
+非同期更新はライブラリ専用です．Scenario ファイルと `normal-form` パックは `update = "synchronous"` だけを受け付けます．
+
+`assemble_async` は `derive_seed(seed, &[1])` を seed にした `SimulationBuilder` を返します．スケジューラー，Recorder，`game_metrics` は `assemble_with` と同じく呼び出し側が足します．
+`log_updates(true)` では，変わった行動ごとにイベント `game.async_update` を記録します．payload は
+`{"agent": <AgentId>, "order": <そのステップでの活性化の通し番号．0 始まり>, "from": <行動>, "to": <行動>}` です（有限の行動は添字，連続の行動は数の配列）．
+
+**例：`huberman_glance`．** `crates/socsim-games/examples/huberman_glance.rs` は Huberman & Glance の Fig. 1 を走らせます．
+固定境界の 99 × 99 の格子，Moore 近傍と自己対戦，`PrisonersDilemma::weak(1.85)`，中央に裏切り者が 1 人，`KeepOwn` の `ImitateBest` という構成です．
+世代ごとの協力者の割合（`game.population_share.a0`）を CSV で出します．`--update async`（`UniformWithReplacement`．既定）と `--update sync`（`assemble_with`．Nowak–May の対照）を選べます．
+
+```sh
+cargo run -q -p socsim-games --features core,engine,grid --example huberman_glance -- --update async --steps 217 --seed 1
+```
+
+```text
+generation,cooperator_share
+1,0.9969390878481788
+2,0.987756351392715
+3,0.9732680338740944
+...
+118,0.0008162432404856647
+119,0.00010203040506070809
+120,0
+...
+217,0
+```
+
+```sh
+cargo run -q -p socsim-games --features core,engine,grid --example huberman_glance -- --update sync --steps 217 --seed 1
+```
+
+```text
+generation,cooperator_share
+1,0.9990817263544536
+2,0.9974492398734823
+3,0.995816753392511
+...
+216,0.37751249872461995
+217,0.39995918783797574
+```
+
+非同期では，第 120 世代から全員が裏切ります（seed 1）．seed 0〜4 では，全員が裏切りになるのはそれぞれ第 119，120，79，129，134 世代です．
+同期では裏切り者が対称な模様で広がり，第 217 世代に 3 920 人の協力者が残ります．
+**この結果は $b > 1.8$ に限ります．** $b \le 1.8$ では，非同期に更新しても協力が残ります．
+$b = 1.85$ は，Nowak & May の空間カオスの区間 $1.8 < b < 2$ にあります．
 
 ### `PostStep` で見えるもの
 
@@ -1710,6 +1899,12 @@ $\pi_i$ はエージェント $i$ のそのステップの利得で，`PayoffAgg
 `MetricsOptions::population_share(true)` で有効にする `game.population_share.a<k>` は，更新後に行動 `k` を保持する**全エージェント**の割合です．
 2 つは中身（更新の前か後か）も分母（席かエージェントか）も違います．9 つの対戦の席に着いたエージェントは `played_share` では 9 回，`population_share` では 1 回数え，
 どの席にも着かなかったエージェントは `population_share` でだけ数えます．[列](#列) を参照してください．
+
+`async_population_step` の後では時点は 1 つだけです．`payoffs()`，`n_played()`，ステップ履歴，`held()` はどれもそのステップの全更新の後に保持している行動を表し，`plays()` は空です．
+このとき `played_share` と `population_share` は同じ行動から数え，違うのは分母（席かエージェントか）だけです．
+全エージェントの席の数が同じ構成（`WholePopulation`，トーラス，正則なネットワーク）では 2 つの列は等しくなります（[非同期更新](#非同期更新) の例）．
+固定境界の格子では縁のエージェントの席が少ないので，2 つはわずかに違います．
+その差を更新の効果と読まないでください．
 
 ### 組み立て時の検査
 
@@ -1965,6 +2160,7 @@ cargo run --release -p socsim-games --features core,engine --example hawk_dove_l
 | `stop(tol, window)` | なし | 行動の割合が動かなくなったら実行の終了を求める．`tol` は有限で `> 0`，`window ≥ 1`．そうでなければ `GameError::Metrics` |
 | `action_entropy(on)` | 有効 | feature `metrics` のときだけ．`game.action_entropy` を足す／除く |
 | `population_share(on)` | 無効 | `game.population_share.a<k>` を足す．すべての役割の行動数が等しくなければ `GameError::Metrics` |
+| `payoff_timing(PayoffTiming)` | `BeforeUpdate` | `describe()` が返す意味だけを変える．`AfterUpdate` は，打った行動の割合，利得，協力率がそのステップの全更新の後に保持している行動から来ることを述べる（[非同期更新](#非同期更新) を参照） |
 
 2 エージェントの囚人のジレンマで，Tit-for-Tat と常に裏切る相手を対戦させます．
 
@@ -2472,6 +2668,9 @@ pattern = "game.aggregate.{name}"
 meaning = "Public game aggregate for the completed step; present only when the simulation was assembled with aggregates."
 ```
 
+`MetricsOptions::payoff_timing(PayoffTiming::AfterUpdate)` では，パターンは同じままで，`game.played_share.{action}`，`game.mean_payoff`，`game.payoff_sd`，`game.coop_rate` の意味が «the actions held after every update of the step (asynchronous update)» から来ることを述べる文になります．
+`assemble_async` で組み立てたシミュレーションに使ってください（[非同期更新](#非同期更新) を参照）．
+
 `unit`，`direction`，パターンの `axes` が欲しければ手で足してください．この crate 自体は runvault に依存しません．
 
 ---
@@ -2504,6 +2703,11 @@ meaning = "Public game aggregate for the completed step; present only when the s
 変異体の行動は，変異が起きないときも引きます．`DampedBestResponse` と `GradientAscent` は何も引きません．
 `RandomPairs` と `RandomGroups` は Decision で 1 ステップに 1 回並べ替えを引き，ほかの組込みの Matching は何も引きません．
 動学は World の外に状態を持たないので，snapshot から正確に再開できます．
+
+`async_population_step` も同じエンジンのストリームから，Reward で活性化を 1 回ずつ順に行いながら引きます．
+`AsyncActivation::UniformWithReplacement` では，活性化のたびにまずエージェントを引き（`gen_range(0..N)`），続いて規則の乱数を引きます（上と同じく，`fermi_update` と `replicator_update` は相手と `f64` を 1 つ，`imitate_best` は何も引きません）．$N$ 人を先にまとめて引くことはしません．
+`AgentOrder` では規則の乱数だけを引き，スケジューラーの順に従います．
+作業領域の利得は活性化のたびに計算し直すので，これも snapshot から正確に再開できます．
 
 ---
 
@@ -3285,6 +3489,7 @@ let metrics = ContinuousMetrics::new(           // before `game` moves into buil
 | `new()` / `default()` | — | 均衡までの距離なし，停止なし |
 | `equilibrium(ContinuousEquilibrium)` | `None` | `Solve`：`new` の中で `best_response_iteration` を 1 回，区間の中点から既定のオプションで走らせ，`Converged` でなければ失敗する．`Given(profile)`：この行動の組（役割ごとに長さの合った有限の行動）を使う．どちらも `game.eq_distance` を足す |
 | `stop(tol, window)` | なし | どのエージェントの行動も `window` ステップ続けて `tol` 以上変わらなければ実行を終える．`tol` は有限で `> 0`，`window ≥ 1` |
+| `payoff_timing(PayoffTiming)` | `BeforeUpdate` | `MetricsOptions` と同じ．`AfterUpdate` は `describe()` が返す `mean_action`，`action_sd`，`mean_payoff`，`payoff_sd` の意味だけを変える |
 
 `ContinuousMetrics::new` は，区間かオプションが不正なとき，与えた行動の組の形が合わないとき，解が収束しないときに `GameError::Metrics` を返します．
 `Solve` が見つける均衡は 1 つです．均衡が複数あるゲームでは，意図した均衡を `Given` で渡してください．
@@ -3323,6 +3528,8 @@ let metrics = ContinuousMetrics::new(           // before `game` moves into buil
 | `imitate_best` | 最も稼いだエージェントの行動ベクトルを写す．有限の規則が «最小の行動番号» で同点を解くところを，連続の規則は **辞書式に最小の行動ベクトル**（成分は `f64::total_cmp` で比べ，長さが違えば短い方が先）で解く |
 | `fermi_update` | 相手の行動ベクトルをそのまま写す |
 | `moran_update` | `Fitness::Linear` は拒否される（正値性の検査に全行動の組にわたる利得の範囲が要る）．`Fitness::Exponential` を使う．突然変異体は，親の行動の各成分に独立なガウス雑音を加え，区間へ切り詰めたもの |
+
+連続の行動の `imitate_best` と `fermi_update` も非同期に更新できます（[非同期更新](#非同期更新) を参照）．
 
 ガウスの突然変異はモラン過程に設定します．
 
@@ -3484,7 +3691,7 @@ coop_rate: first Some(1.0), last Some(0.0), rows 200
 
 `GameSimFactory<G, X = (), M = NoMatching, P = Pairwise<NormalFormOutcome>, D = NoDynamics>` は，ゲーム `G`，実験状態 `X`，Matching `M`，対戦の評価経路 `P`，集団動学 `D` を記録します．
 `GameSimFactory::new(game)` は `X = ()` から始まり，`GameSimFactory::with_state(game, x)` は利用者の実験状態から始まります．factory から作るシミュレーションは，どれも `x` の複製から始まります．
-型を変えるメソッドは 5 つです．
+型を変えるメソッドは 6 つです．
 
 | メソッド | 置き換えるもの | 要求 |
 |---|---|---|
@@ -3492,11 +3699,60 @@ coop_rate: first Some(1.0), last Some(0.0), rows 200
 | `.outcome(o)` | `P` を `Pairwise<O>` に | `o: OutcomeRule<G, X> + Clone + 'static` |
 | `.counting_play()` | `P` を `Counting` に | `G: AnonymousGame` |
 | `.aggregates(len)` | `P` を `WithAggregates<P>` に | `G: AggregateGame`．呼んだ後は `outcome` と `counting_play` を呼べなくなるので，集計値を誤って落とすことはない |
-| `.dynamics(d)` | `D`（`NoDynamics` から） | `d: PopulationDynamics<G, X> + Clone`（`ProportionalImitation` は有限ゲームだけ） |
+| `.dynamics(d)` | `D` | `d: PopulationDynamics<G, X> + Clone`（`ProportionalImitation` は有限ゲームだけ） |
+| `.async_dynamics(step)` | `D` を `AsyncPopulationStep<D2>` に | `step` は `Update::Asynchronous` で作った `ImitateBest`，`FermiUpdate`，`ProportionalImitation` を包む（[非同期更新](#非同期更新) を参照） |
 
 `build`，`into_builder`，`build_trial` は `M` が `Matching` を実装したときにだけ存在するので，`.matching(..)` を忘れるとコンパイルできません．
 また，どの組み立てもゲームと実験状態の複製から始まるので，`G: Clone` と `X: Clone` も要求します．
 ほかの制約もコンパイラーが確かめます．`.rule(name, r)` は `r: DecisionRule<G, X>` を要求し（連続ゲームで仮想プレイを使うとコンパイルできない），`.metrics(..)` は `G: FiniteGame`，`.continuous_metrics(..)` は `G: ContinuousGame` を要求します．
+
+`.dynamics(..)` と `.async_dynamics(..)` は互いに置き換えます．後から呼んだ方が factory の組み立て方を決めます．
+`.async_dynamics(step)` の後の `build`，`into_builder`，`build_trial` は `assemble_async` の検査を行い，`game_match`，`game_decide`，動学，`game_play` の代わりに `async_population_step` だけを登録します．
+登録した規則は使わず，全エージェントが Held でなければなりません．
+factory は指標の利得の時点も `PayoffTiming::AfterUpdate` にします．`.metrics(..)` や `.continuous_metrics(..)` のオプションで時点を指定していても上書きし，同期の経路では `BeforeUpdate` にします．
+Scenario から非同期更新を選ぶことはできません．
+
+```rust
+use socsim_core::WorldState;
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::{
+    AsyncActivation, AsyncPopulationStep, GameSimFactory, GridBoundary, GridNeighborhood,
+    GridNeighbors, GridSpec, ImitateBest, InitialActions, MetricsOptions, Topology, Update,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let side = 99;
+    let mut initial = vec![0; side * side]; // action 0 = C
+    initial[49 * side + 49] = 1; // one D in the centre
+    let factory = GameSimFactory::new(PrisonersDilemma::weak(1.85)?)
+        .agents(side * side) // no rule registered: every agent is held
+        .matching(GridNeighborhood::new().include_self(true))
+        .topology(Topology::grid(GridSpec {
+            rows: side,
+            cols: side,
+            boundary: GridBoundary::Fixed,
+            neighborhood: GridNeighbors::Moore,
+        })?)
+        .initial_held(InitialActions::PerAgent(initial))
+        .history_len(1)
+        .t_max(217)
+        .async_dynamics(
+            AsyncPopulationStep::new(ImitateBest::new(Update::Asynchronous))
+                .activation(AsyncActivation::UniformWithReplacement),
+        )
+        .metrics(MetricsOptions::new().population_share(true)); // AfterUpdate is set by the factory
+
+    let mut sim = factory.build(1)?;
+    sim.run()?;
+    let cooperators = sim.world().held().iter().filter(|&&a| a == 0).count();
+    println!("t = {}, cooperators = {cooperators}", sim.world().clock().t());
+    Ok(())
+}
+```
+
+```text
+t = 217, cooperators = 0
+```
 
 ### 設定と既定値
 
@@ -3512,8 +3768,8 @@ coop_rate: first Some(1.0), last Some(0.0), rows 200
 | `topology(Topology)` | なし．エージェント `i` がノードまたはセル `i` |
 | `play_options(PlayOptions)` | `PlayOptions::new()` |
 | `outcome(o)` か `counting_play()`，続けて任意で `aggregates(len)` | 集計値なしの `Pairwise<NormalFormOutcome>` |
-| `dynamics(d)` | `NoDynamics` |
-| `metrics(MetricsOptions)`（有限）/ `continuous_metrics(ContinuousMetricsOptions)`（連続） | 指標なし．後の呼び出しが前の呼び出しを置き換える．指標の Mechanism をさらに足すときは `into_builder` を通す |
+| `dynamics(d)` か `async_dynamics(step)` | `NoDynamics`．どちらも後の呼び出しが前の呼び出しを置き換える |
+| `metrics(MetricsOptions)`（有限）/ `continuous_metrics(ContinuousMetricsOptions)`（連続） | 指標なし．後の呼び出しが前の呼び出しを置き換える．指標の Mechanism をさらに足すときは `into_builder` を通す．利得の時点は factory が決める（`async_dynamics` の後は `AfterUpdate`，それ以外は `BeforeUpdate`） |
 | `scheduler(SchedulerChoice)` | `SchedulerChoice::Sequential`（もう一つの選択肢は `RandomActivation`） |
 
 必須の値が無いと，`build` は `GameError::Config` を返します．文言は設定の名前を含みます（例：`invalid scenario: history_len: the history length is required`）．
@@ -3585,6 +3841,7 @@ fn tft_pairs() -> Result<TftPairs, socsim_games::GameError> {
 |---|---|
 | 必須の設定が無い．規則を 2 つ以上登録したのに `assign` が無い | `GameError::Config` |
 | 集団動学があるのに，決定規則に従うエージェントがいる | `GameError::Population` |
+| `async_dynamics` の後で，`assemble_async` が拒否する構成（[非同期更新](#非同期更新) を参照） | `assemble_async` のエラー |
 | 役割によって行動の数が違う（連続ゲームでは区間が違う）ゲームに集団動学を付けた | `GameError::Population` |
 | `replicator_update` の $\beta$ が $1/\Delta\pi_{\max}$ を超える．`moran_update` の `Fitness::Linear` で適応度が正でない | `GameError::Population` |
 | 1 ステップに複数の役割を持つエージェントがいるのにステップごとの決定にした（例：3 人以上の `RoundRobin` を `PerStep` で） | Matching が組み立て時に判断できれば `GameError::InvalidMatching`．できなければそのステップが `RuleError::AmbiguousRole` で失敗する |

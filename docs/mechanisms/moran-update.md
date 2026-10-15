@@ -109,7 +109,7 @@ describes the step just played (see
 | `fitness: Fitness` | — (required) | tunable | `Linear { w }` with `w` in `[0, 1]`, or `Exponential { w }` with finite `w`; otherwise `MoranUpdate::new` returns `GameError::Population`. `w` is the intensity of selection. |
 | `mutation: f64` | — (required) | tunable | Probability in `[0, 1]` that the offspring takes a mutant instead of the parent's action (a uniformly drawn action in a finite game, which may coincide with the parent's; a Gaussian perturbation of the parent's action in a continuous game). `0` gives absorbing monomorphic states. |
 | `gaussian_mutation(sd)` | unset | tunable | Continuous games only: the standard deviation $\sigma$ of the Gaussian mutation, the same for every component; finite and `> 0`, else `GameError::Population`. Required when `mutation > 0`; `gaussian_sd()` returns it. |
-| `update: Update` | — (required) | structural | `Update::Synchronous`, the only schedule; it has no default. |
+| `update: Update` | — (required) | structural | `Update::Synchronous`, the only schedule the Moran process supports; it has no default. `assemble_with` rejects `Update::Asynchronous`, and `MoranUpdate` cannot be passed to `assemble_async`: one birth–death event per step has no asynchronous form. |
 
 ## 8. How to apply
 

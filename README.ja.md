@@ -117,7 +117,7 @@ t       game.action_sd.0  game.aggregate.price  game.aggregate.total_output  gam
 | [CLIリファレンス](docs/cli.ja.md) | 全サブコマンド，フラグ，JSONL出力形式 |
 | [ユースケース＆レシピ](docs/usecases.ja.md) | 代表的な研究ワークフローのランブック |
 | [ライブラリAPI](docs/library.ja.md) | カスタムメカニズムの実装とライブラリとしての利用 |
-| [Mechanismカタログ](docs/mechanisms.ja.md) | 全37メカニズム：理論，出典，図解，フェーズ上の位置付け，各メカニズムの適用方法 |
+| [Mechanismカタログ](docs/mechanisms.ja.md) | 全38メカニズム：理論，出典，図解，フェーズ上の位置付け，各メカニズムの適用方法 |
 | [戦略形ゲーム](docs/games.ja.md) | `socsim-games`：段階ゲーム，決定規則，利得規則，実験状態，情報構造，格子とネットワーク上の集団動学，ゲームのソルバー，snapshot から正確に再開できるゲームのシミュレーション |
 | [モジュールパック](docs/packs.ja.md) | 同梱の4つのパック（`hr-lifecycle`，`opinion-dynamics`，`organizational-silence`，`normal-form`）：World のデータモデル，メカニズムの構成，スターターシナリオ，記録されるメトリクス |
 | [アーキテクチャ](docs/architecture.ja.md) | クレート依存グラフ，6フェーズティックループ，キャリブレーション哲学 |

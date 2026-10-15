@@ -78,7 +78,7 @@ PostStep では，`world.held()` は次のステップの行動を持ち，`worl
 | パラメータ | 既定 | 種別 | 備考 |
 |---|---|---|---|
 | `beta: f64` | —（必須） | tunable | 模倣の率 $\beta$．`ProportionalImitation::new` は有限かつ `> 0` を求め，`assemble_with` は $\beta \le 1/\Delta\pi$ を求める（`GameError::Population`）． |
-| `update: Update` | —（必須） | structural | `Update::Synchronous`．方式はこれだけで，既定値は無い． |
+| `update: Update` | —（必須） | structural | ここでは `Update::Synchronous`．方式を足しても既存の設定が変わらないよう，既定値は無い．`Update::Asynchronous` は `assemble_with` が拒否し，`assemble_async` でだけ使える．そのときこの規則は [`async_population_step`](async-population-step.ja.md) として動く． |
 
 1 回の対戦の値域 $[p_{\min}, p_{\max}]$ と Matching の `encounter_bounds` `min..max` から $\Delta\pi$ を求める方法は次のとおりです．
 

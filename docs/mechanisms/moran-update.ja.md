@@ -80,7 +80,7 @@ PostStep では，`world.held()` はすでに入れ替えを含み，`world.payo
 | `fitness: Fitness` | —（必須） | tunable | `Linear { w }`（`w` は `[0, 1]`）か `Exponential { w }`（`w` は有限）．そうでなければ `MoranUpdate::new` が `GameError::Population` を返す．`w` は選択の強さ． |
 | `mutation: f64` | —（必須） | tunable | 子が親の行動の代わりに変異体を採る確率．`[0, 1]`（有限ゲームでは一様に引いた行動で，親の行動と一致することもある．連続ゲームでは親の行動のガウスの摂動）．`0` なら単型の状態が吸収状態になる． |
 | `gaussian_mutation(sd)` | 未設定 | tunable | 連続ゲームだけ．ガウスの突然変異の標準偏差 $\sigma$（全成分で共通）．有限で `> 0`．そうでなければ `GameError::Population`．`mutation > 0` なら必須．`gaussian_sd()` が返す． |
-| `update: Update` | —（必須） | structural | `Update::Synchronous`．方式はこれだけで，既定値は無い． |
+| `update: Update` | —（必須） | structural | `Update::Synchronous`．モラン過程が受け付ける方式はこれだけで，既定値は無い．`assemble_with` は `Update::Asynchronous` を拒否し，`MoranUpdate` は `assemble_async` に渡せない．1 ステップに 1 回の出生と死亡には非同期版が無い． |
 
 ## 8. 適用方法
 

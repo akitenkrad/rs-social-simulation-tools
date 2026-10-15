@@ -72,7 +72,7 @@ PostStep では，`world.held()` は次のステップの行動を持ち，`worl
 | パラメータ | 既定 | 種別 | 備考 |
 |---|---|---|---|
 | `k: f64` | —（必須） | tunable | 雑音 $K$．有限かつ `> 0` でなければ `FermiUpdate::new` が `GameError::Population` を返す．上限は無い． |
-| `update: Update` | —（必須） | structural | `Update::Synchronous`．方式はこれだけで，既定値は無い． |
+| `update: Update` | —（必須） | structural | ここでは `Update::Synchronous`．方式を足しても既存の設定が変わらないよう，既定値は無い．`Update::Asynchronous` は `assemble_with` が拒否し，`assemble_async` でだけ使える．そのときこの規則は [`async_population_step`](async-population-step.ja.md) として動く． |
 
 ## 8. 適用方法
 

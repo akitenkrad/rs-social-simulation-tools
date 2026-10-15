@@ -78,7 +78,7 @@ $$a_i^{t+1} = a_{j^*}^{t}, \qquad j^* \in \arg\max_{j \in \{i\} \cup N(i)} \pi_j
 
 | パラメータ | 既定 | 種別 | 備考 |
 |---|---|---|---|
-| `update: Update` | —（必須） | structural | `Update::Synchronous`．方式はこれだけ．方式を足しても既存の設定が変わらないよう，既定値は無い． |
+| `update: Update` | —（必須） | structural | ここでは `Update::Synchronous`．方式を足しても既存の設定が変わらないよう，既定値は無い．`Update::Asynchronous` は `assemble_with` が拒否し，`assemble_async` でだけ使える．そのときこの規則は [`async_population_step`](async-population-step.ja.md) として動く． |
 | `tie_break(ImitationTie)` | `KeepOwn` | structural | `KeepOwn`：自分の利得が最高に並ぶなら自分の行動を保ち，そうでなければ最高の近傍のうち最小の行動の添字を採る．`LowestAction`：最高の利得に並ぶ自分と近傍のうち最小の行動の添字を採る．連続ゲームでの «最小の行動» は辞書式に最小の行動ベクトル（成分は `f64::total_cmp` で比べ，長さが違えば短い方が先）． |
 
 ## 8. 適用方法

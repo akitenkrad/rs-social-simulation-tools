@@ -75,7 +75,9 @@ networks), `socsim-grid` (spatial), `socsim-packs` (bundled CLI packs),
 (learnable policies), `socsim-llm` (LLM agents), `socsim-games` (normal-form
 games: stage games, decision rules, matching, payoffs, per-step metrics
 `game_metrics`, population dynamics of held agents `imitate_best` /
-`fermi_update` / `replicator_update` / `moran_update` via `assemble_with`;
+`fermi_update` / `replicator_update` / `moran_update` via `assemble_with`,
+and their asynchronous in-place form `async_population_step` via
+`assemble_async`;
 features `core` / `engine`, `socsim-net` only with feature `net` (network
 topology, `NetworkEdges`), `socsim-grid` only with feature `grid` (lattice
 topology, `GridNeighborhood`), `socsim-llm` only with feature `llm`,

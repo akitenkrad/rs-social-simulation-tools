@@ -103,7 +103,7 @@ describes the step just played (see
 | Parameter | Default | Kind | Notes |
 |---|---|---|---|
 | `beta: f64` | — (required) | tunable | The imitation rate $\beta$. `ProportionalImitation::new` requires it finite and `> 0`; `assemble_with` requires $\beta \le 1/\Delta\pi$ (`GameError::Population`). |
-| `update: Update` | — (required) | structural | `Update::Synchronous`, the only schedule; it has no default. |
+| `update: Update` | — (required) | structural | `Update::Synchronous` here; it has no default so that adding schedules cannot change an existing configuration. `Update::Asynchronous` is rejected by `assemble_with` and is used only through `assemble_async`, which runs this rule as [`async_population_step`](async-population-step.md). |
 
 How $\Delta\pi$ follows from the one-encounter range $[p_{\min}, p_{\max}]$
 and the matching's `encounter_bounds` `min..max`:

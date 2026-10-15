@@ -104,7 +104,7 @@ It writes nothing else: no history, no play arena, no payoff.
 
 | Parameter | Default | Kind | Notes |
 |---|---|---|---|
-| `update: Update` | — (required) | structural | `Update::Synchronous`, the only schedule; it has no default so that adding schedules cannot change an existing configuration. |
+| `update: Update` | — (required) | structural | `Update::Synchronous` here; it has no default so that adding schedules cannot change an existing configuration. `Update::Asynchronous` is rejected by `assemble_with` and is used only through `assemble_async`, which runs this rule as [`async_population_step`](async-population-step.md). |
 | `tie_break(ImitationTie)` | `KeepOwn` | structural | `KeepOwn`: keep the own action when the own payoff is among the highest, else adopt the lowest action index among the best neighbours. `LowestAction`: adopt the lowest action index among the agent and its neighbours that share the highest payoff. In a continuous game "the lowest action" is the lexicographically smallest action vector (components compared with `f64::total_cmp`, a shorter vector first). |
 
 ## 8. How to apply
