@@ -282,7 +282,11 @@ impl SolutionSet {
         Ok(())
     }
 
-    fn finite_action_counts(&self, id: &str, kind: &str) -> Result<Vec<usize>, ExportError> {
+    pub(super) fn finite_action_counts(
+        &self,
+        id: &str,
+        kind: &str,
+    ) -> Result<Vec<usize>, ExportError> {
         match &self.game.data {
             GameCopyData::Finite { action_labels } => {
                 Ok(action_labels.iter().map(Vec::len).collect())

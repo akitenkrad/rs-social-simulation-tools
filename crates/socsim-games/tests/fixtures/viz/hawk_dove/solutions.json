@@ -1,0 +1,155 @@
+{
+  "schema": "socsim-games.solutions",
+  "version": 1,
+  "game": {
+    "name": "hawk_dove",
+    "n_roles": 2,
+    "action_labels": [
+      [
+        "H",
+        "D"
+      ],
+      [
+        "H",
+        "D"
+      ]
+    ]
+  },
+  "solutions": [
+    {
+      "id": "pure-0",
+      "solver": "pure_nash",
+      "kind": "nash",
+      "strategies": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "payoffs": [
+        2.0,
+        0.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "pure-1",
+      "solver": "pure_nash",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0
+        ]
+      ],
+      "payoffs": [
+        0.0,
+        2.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "se-0",
+      "solver": "support_enumeration",
+      "kind": "nash",
+      "strategies": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "payoffs": [
+        2.0,
+        0.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "se-1",
+      "solver": "support_enumeration",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.5000000000000001,
+          0.5
+        ],
+        [
+          0.5000000000000001,
+          0.5
+        ]
+      ],
+      "payoffs": [
+        0.5,
+        0.5
+      ],
+      "regret": 0.0,
+      "pure": false
+    },
+    {
+      "id": "se-2",
+      "solver": "support_enumeration",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0
+        ]
+      ],
+      "payoffs": [
+        0.0,
+        2.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "rep-0",
+      "solver": "replicator_fixed_points",
+      "kind": "population",
+      "shares": [
+        1.0,
+        0.0
+      ],
+      "ess": "false"
+    },
+    {
+      "id": "rep-1",
+      "solver": "replicator_fixed_points",
+      "kind": "population",
+      "shares": [
+        0.0,
+        1.0
+      ],
+      "ess": "false"
+    },
+    {
+      "id": "rep-2",
+      "solver": "replicator_fixed_points",
+      "kind": "population",
+      "shares": [
+        0.5,
+        0.49999999999999994
+      ],
+      "ess": "true"
+    }
+  ]
+}

@@ -242,7 +242,7 @@ fn validate_strategy_dimension(
     Ok(())
 }
 
-fn replicator_derivative(payoffs: &[Vec<f64>], state: &[f64]) -> Vec<f64> {
+pub(crate) fn replicator_derivative(payoffs: &[Vec<f64>], state: &[f64]) -> Vec<f64> {
     let fitness = payoffs
         .iter()
         .map(|row| row.iter().zip(state).map(|(a, x)| a * x).sum::<f64>())

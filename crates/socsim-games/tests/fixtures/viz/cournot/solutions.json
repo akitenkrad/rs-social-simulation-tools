@@ -1,0 +1,39 @@
+{
+  "schema": "socsim-games.solutions",
+  "version": 1,
+  "game": {
+    "name": "cournot",
+    "n_roles": 3,
+    "dimension_labels": [
+      [
+        "x0"
+      ],
+      [
+        "x0"
+      ],
+      [
+        "x0"
+      ]
+    ]
+  },
+  "solutions": [
+    {
+      "id": "br",
+      "solver": "best_response_iteration",
+      "kind": "continuous",
+      "actions": [
+        [
+          22.5
+        ],
+        [
+          22.5
+        ],
+        [
+          22.5
+        ]
+      ],
+      "residual": 0.0,
+      "converged": true
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "schema": "socsim-games.solutions",
+  "version": 1,
+  "game": {
+    "name": "matching_pennies",
+    "n_roles": 2,
+    "action_labels": [
+      [
+        "H",
+        "T"
+      ],
+      [
+        "H",
+        "T"
+      ]
+    ]
+  },
+  "solutions": [
+    {
+      "id": "se-0",
+      "solver": "support_enumeration",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.5,
+          0.49999999999999994
+        ],
+        [
+          0.5,
+          0.49999999999999994
+        ]
+      ],
+      "payoffs": [
+        -3.0814879110195774e-33,
+        3.0814879110195774e-33
+      ],
+      "regret": 5.551115123125783e-17,
+      "pure": false
+    },
+    {
+      "id": "minimax",
+      "solver": "zero_sum_minimax",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.5,
+          0.5
+        ]
+      ],
+      "payoffs": [
+        0.0,
+        -0.0
+      ],
+      "regret": 0.0,
+      "pure": false
+    },
+    {
+      "id": "qre",
+      "solver": "logit_qre",
+      "kind": "qre",
+      "lambda": 1.0,
+      "strategies": [
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.5,
+          0.5
+        ]
+      ],
+      "residual": 0.0
+    }
+  ]
+}

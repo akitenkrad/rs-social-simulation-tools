@@ -1,0 +1,146 @@
+{
+  "schema": "socsim-games.solutions",
+  "version": 1,
+  "game": {
+    "name": "battle_of_sexes",
+    "n_roles": 2,
+    "action_labels": [
+      [
+        "B",
+        "V"
+      ],
+      [
+        "B",
+        "V"
+      ]
+    ]
+  },
+  "solutions": [
+    {
+      "id": "pure-0",
+      "solver": "pure_nash",
+      "kind": "nash",
+      "strategies": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          1.0,
+          0.0
+        ]
+      ],
+      "payoffs": [
+        2.0,
+        1.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "pure-1",
+      "solver": "pure_nash",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "payoffs": [
+        1.0,
+        2.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "se-0",
+      "solver": "support_enumeration",
+      "kind": "nash",
+      "strategies": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          1.0,
+          0.0
+        ]
+      ],
+      "payoffs": [
+        2.0,
+        1.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "se-1",
+      "solver": "support_enumeration",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.6,
+          0.4000000000000001
+        ],
+        [
+          0.4000000000000001,
+          0.6
+        ]
+      ],
+      "payoffs": [
+        0.20000000000000007,
+        0.20000000000000007
+      ],
+      "regret": 1.1102230246251565e-16,
+      "pure": false
+    },
+    {
+      "id": "se-2",
+      "solver": "support_enumeration",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "payoffs": [
+        1.0,
+        2.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "lh",
+      "solver": "lemke_howson",
+      "kind": "nash",
+      "strategies": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          1.0,
+          0.0
+        ]
+      ],
+      "payoffs": [
+        2.0,
+        1.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    }
+  ]
+}

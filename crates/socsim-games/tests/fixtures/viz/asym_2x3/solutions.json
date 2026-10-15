@@ -1,0 +1,87 @@
+{
+  "schema": "socsim-games.solutions",
+  "version": 1,
+  "game": {
+    "name": "asym_2x3",
+    "n_roles": 2,
+    "action_labels": [
+      [
+        "U",
+        "D"
+      ],
+      [
+        "L",
+        "C",
+        "R"
+      ]
+    ]
+  },
+  "solutions": [
+    {
+      "id": "pure-0",
+      "solver": "pure_nash",
+      "kind": "nash",
+      "strategies": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "payoffs": [
+        3.0,
+        2.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "se-0",
+      "solver": "support_enumeration",
+      "kind": "nash",
+      "strategies": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "payoffs": [
+        3.0,
+        2.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "lh",
+      "solver": "lemke_howson",
+      "kind": "nash",
+      "strategies": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "payoffs": [
+        3.0,
+        2.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    }
+  ]
+}

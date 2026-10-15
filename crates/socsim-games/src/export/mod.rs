@@ -7,6 +7,7 @@
 //! rename. This crate never writes these artifacts implicitly: callers must
 //! invoke one of the writing functions.
 
+mod convert;
 mod error;
 mod solutions;
 mod spec;

@@ -271,6 +271,11 @@ name = "export_spec"
 path = "tests/export_spec.rs"
 required-features = ["export"]
 
+[[test]]
+name = "export_solutions"
+path = "tests/export_solutions.rs"
+required-features = ["export"]
+
 [[example]]
 name = "ipd_pair"
 path = "examples/ipd_pair.rs"
@@ -300,3 +305,8 @@ required-features = ["core", "engine"]
 name = "cournot"
 path = "examples/cournot.rs"
 required-features = ["core", "engine"]
+
+[[example]]
+name = "export_games"
+path = "examples/export_games.rs"
+required-features = ["export"]

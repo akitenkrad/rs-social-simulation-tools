@@ -1,0 +1,67 @@
+{
+  "schema": "socsim-games.solutions",
+  "version": 1,
+  "game": {
+    "name": "replicator_component",
+    "n_roles": 2,
+    "action_labels": [
+      [
+        "a0",
+        "a1",
+        "a2"
+      ],
+      [
+        "a0",
+        "a1",
+        "a2"
+      ]
+    ]
+  },
+  "solutions": [
+    {
+      "id": "rep-0",
+      "solver": "replicator_fixed_points",
+      "kind": "population",
+      "shares": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "ess": "true"
+    },
+    {
+      "id": "rep-c0",
+      "solver": "replicator_fixed_points",
+      "kind": "population_component",
+      "base": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "directions": [
+        [
+          1.0,
+          -1.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "id": "rep-c1",
+      "solver": "replicator_fixed_points",
+      "kind": "population_component",
+      "base": [
+        0.49999999999999994,
+        0.0,
+        0.5
+      ],
+      "directions": [
+        [
+          -0.9999999999999999,
+          1.0,
+          0.0
+        ]
+      ]
+    }
+  ]
+}
