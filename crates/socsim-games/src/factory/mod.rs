@@ -14,11 +14,10 @@
 //! 1. the world is built by [`build_world_with`] from the game, the
 //!    registered rules, the assignment, and the initial held actions;
 //! 2. the topology, if any, is attached with [`GameWorld::with_topology`];
-//! 3. the matching, the rules, the play path, and the population dynamic are
-//!    validated and turned into mechanisms by the same internal procedure as
-//!    [`assemble_with`](crate::assemble_with), in the order `game_match`,
-//!    `game_decide`, the population dynamic (if any), and `game_play`;
-//! 4. the per-step metrics, if requested, are appended as `game_metrics`.
+//! 3. the selected population-dynamics type state dispatches to the matching
+//!    synchronous or asynchronous assembly procedure;
+//! 4. the per-step metrics, if requested, are appended as `game_metrics` with
+//!    payoff descriptions matching that procedure.
 //!
 //! # Random streams
 //!
@@ -47,13 +46,14 @@ mod trial;
 #[cfg(feature = "config")]
 pub use trial::GameTrialFactory;
 
-use crate::assemble::{assemble_parts, AssembledParts};
+use crate::assemble::{assemble_async_parts, assemble_parts, AssembledParts};
 use crate::{
     build_world_with, AggregateGame, AnonymousGame, AssignGroup, AssignKind, Assignment,
-    ContinuousGame, ContinuousMetrics, ContinuousMetricsOptions, Counting, DecisionRule,
-    ExperimentState, FiniteGame, GameError, GameMetrics, GameWorld, InitialActions, KindCatalog,
-    Matching, MetricsOptions, NoDynamics, NormalFormOutcome, OutcomeRule, Pairwise, PlayOptions,
-    PlayPath, PopulationDynamics, RuleBook, StageGame, Topology, WithAggregates,
+    AsyncPopulationStep, ContinuousGame, ContinuousMetrics, ContinuousMetricsOptions, Counting,
+    DecisionRule, ExperimentState, FiniteGame, GameError, GameMetrics, GameWorld, InitialActions,
+    KindCatalog, Matching, MetricsOptions, NoDynamics, NormalFormGame, NormalFormOutcome,
+    OutcomeRule, Pairwise, PayoffTiming, PlayOptions, PlayPath, PopulationDynamics, RuleBook,
+    StageGame, Topology, WithAggregates,
 };
 
 /// Type-state marker of a [`GameSimFactory`] whose matching is not set yet.
@@ -91,8 +91,79 @@ impl SchedulerChoice {
 
 /// Builds the per-step metrics mechanism for a game.
 type MetricsCtor<G, X> = Arc<
-    dyn Fn(&G) -> Result<Box<dyn Mechanism<GameWorld<G, X>>>, GameError> + Send + Sync + 'static,
+    dyn Fn(&G, PayoffTiming) -> Result<Box<dyn Mechanism<GameWorld<G, X>>>, GameError>
+        + Send
+        + Sync
+        + 'static,
 >;
+
+mod sealed {
+    use super::*;
+
+    type Synchronous = ();
+    type Asynchronous = bool;
+
+    pub(super) trait FactoryBuild<G, X, M, P, K>: Clone
+    where
+        G: StageGame,
+        X: ExperimentState,
+    {
+        fn assemble(
+            &self,
+            world: GameWorld<G, X>,
+            matching: M,
+            rules: RuleBook<G, X>,
+            play: P,
+            options: PlayOptions<G::Action>,
+            seed: u64,
+        ) -> Result<(AssembledParts<G, X>, PayoffTiming), GameError>;
+    }
+
+    impl<G, X, M, P, D> FactoryBuild<G, X, M, P, Synchronous> for D
+    where
+        G: StageGame,
+        X: ExperimentState,
+        M: Matching<G, X> + 'static,
+        P: PlayPath<G, X>,
+        D: PopulationDynamics<G, X> + Clone,
+    {
+        fn assemble(
+            &self,
+            world: GameWorld<G, X>,
+            matching: M,
+            rules: RuleBook<G, X>,
+            play: P,
+            options: PlayOptions<G::Action>,
+            seed: u64,
+        ) -> Result<(AssembledParts<G, X>, PayoffTiming), GameError> {
+            let parts = assemble_parts(world, matching, rules, play, self.clone(), options, seed)?;
+            Ok((parts, PayoffTiming::BeforeUpdate))
+        }
+    }
+
+    impl<G, X, M, P, D> FactoryBuild<G, X, M, P, Asynchronous> for AsyncPopulationStep<D>
+    where
+        G: NormalFormGame,
+        G::Action: crate::mechanism::ActionSpace<G>,
+        X: ExperimentState,
+        M: Matching<G, X> + 'static,
+        P: PlayPath<G, X>,
+        D: crate::mechanism::AsyncDynamics<G, X> + Clone,
+    {
+        fn assemble(
+            &self,
+            world: GameWorld<G, X>,
+            matching: M,
+            _rules: RuleBook<G, X>,
+            play: P,
+            options: PlayOptions<G::Action>,
+            seed: u64,
+        ) -> Result<(AssembledParts<G, X>, PayoffTiming), GameError> {
+            let parts = assemble_async_parts(world, matching, play, self.clone(), options, seed)?;
+            Ok((parts, PayoffTiming::AfterUpdate))
+        }
+    }
+}
 
 /// A reusable, type-checked configuration of a game simulation.
 ///
@@ -125,7 +196,7 @@ type MetricsCtor<G, X> = Arc<
 /// | [`topology`](Self::topology) | [`Topology::None`] |
 /// | [`play_options`](Self::play_options) | [`PlayOptions::new`] |
 /// | [`outcome`](Self::outcome) or [`counting_play`](Self::counting_play), then optionally [`aggregates`](Self::aggregates) | pairwise play with [`NormalFormOutcome`], no aggregates |
-/// | [`dynamics`](Self::dynamics) | [`NoDynamics`] |
+/// | [`dynamics`](Self::dynamics) or [`async_dynamics`](Self::async_dynamics) | [`NoDynamics`] |
 /// | [`metrics`](Self::metrics), [`continuous_metrics`](Self::continuous_metrics) | no metrics |
 /// | [`scheduler`](Self::scheduler) | [`SchedulerChoice::Sequential`] |
 ///
@@ -341,6 +412,20 @@ impl<G: StageGame, X: ExperimentState, M, P, D> GameSimFactory<G, X, M, P, D> {
         self.replace(|matching, play, _| (matching, play, dynamics))
     }
 
+    /// Sets an in-place asynchronous population step; this changes the type
+    /// state.
+    ///
+    /// The asynchronous assembly path supports held populations with an
+    /// implicit grid, network, or whole-population matching. Calling
+    /// [`dynamics`](Self::dynamics) or `async_dynamics` again replaces the
+    /// earlier setting, so the method called last selects the assembly path.
+    pub fn async_dynamics<D2>(
+        self,
+        step: AsyncPopulationStep<D2>,
+    ) -> GameSimFactory<G, X, M, P, AsyncPopulationStep<D2>> {
+        self.replace(|matching, play, _| (matching, play, step))
+    }
+
     /// Sets the per-step [`GameMetrics`] built from `options` (replaces any
     /// metrics set earlier).
     ///
@@ -353,9 +438,11 @@ impl<G: StageGame, X: ExperimentState, M, P, D> GameSimFactory<G, X, M, P, D> {
     where
         G: FiniteGame,
     {
-        self.metrics = Some(Arc::new(move |game: &G| {
-            let metrics: Box<dyn Mechanism<GameWorld<G, X>>> =
-                Box::new(GameMetrics::new(game, options.clone())?);
+        self.metrics = Some(Arc::new(move |game: &G, payoff_timing| {
+            let metrics: Box<dyn Mechanism<GameWorld<G, X>>> = Box::new(GameMetrics::new(
+                game,
+                options.clone().payoff_timing(payoff_timing),
+            )?);
             Ok(metrics)
         }));
         self
@@ -371,9 +458,11 @@ impl<G: StageGame, X: ExperimentState, M, P, D> GameSimFactory<G, X, M, P, D> {
     where
         G: ContinuousGame,
     {
-        self.metrics = Some(Arc::new(move |game: &G| {
-            let metrics: Box<dyn Mechanism<GameWorld<G, X>>> =
-                Box::new(ContinuousMetrics::new(game, options.clone())?);
+        self.metrics = Some(Arc::new(move |game: &G, payoff_timing| {
+            let metrics: Box<dyn Mechanism<GameWorld<G, X>>> = Box::new(ContinuousMetrics::new(
+                game,
+                options.clone().payoff_timing(payoff_timing),
+            )?);
             Ok(metrics)
         }));
         self
@@ -506,20 +595,24 @@ where
     }
 }
 
+#[allow(private_bounds)]
 impl<G, X, M, P, D> GameSimFactory<G, X, M, P, D>
 where
     G: StageGame + Clone,
     X: ExperimentState + Clone,
     M: Matching<G, X> + Clone + 'static,
     P: PlayPath<G, X> + Clone,
-    D: PopulationDynamics<G, X> + Clone,
+    D: Clone,
 {
     /// Builds a simulation for `seed`.
     ///
     /// The simulation records into the engine's null recorder; use
     /// [`into_builder`](Self::into_builder) to attach a recorder.
-    pub fn build(&self, seed: u64) -> Result<Simulation<GameWorld<G, X>>, GameError> {
-        Ok(self.into_builder(seed)?.build())
+    pub fn build<K>(&self, seed: u64) -> Result<Simulation<GameWorld<G, X>>, GameError>
+    where
+        D: sealed::FactoryBuild<G, X, M, P, K>,
+    {
+        Ok(self.into_builder::<K>(seed)?.build())
     }
 
     /// Builds a [`SimulationBuilder`] for `seed`, with every mechanism, the
@@ -527,8 +620,14 @@ where
     ///
     /// Further mechanisms (environment or reward mechanisms, for example) and
     /// a recorder can be added before `build`.
-    pub fn into_builder(&self, seed: u64) -> Result<SimulationBuilder<GameWorld<G, X>>, GameError> {
-        let parts = self.parts(seed)?;
+    pub fn into_builder<K>(
+        &self,
+        seed: u64,
+    ) -> Result<SimulationBuilder<GameWorld<G, X>>, GameError>
+    where
+        D: sealed::FactoryBuild<G, X, M, P, K>,
+    {
+        let parts = self.parts::<K>(seed)?;
         let builder = parts
             .mechanisms
             .into_iter()
@@ -549,8 +648,11 @@ where
     /// private `execute_trial` kernel), the world's clock is reset to
     /// `scenario.simulation.t_max`, so the factory's [`t_max`](Self::t_max) is
     /// not used there.
-    pub fn build_trial(&self, seed: u64) -> Result<Trial<GameWorld<G, X>>, GameError> {
-        let parts = self.parts(seed)?;
+    pub fn build_trial<K>(&self, seed: u64) -> Result<Trial<GameWorld<G, X>>, GameError>
+    where
+        D: sealed::FactoryBuild<G, X, M, P, K>,
+    {
+        let parts = self.parts::<K>(seed)?;
         Ok(Trial::new(
             parts.world,
             parts.mechanisms,
@@ -561,7 +663,10 @@ where
 
     /// The single build procedure behind `build`, `into_builder`, and
     /// `build_trial`.
-    fn parts(&self, seed: u64) -> Result<AssembledParts<G, X>, GameError> {
+    fn parts<K>(&self, seed: u64) -> Result<AssembledParts<G, X>, GameError>
+    where
+        D: sealed::FactoryBuild<G, X, M, P, K>,
+    {
         let n_agents = self
             .n_agents
             .ok_or_else(|| missing("agents", "the number of agents is required"))?;
@@ -605,17 +710,17 @@ where
             Some(topology) => world.with_topology(topology.clone())?,
             None => world,
         };
-        let mut parts = assemble_parts(
+        let (mut parts, payoff_timing) = sealed::FactoryBuild::<G, X, M, P, K>::assemble(
+            &self.dynamics,
             world,
             self.matching.clone(),
             rules,
             self.play.clone(),
-            self.dynamics.clone(),
             self.play_options.clone(),
             seed,
         )?;
         if let Some(metrics) = &self.metrics {
-            let mechanism = metrics(parts.world.game())?;
+            let mechanism = metrics(parts.world.game(), payoff_timing)?;
             parts.mechanisms.push(mechanism);
         }
         Ok(parts)
@@ -649,4 +754,154 @@ fn default_initial_held<A: 'static>() -> Option<InitialActions<A>> {
     zero.downcast::<A>()
         .ok()
         .map(|action| InitialActions::Same(*action))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+    use crate::catalog::PublicGoodsFinite;
+    use crate::{AsyncPopulationStep, ProportionalImitation, Update, WholePopulation};
+
+    const SEED: u64 = 37;
+    const AFTER_UPDATE_DESCRIPTION: &str =
+        "the actions held after every update of the step (asynchronous update)";
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct MetricsObservation {
+        timing: PayoffTiming,
+        mean_payoff_description: String,
+    }
+
+    type TestFactory<M, P, D> = GameSimFactory<PublicGoodsFinite, (), M, P, D>;
+    type MetricsObservations = Arc<Mutex<Vec<MetricsObservation>>>;
+    type TimingObservations = Arc<Mutex<Vec<PayoffTiming>>>;
+
+    fn base_factory() -> GameSimFactory<PublicGoodsFinite, (), WholePopulation, Counting, NoDynamics>
+    {
+        GameSimFactory::new(PublicGoodsFinite::new(4, 3.0, 1.0).unwrap())
+            .agents(4)
+            .matching(WholePopulation::new())
+            .counting_play()
+            .initial_held(InitialActions::PerAgent(vec![0, 1, 0, 1]))
+            .history_len(2)
+            .t_max(1)
+    }
+
+    fn asynchronous_step() -> AsyncPopulationStep<ProportionalImitation> {
+        AsyncPopulationStep::new(ProportionalImitation::new(0.1, Update::Asynchronous).unwrap())
+    }
+
+    fn synchronous_dynamics() -> ProportionalImitation {
+        ProportionalImitation::new(0.1, Update::Synchronous).unwrap()
+    }
+
+    fn observe_metrics<M, P, D>(
+        mut factory: TestFactory<M, P, D>,
+        options: MetricsOptions,
+    ) -> (TestFactory<M, P, D>, MetricsObservations) {
+        let observations = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&observations);
+        factory.metrics = Some(Arc::new(move |game, timing| {
+            let metrics = GameMetrics::new(game, options.clone().payoff_timing(timing))?;
+            let mean_payoff_description = metrics
+                .describe()
+                .into_iter()
+                .find_map(|(column, description)| {
+                    (column == "game.mean_payoff").then_some(description)
+                })
+                .expect("game.mean_payoff must be described");
+            captured.lock().unwrap().push(MetricsObservation {
+                timing,
+                mean_payoff_description,
+            });
+            Ok(Box::new(metrics))
+        }));
+        (factory, observations)
+    }
+
+    fn observations(observations: &MetricsObservations) -> Vec<MetricsObservation> {
+        observations.lock().unwrap().clone()
+    }
+
+    fn observe_existing_metrics_ctor<M, P, D>(
+        mut factory: TestFactory<M, P, D>,
+    ) -> (TestFactory<M, P, D>, TimingObservations) {
+        let metrics = factory.metrics.take().expect("metrics must be configured");
+        let timings = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&timings);
+        factory.metrics = Some(Arc::new(move |game, timing| {
+            captured.lock().unwrap().push(timing);
+            metrics(game, timing)
+        }));
+        (factory, timings)
+    }
+
+    #[test]
+    fn async_build_entry_points_pass_after_update_to_metrics_ctor() {
+        let (factory, observed) = observe_metrics(
+            base_factory().async_dynamics(asynchronous_step()),
+            MetricsOptions::new(),
+        );
+
+        factory.build(SEED).unwrap();
+        factory.into_builder(SEED).unwrap();
+        factory.build_trial(SEED).unwrap();
+
+        assert_eq!(
+            observations(&observed)
+                .into_iter()
+                .map(|observation| observation.timing)
+                .collect::<Vec<_>>(),
+            vec![PayoffTiming::AfterUpdate; 3]
+        );
+    }
+
+    #[test]
+    fn synchronous_and_absent_dynamics_pass_before_update_to_metrics_ctor() {
+        let (synchronous, synchronous_observed) = observe_metrics(
+            base_factory().dynamics(synchronous_dynamics()),
+            MetricsOptions::new(),
+        );
+        synchronous.build(SEED).unwrap();
+
+        let (absent, absent_observed) = observe_metrics(base_factory(), MetricsOptions::new());
+        absent.build(SEED).unwrap();
+
+        assert_eq!(
+            observations(&synchronous_observed)[0].timing,
+            PayoffTiming::BeforeUpdate
+        );
+        assert_eq!(
+            observations(&absent_observed)[0].timing,
+            PayoffTiming::BeforeUpdate
+        );
+    }
+
+    #[test]
+    fn async_state_overrides_explicit_before_update_in_metrics_description() {
+        let explicit_before = MetricsOptions::new().payoff_timing(PayoffTiming::BeforeUpdate);
+        let (factory, ctor_timings) = observe_existing_metrics_ctor(
+            base_factory()
+                .async_dynamics(asynchronous_step())
+                .metrics(explicit_before.clone()),
+        );
+        factory.build(SEED).unwrap();
+        assert_eq!(
+            ctor_timings.lock().unwrap().as_slice(),
+            &[PayoffTiming::AfterUpdate]
+        );
+
+        let (factory, observed) = observe_metrics(
+            base_factory().async_dynamics(asynchronous_step()),
+            explicit_before,
+        );
+        factory.build(SEED).unwrap();
+        let observed = observations(&observed);
+        assert_eq!(observed[0].timing, PayoffTiming::AfterUpdate);
+        assert!(observed[0]
+            .mean_payoff_description
+            .contains(AFTER_UPDATE_DESCRIPTION));
+    }
 }

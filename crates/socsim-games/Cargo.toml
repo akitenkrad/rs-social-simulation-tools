@@ -246,6 +246,11 @@ path = "tests/factory_typestate.rs"
 required-features = ["factory", "grid"]
 
 [[test]]
+name = "factory_async"
+path = "tests/factory_async.rs"
+required-features = ["factory", "metrics", "net", "grid"]
+
+[[test]]
 name = "params_roundtrip"
 path = "tests/params_roundtrip.rs"
 required-features = ["config"]
