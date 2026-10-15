@@ -11,6 +11,7 @@ use super::population::{
     check_dynamics, check_payoffs, CopyKernel, FermiKernel, ImitateBestKernel, ProportionalKernel,
 };
 use crate::assemble::sealed::DynamicsCheck;
+use crate::outcome::kernel::LocalEncounterIds;
 use crate::{
     CommonActionSpace, ExperimentState, FermiUpdate, FiniteGame, GameError, GameWorld, ImitateBest,
     ImplicitPattern, NormalFormGame, OutcomeContext, PayoffAggregation, ProportionalImitation,
@@ -161,6 +162,7 @@ pub(crate) struct AsyncPopulationMechanism<G: StageGame, X: ExperimentState> {
     aggregate: Option<AggregateCollector<G>>,
     activation: AsyncActivation,
     log_updates: bool,
+    encounter_ids: LocalEncounterIds,
     local: Vec<f64>,
     local_played: Vec<u32>,
     marker: PhantomData<fn() -> X>,
@@ -177,8 +179,9 @@ impl<G: StageGame, X: ExperimentState> AsyncPopulationMechanism<G, X> {
         activation: AsyncActivation,
         log_updates: bool,
         n_agents: usize,
-    ) -> Self {
-        Self {
+        topology: &Topology,
+    ) -> socsim_core::Result<Self> {
+        Ok(Self {
             kernel,
             runner,
             pattern,
@@ -186,10 +189,11 @@ impl<G: StageGame, X: ExperimentState> AsyncPopulationMechanism<G, X> {
             aggregate,
             activation,
             log_updates,
+            encounter_ids: LocalEncounterIds::new(pattern, topology)?,
             local: vec![0.0; n_agents],
             local_played: vec![0; n_agents],
             marker: PhantomData,
-        }
+        })
     }
 
     fn local_payoff(&mut self, world: &GameWorld<G, X>, index: usize) -> socsim_core::Result<()> {
@@ -202,7 +206,14 @@ impl<G: StageGame, X: ExperimentState> AsyncPopulationMechanism<G, X> {
         };
         let result = self
             .runner
-            .local_payoff(self.pattern, &context, &world.ids, index, self.aggregation)
+            .local_payoff(
+                self.pattern,
+                &context,
+                &world.ids,
+                &self.encounter_ids,
+                index,
+                self.aggregation,
+            )
             .ok_or_else(|| {
                 SocsimError::Mechanism(
                     "async_population_step requires a local payoff runner".to_owned(),

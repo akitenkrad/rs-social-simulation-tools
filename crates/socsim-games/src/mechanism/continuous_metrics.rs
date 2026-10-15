@@ -8,7 +8,7 @@ use crate::outcome::kernel::for_each_implicit;
 use crate::world::InternalMetricsState;
 use crate::{
     best_response_iteration, BrIterationOptions, BrStatus, ContinuousGame, ExperimentState,
-    GameError, GameWorld,
+    GameError, GameWorld, PayoffTiming,
 };
 
 /// Selects the equilibrium used by `game.eq_distance` for a continuous game.
@@ -37,6 +37,7 @@ pub struct ContinuousMetricsOptions {
     equilibrium: ContinuousEquilibrium,
     stop_tol: Option<f64>,
     stop_window: u32,
+    payoff_timing: PayoffTiming,
 }
 
 impl ContinuousMetricsOptions {
@@ -47,6 +48,7 @@ impl ContinuousMetricsOptions {
             equilibrium: ContinuousEquilibrium::None,
             stop_tol: None,
             stop_window: 0,
+            payoff_timing: PayoffTiming::BeforeUpdate,
         }
     }
 
@@ -66,6 +68,15 @@ impl ContinuousMetricsOptions {
     pub fn stop(mut self, tol: f64, window: u32) -> Self {
         self.stop_tol = Some(tol);
         self.stop_window = window;
+        self
+    }
+
+    /// Selects the timing described for action and payoff columns.
+    ///
+    /// This changes only [`ContinuousMetrics::describe`], not recorded values.
+    /// The default is [`PayoffTiming::BeforeUpdate`].
+    pub fn payoff_timing(mut self, timing: PayoffTiming) -> Self {
+        self.payoff_timing = timing;
         self
     }
 }
@@ -110,6 +121,7 @@ pub struct ContinuousMetrics<G: ContinuousGame> {
     equilibrium: Option<Vec<Vec<f64>>>,
     stop_tol: Option<f64>,
     stop_window: u32,
+    payoff_timing: PayoffTiming,
     marker: PhantomData<fn() -> G>,
 }
 
@@ -191,6 +203,7 @@ impl<G: ContinuousGame> ContinuousMetrics<G> {
             equilibrium,
             stop_tol: options.stop_tol,
             stop_window: options.stop_window,
+            payoff_timing: options.payoff_timing,
             marker: PhantomData,
         })
     }
@@ -237,8 +250,8 @@ impl<G: ContinuousGame> ContinuousMetrics<G> {
     /// Worlds that bypass the initial- and fallback-action checks through
     /// deserialization or `Simulation::restore` are unsupported.
     pub fn describe(&self) -> Vec<(String, String)> {
-        let (mean, sd) = if self.pooled {
-            (
+        let (mean, sd) = match (self.pooled, self.payoff_timing) {
+            (true, PayoffTiming::BeforeUpdate) => (
                 (
                     "game.mean_action.{d}",
                     "Mean of component d of the actions over all seats played in the step, pooled across roles.",
@@ -247,9 +260,8 @@ impl<G: ContinuousGame> ContinuousMetrics<G> {
                     "game.action_sd.{d}",
                     "Population standard deviation of component d of the actions over all seats played in the step, pooled across roles.",
                 ),
-            )
-        } else {
-            (
+            ),
+            (false, PayoffTiming::BeforeUpdate) => (
                 (
                     "game.mean_action.{role_component}",
                     "Mean of component d of the actions over the seats of role r played in the step. `{role_component}` is `r<r>-<d>`.",
@@ -258,20 +270,48 @@ impl<G: ContinuousGame> ContinuousMetrics<G> {
                     "game.action_sd.{role_component}",
                     "Population standard deviation of component d of the actions over the seats of role r played in the step. `{role_component}` is `r<r>-<d>`.",
                 ),
-            )
+            ),
+            (true, PayoffTiming::AfterUpdate) => (
+                (
+                    "game.mean_action.{d}",
+                    "Mean of component d of the actions held after every update of the step (asynchronous update), over all played seats and pooled across roles.",
+                ),
+                (
+                    "game.action_sd.{d}",
+                    "Population standard deviation of component d of the actions held after every update of the step (asynchronous update), over all played seats and pooled across roles.",
+                ),
+            ),
+            (false, PayoffTiming::AfterUpdate) => (
+                (
+                    "game.mean_action.{role_component}",
+                    "Mean of component d of the actions held after every update of the step (asynchronous update), over the played seats of role r. `{role_component}` is `r<r>-<d>`.",
+                ),
+                (
+                    "game.action_sd.{role_component}",
+                    "Population standard deviation of component d of the actions held after every update of the step (asynchronous update), over the played seats of role r. `{role_component}` is `r<r>-<d>`.",
+                ),
+            ),
+        };
+        let (mean_payoff, payoff_sd) = match self.payoff_timing {
+            PayoffTiming::BeforeUpdate => (
+                "Mean aggregated payoff among agents who played at least once in the step.",
+                "Population standard deviation of aggregated payoff among agents who played at least once in the step.",
+            ),
+            PayoffTiming::AfterUpdate => (
+                "Mean aggregated payoff from play using the actions held after every update of the step (asynchronous update), among agents who played at least once.",
+                "Population standard deviation of aggregated payoff from play using the actions held after every update of the step (asynchronous update), among agents who played at least once.",
+            ),
         };
         let mut descriptions = vec![
             (mean.0.to_owned(), mean.1.to_owned()),
             (sd.0.to_owned(), sd.1.to_owned()),
             (
                 "game.mean_payoff".to_owned(),
-                "Mean aggregated payoff among agents who played at least once in the step."
-                    .to_owned(),
+                mean_payoff.to_owned(),
             ),
             (
                 "game.payoff_sd".to_owned(),
-                "Population standard deviation of aggregated payoff among agents who played at least once in the step."
-                    .to_owned(),
+                payoff_sd.to_owned(),
             ),
             (
                 "game.aggregate.{name}".to_owned(),

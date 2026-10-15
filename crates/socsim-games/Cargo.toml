@@ -206,6 +206,11 @@ path = "tests/async_population.rs"
 required-features = ["core", "engine", "metrics", "net", "grid"]
 
 [[test]]
+name = "huberman_glance"
+path = "tests/huberman_glance.rs"
+required-features = ["core", "engine", "metrics", "grid"]
+
+[[test]]
 name = "moran_fixation"
 path = "tests/moran_fixation.rs"
 required-features = ["core", "engine"]
@@ -268,6 +273,11 @@ required-features = ["core", "engine"]
 [[example]]
 name = "nowak_may"
 path = "examples/nowak_may.rs"
+required-features = ["core", "engine", "grid"]
+
+[[example]]
+name = "huberman_glance"
+path = "examples/huberman_glance.rs"
 required-features = ["core", "engine", "grid"]
 
 [[example]]

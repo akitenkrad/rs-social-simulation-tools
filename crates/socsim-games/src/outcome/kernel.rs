@@ -262,11 +262,73 @@ where
     Ok(())
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct LocalEncounterIds {
+    #[cfg(feature = "grid")]
+    grid_starts: Option<Vec<u32>>,
+}
+
+impl LocalEncounterIds {
+    pub(crate) fn new(pattern: ImplicitPattern, _topology: &Topology) -> socsim_core::Result<Self> {
+        match pattern {
+            #[cfg(feature = "grid")]
+            ImplicitPattern::GridCenter { include_self } => {
+                let Topology::Grid(grid) = _topology else {
+                    return Err(SocsimError::Mechanism(
+                        "implicit grid matching requires a grid topology".to_owned(),
+                    ));
+                };
+                let mut starts = Vec::with_capacity(grid.adjacency().len());
+                let mut next = 0_u32;
+                for index in 0..grid.adjacency().len() {
+                    starts.push(next);
+                    let count = grid
+                        .adjacency()
+                        .neighbors(index)
+                        .len()
+                        .checked_add(usize::from(include_self))
+                        .ok_or_else(|| {
+                            SocsimError::Mechanism("encounter count exceeds usize::MAX".to_owned())
+                        })?;
+                    let count = u32::try_from(count).map_err(|_| {
+                        SocsimError::Mechanism("encounter count exceeds u32::MAX".to_owned())
+                    })?;
+                    next = next.checked_add(count).ok_or_else(|| {
+                        SocsimError::Mechanism("encounter count exceeds u32::MAX".to_owned())
+                    })?;
+                }
+                Ok(Self {
+                    grid_starts: Some(starts),
+                })
+            }
+            #[cfg(not(feature = "grid"))]
+            ImplicitPattern::GridCenter { .. } => Err(SocsimError::Mechanism(
+                "implicit grid matching requires the grid feature".to_owned(),
+            )),
+            _ => Ok(Self::default()),
+        }
+    }
+
+    #[cfg(feature = "grid")]
+    fn grid_start(&self, index: usize) -> socsim_core::Result<u32> {
+        self.grid_starts
+            .as_ref()
+            .and_then(|starts| starts.get(index))
+            .copied()
+            .ok_or_else(|| {
+                SocsimError::Mechanism(format!(
+                    "local encounter id is not initialized for agent {index}"
+                ))
+            })
+    }
+}
+
 fn for_each_local_implicit<A, F>(
     pattern: ImplicitPattern,
     _topology: &Topology,
     ids: &[AgentId],
     held: &[A],
+    _encounter_ids: &LocalEncounterIds,
     index: usize,
     mut visit: F,
 ) -> socsim_core::Result<()>
@@ -304,18 +366,7 @@ where
             else {
                 return Err(SocsimError::Mechanism(format!("unknown agent {}", agent.0)));
             };
-            let preceding = (0..index).try_fold(0_usize, |count, prior| {
-                count
-                    .checked_add(
-                        grid.adjacency().neighbors(prior).len() + usize::from(include_self),
-                    )
-                    .ok_or_else(|| {
-                        SocsimError::Mechanism("encounter count exceeds usize::MAX".to_owned())
-                    })
-            })?;
-            let mut id = u32::try_from(preceding).map_err(|_| {
-                SocsimError::Mechanism("encounter count exceeds u32::MAX".to_owned())
-            })?;
+            let mut id = _encounter_ids.grid_start(index)?;
             for &neighbor in neighbors {
                 emit(id, &[agent, AgentId(neighbor as u64)], Credit::Center, 0)?;
                 id = id.checked_add(1).ok_or_else(|| {
@@ -388,6 +439,7 @@ pub(crate) fn local_payoff_pairwise<G, X, O>(
     context: &OutcomeContext<'_, G, X>,
     ids: &[AgentId],
     outcome: &O,
+    encounter_ids: &LocalEncounterIds,
     index: usize,
     aggregation: PayoffAggregation,
 ) -> socsim_core::Result<(f64, u32)>
@@ -404,6 +456,7 @@ where
         context.topology(),
         ids,
         context.held,
+        encounter_ids,
         index,
         |id, seats, credit, actions, role| {
             payoffs.clear();
@@ -431,12 +484,14 @@ where
     Ok((total, count))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn local_payoff_counting<G: AnonymousGame>(
     pattern: ImplicitPattern,
     game: &G,
     topology: &Topology,
     ids: &[AgentId],
     held: &[usize],
+    encounter_ids: &LocalEncounterIds,
     index: usize,
     aggregation: PayoffAggregation,
 ) -> socsim_core::Result<(f64, u32)> {
@@ -448,6 +503,7 @@ pub(crate) fn local_payoff_counting<G: AnonymousGame>(
         topology,
         ids,
         held,
+        encounter_ids,
         index,
         |_id, _seats, _credit, actions, role| {
             scratch.compute(game, actions)?;
@@ -549,6 +605,7 @@ mod tests {
             held,
             topology,
         };
+        let encounter_ids = LocalEncounterIds::new(pattern, topology).unwrap();
 
         for aggregation in [PayoffAggregation::Sum, PayoffAggregation::Mean] {
             let mut pairwise_payoff = vec![0.0; held.len()];
@@ -583,6 +640,7 @@ mod tests {
                         &context,
                         &ids,
                         &NormalFormOutcome,
+                        &encounter_ids,
                         index,
                         aggregation,
                     )
@@ -591,8 +649,17 @@ mod tests {
                     "pairwise agent {index}, aggregation {aggregation:?}"
                 );
                 assert_eq!(
-                    local_payoff_counting(pattern, game, topology, &ids, held, index, aggregation,)
-                        .unwrap(),
+                    local_payoff_counting(
+                        pattern,
+                        game,
+                        topology,
+                        &ids,
+                        held,
+                        &encounter_ids,
+                        index,
+                        aggregation,
+                    )
+                    .unwrap(),
                     (counting_payoff[index], counting_played[index]),
                     "counting agent {index}, aggregation {aggregation:?}"
                 );
@@ -679,5 +746,51 @@ mod tests {
             ImplicitPattern::WholePopulation,
             &random_held(n_agents, 31),
         );
+    }
+
+    #[test]
+    fn grid_local_encounter_ids_match_full_traversal() {
+        let topology = Topology::grid(GridSpec {
+            rows: 4,
+            cols: 5,
+            boundary: GridBoundary::Fixed,
+            neighborhood: GridNeighbors::Moore,
+        })
+        .unwrap();
+        let pattern = ImplicitPattern::GridCenter { include_self: true };
+        let held = random_held(20, 37);
+        let ids: Vec<_> = (0..held.len()).map(|index| AgentId(index as u64)).collect();
+        let encounter_ids = LocalEncounterIds::new(pattern, &topology).unwrap();
+
+        let mut full = vec![Vec::new(); held.len()];
+        for_each_implicit(
+            pattern,
+            &topology,
+            &ids,
+            &held,
+            |id, seats, _credit, _actions| {
+                full[seats[0].0 as usize].push(id);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        for (index, expected) in full.iter().enumerate() {
+            let mut local = Vec::new();
+            for_each_local_implicit(
+                pattern,
+                &topology,
+                &ids,
+                &held,
+                &encounter_ids,
+                index,
+                |id, _seats, _credit, _actions, _role| {
+                    local.push(id);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(&local, expected, "agent {index}");
+        }
     }
 }

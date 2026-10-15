@@ -19,7 +19,7 @@ pub use continuous_metrics::{ContinuousEquilibrium, ContinuousMetrics, Continuou
 pub use decide::RuleDriver;
 #[cfg(feature = "engine")]
 pub(crate) use matching::MatchMechanism;
-pub use metrics::{EquilibriumTarget, GameMetrics, MetricsOptions, MixedSource};
+pub use metrics::{EquilibriumTarget, GameMetrics, MetricsOptions, MixedSource, PayoffTiming};
 #[cfg(feature = "engine")]
 pub(crate) use play::{
     counting_runner, pairwise_runner, AggregateCollector, KernelRunner, PlayMechanism,

@@ -14,12 +14,12 @@ use socsim_games::catalog::{PrisonersDilemma, PublicGoodsFinite};
 use socsim_games::continuous::PublicGoodsContinuous;
 use socsim_games::{
     assemble_async, assemble_with, build_world, counting_play, AssignGroup, AssignKind, Assignment,
-    AsyncActivation, AsyncPopulationStep, DecisionScope, EncounterRef, FermiUpdate, FiniteGame,
-    Fixed, GameError, GameMetrics, GameWorld, GridBoundary, GridNeighborhood, GridNeighbors,
-    GridSpec, ImitateBest, InitialActions, MetricsOptions, NetworkEdges, NoDynamics,
-    NormalFormOutcome, OnInvalidAction, OutcomeContext, OutcomeRule, Pairwise, PayoffAggregation,
-    PlayOptions, ProportionalImitation, RandomPairs, RuleBook, StageGame, Topology, Update,
-    WholePopulation,
+    AsyncActivation, AsyncPopulationStep, ContinuousMetrics, ContinuousMetricsOptions,
+    DecisionScope, EncounterRef, FermiUpdate, FiniteGame, Fixed, GameError, GameMetrics, GameWorld,
+    GridBoundary, GridNeighborhood, GridNeighbors, GridSpec, ImitateBest, InitialActions,
+    MetricsOptions, NetworkEdges, NoDynamics, NormalFormOutcome, OnInvalidAction, OutcomeContext,
+    OutcomeRule, Pairwise, PayoffAggregation, PayoffTiming, PlayOptions, ProportionalImitation,
+    RandomPairs, RuleBook, StageGame, Topology, Update, WholePopulation,
 };
 
 const SIDE: usize = 99;
@@ -954,5 +954,132 @@ fn continuous_fermi_update_is_deterministic() {
             serde_json::to_string(first.world()).unwrap(),
             serde_json::to_string(second.world()).unwrap()
         );
+    }
+}
+
+fn descriptions_by_pattern(descriptions: Vec<(String, String)>) -> BTreeMap<String, String> {
+    descriptions.into_iter().collect()
+}
+
+#[test]
+fn payoff_timing_changes_only_post_update_descriptions() {
+    const POST_UPDATE: &str =
+        "the actions held after every update of the step (asynchronous update)";
+
+    let finite_game = PrisonersDilemma::weak(1.85).unwrap();
+    let finite_default = GameMetrics::new(&finite_game, MetricsOptions::new().cooperate_label("C"))
+        .unwrap()
+        .describe();
+    let finite_before = GameMetrics::new(
+        &finite_game,
+        MetricsOptions::new()
+            .cooperate_label("C")
+            .payoff_timing(PayoffTiming::BeforeUpdate),
+    )
+    .unwrap()
+    .describe();
+    assert_eq!(finite_default, finite_before);
+
+    let finite_default = descriptions_by_pattern(finite_default);
+    assert_eq!(
+        finite_default["game.played_share.{action}"],
+        "Share of all played seats choosing `{action}`. `{action}` is a metric_id; display labels come from the game's metric actions. Actions are pooled across roles."
+    );
+    assert_eq!(
+        finite_default["game.mean_payoff"],
+        "Mean aggregated payoff among agents who played at least once in the step."
+    );
+    assert_eq!(
+        finite_default["game.payoff_sd"],
+        "Population standard deviation of aggregated payoff among agents who played at least once in the step."
+    );
+    assert_eq!(
+        finite_default["game.coop_rate"],
+        "Share of all played seats choosing the configured cooperation label for that seat's role."
+    );
+
+    let finite_after = descriptions_by_pattern(
+        GameMetrics::new(
+            &finite_game,
+            MetricsOptions::new()
+                .cooperate_label("C")
+                .payoff_timing(PayoffTiming::AfterUpdate),
+        )
+        .unwrap()
+        .describe(),
+    );
+    for pattern in [
+        "game.played_share.{action}",
+        "game.mean_payoff",
+        "game.payoff_sd",
+        "game.coop_rate",
+    ] {
+        assert!(finite_after[pattern].contains(POST_UPDATE));
+        assert_ne!(finite_after[pattern], finite_default[pattern]);
+    }
+    for (pattern, description) in &finite_default {
+        if ![
+            "game.played_share.{action}",
+            "game.mean_payoff",
+            "game.payoff_sd",
+            "game.coop_rate",
+        ]
+        .contains(&pattern.as_str())
+        {
+            assert_eq!(finite_after[pattern], *description);
+        }
+    }
+
+    let continuous_game = PublicGoodsContinuous::new(6, 10.0, 2.5).unwrap();
+    let continuous_default =
+        ContinuousMetrics::new(&continuous_game, ContinuousMetricsOptions::new())
+            .unwrap()
+            .describe();
+    let continuous_before = ContinuousMetrics::new(
+        &continuous_game,
+        ContinuousMetricsOptions::new().payoff_timing(PayoffTiming::BeforeUpdate),
+    )
+    .unwrap()
+    .describe();
+    assert_eq!(continuous_default, continuous_before);
+
+    let continuous_default = descriptions_by_pattern(continuous_default);
+    assert_eq!(
+        continuous_default["game.mean_action.{d}"],
+        "Mean of component d of the actions over all seats played in the step, pooled across roles."
+    );
+    assert_eq!(
+        continuous_default["game.action_sd.{d}"],
+        "Population standard deviation of component d of the actions over all seats played in the step, pooled across roles."
+    );
+
+    let continuous_after = descriptions_by_pattern(
+        ContinuousMetrics::new(
+            &continuous_game,
+            ContinuousMetricsOptions::new().payoff_timing(PayoffTiming::AfterUpdate),
+        )
+        .unwrap()
+        .describe(),
+    );
+    for pattern in [
+        "game.mean_action.{d}",
+        "game.action_sd.{d}",
+        "game.mean_payoff",
+        "game.payoff_sd",
+    ] {
+        assert!(continuous_after[pattern].contains(POST_UPDATE));
+        assert_ne!(continuous_after[pattern], continuous_default[pattern]);
+    }
+    for (pattern, description) in &continuous_default {
+        if ![
+            "game.mean_action.{d}",
+            "game.action_sd.{d}",
+            "game.mean_payoff",
+            "game.payoff_sd",
+        ]
+        .contains(&pattern.as_str())
+        {
+            assert_eq!(continuous_after[pattern], *description);
+        }
     }
 }

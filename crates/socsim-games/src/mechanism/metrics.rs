@@ -9,6 +9,23 @@ use crate::{
     GameWorld, MetricScheme, MixedStrategy, PolicyTable,
 };
 
+/// Selects whether metric descriptions refer to actions before or after a
+/// population update.
+///
+/// This option changes only the text returned by `describe()`; it does not
+/// change any recorded value. Use [`PayoffTiming::AfterUpdate`] for an
+/// asynchronous population step, whose final record is recomputed from the
+/// actions held after every update of the step.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PayoffTiming {
+    /// Describe the actions and payoffs played before population dynamics.
+    #[default]
+    BeforeUpdate,
+    /// Describe play recomputed from the final actions after in-place updates.
+    AfterUpdate,
+}
+
 /// Selects the source used to construct per-role mixed strategies.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -44,6 +61,7 @@ pub struct MetricsOptions {
     stop_tol: Option<f64>,
     stop_window: u32,
     population_share: bool,
+    payoff_timing: PayoffTiming,
     #[cfg(feature = "metrics")]
     action_entropy: bool,
 }
@@ -59,6 +77,7 @@ impl MetricsOptions {
             stop_tol: None,
             stop_window: 0,
             population_share: false,
+            payoff_timing: PayoffTiming::BeforeUpdate,
             #[cfg(feature = "metrics")]
             action_entropy: true,
         }
@@ -114,6 +133,15 @@ impl MetricsOptions {
         self
     }
 
+    /// Selects the timing described for action and payoff columns.
+    ///
+    /// This changes only [`GameMetrics::describe`], not recorded values. The
+    /// default is [`PayoffTiming::BeforeUpdate`].
+    pub fn payoff_timing(mut self, timing: PayoffTiming) -> Self {
+        self.payoff_timing = timing;
+        self
+    }
+
     /// Enables or disables Shannon entropy of the pooled played-action shares.
     #[cfg(feature = "metrics")]
     pub fn action_entropy(mut self, on: bool) -> Self {
@@ -152,6 +180,7 @@ pub struct GameMetrics<G: FiniteGame> {
     stop_tol: Option<f64>,
     stop_window: u32,
     population_columns: Option<Vec<String>>,
+    payoff_timing: PayoffTiming,
     #[cfg(feature = "metrics")]
     action_entropy: bool,
     marker: PhantomData<fn() -> G>,
@@ -269,6 +298,7 @@ impl<G: FiniteGame> GameMetrics<G> {
             stop_tol: options.stop_tol,
             stop_window: options.stop_window,
             population_columns,
+            payoff_timing: options.payoff_timing,
             #[cfg(feature = "metrics")]
             action_entropy: options.action_entropy,
             marker: PhantomData,
@@ -305,36 +335,48 @@ impl<G: FiniteGame> GameMetrics<G> {
     /// text, so the patterns can be copied unchanged into the
     /// `[[metric_patterns]]` of a runvault `runvault.toml`.
     pub fn describe(&self) -> Vec<(String, String)> {
-        let played_share = match self.scheme {
-            MetricScheme::Pooled => {
+        let played_share = match (self.scheme, self.payoff_timing) {
+            (MetricScheme::Pooled, PayoffTiming::BeforeUpdate) => {
                 "Share of all played seats choosing `{action}`. `{action}` is a metric_id; display labels come from the game's metric actions. Actions are pooled across roles."
             }
-            MetricScheme::PerRole => {
+            (MetricScheme::PerRole, PayoffTiming::BeforeUpdate) => {
                 "Share of played seats in the indicated role choosing `{action}`. `{action}` is a metric_id; display labels come from the game's metric actions. Actions are reported per role."
             }
+            (MetricScheme::Pooled, PayoffTiming::AfterUpdate) => {
+                "Share of all played seats choosing `{action}` from the actions held after every update of the step (asynchronous update). `{action}` is a metric_id; display labels come from the game's metric actions. Actions are pooled across roles."
+            }
+            (MetricScheme::PerRole, PayoffTiming::AfterUpdate) => {
+                "Share of played seats in the indicated role choosing `{action}` from the actions held after every update of the step (asynchronous update). `{action}` is a metric_id; display labels come from the game's metric actions. Actions are reported per role."
+            }
+        };
+        let (mean_payoff, payoff_sd) = match self.payoff_timing {
+            PayoffTiming::BeforeUpdate => (
+                "Mean aggregated payoff among agents who played at least once in the step.",
+                "Population standard deviation of aggregated payoff among agents who played at least once in the step.",
+            ),
+            PayoffTiming::AfterUpdate => (
+                "Mean aggregated payoff from play using the actions held after every update of the step (asynchronous update), among agents who played at least once.",
+                "Population standard deviation of aggregated payoff from play using the actions held after every update of the step (asynchronous update), among agents who played at least once.",
+            ),
         };
         let mut descriptions = vec![
             (
                 "game.played_share.{action}".to_owned(),
                 played_share.to_owned(),
             ),
-            (
-                "game.mean_payoff".to_owned(),
-                "Mean aggregated payoff among agents who played at least once in the step."
-                    .to_owned(),
-            ),
-            (
-                "game.payoff_sd".to_owned(),
-                "Population standard deviation of aggregated payoff among agents who played at least once in the step."
-                    .to_owned(),
-            ),
+            ("game.mean_payoff".to_owned(), mean_payoff.to_owned()),
+            ("game.payoff_sd".to_owned(), payoff_sd.to_owned()),
         ];
         if self.cooperate_actions.is_some() {
-            descriptions.push((
-                "game.coop_rate".to_owned(),
-                "Share of all played seats choosing the configured cooperation label for that seat's role."
-                    .to_owned(),
-            ));
+            let cooperation = match self.payoff_timing {
+                PayoffTiming::BeforeUpdate => {
+                    "Share of all played seats choosing the configured cooperation label for that seat's role."
+                }
+                PayoffTiming::AfterUpdate => {
+                    "Share of all played seats choosing the configured cooperation label from the actions held after every update of the step (asynchronous update), for that seat's role."
+                }
+            };
+            descriptions.push(("game.coop_rate".to_owned(), cooperation.to_owned()));
         }
         if self.regret {
             descriptions.push((

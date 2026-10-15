@@ -82,7 +82,7 @@ pub use mechanism::{AsyncActivation, AsyncPopulationStep};
 pub use mechanism::{
     ContinuousEquilibrium, ContinuousMetrics, ContinuousMetricsOptions, EquilibriumTarget,
     FermiUpdate, Fitness, GameMetrics, ImitateBest, ImitationTie, MetricsOptions, MixedSource,
-    MoranUpdate, ProportionalImitation, RuleDriver, Update,
+    MoranUpdate, PayoffTiming, ProportionalImitation, RuleDriver, Update,
 };
 #[cfg(feature = "core")]
 pub use outcome::{NormalFormOutcome, OutcomeContext, OutcomeRule};

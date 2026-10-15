@@ -1011,7 +1011,9 @@ where
         activation,
         log_updates,
         n_agents,
-    );
+        &world.topology,
+    )
+    .map_err(|error| GameError::Population(error.to_string()))?;
     Ok(AssembledParts {
         world,
         mechanisms: vec![Box::new(mechanism)],

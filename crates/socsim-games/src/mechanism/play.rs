@@ -4,7 +4,8 @@ use socsim_core::{Mechanism, Phase, SocsimError, StepContext};
 
 use crate::outcome::kernel::{
     aggregate_mean, fill_actions, for_each_implicit, local_payoff_counting, local_payoff_pairwise,
-    play_counting, play_implicit_counting, play_implicit_pairwise, play_pairwise, PayoffAccum,
+    play_counting, play_implicit_counting, play_implicit_pairwise, play_pairwise,
+    LocalEncounterIds, PayoffAccum,
 };
 use crate::{
     AggregateReduce, AnonymousGame, DecisionScope, ExperimentState, GameWorld, ImplicitPattern,
@@ -112,6 +113,7 @@ pub(crate) trait KernelRunner<G: StageGame, X: ExperimentState>: Send + Sync {
         _pattern: ImplicitPattern,
         _context: &OutcomeContext<'_, G, X>,
         _ids: &[socsim_core::AgentId],
+        _encounter_ids: &LocalEncounterIds,
         _index: usize,
         _aggregation: PayoffAggregation,
     ) -> Option<socsim_core::Result<(f64, u32)>> {
@@ -189,6 +191,7 @@ where
         pattern: ImplicitPattern,
         context: &OutcomeContext<'_, G, X>,
         ids: &[socsim_core::AgentId],
+        encounter_ids: &LocalEncounterIds,
         index: usize,
         aggregation: PayoffAggregation,
     ) -> Option<socsim_core::Result<(f64, u32)>> {
@@ -197,6 +200,7 @@ where
             context,
             ids,
             &self.0,
+            encounter_ids,
             index,
             aggregation,
         ))
@@ -259,6 +263,7 @@ where
         pattern: ImplicitPattern,
         context: &OutcomeContext<'_, G, X>,
         ids: &[socsim_core::AgentId],
+        encounter_ids: &LocalEncounterIds,
         index: usize,
         aggregation: PayoffAggregation,
     ) -> Option<socsim_core::Result<(f64, u32)>> {
@@ -268,6 +273,7 @@ where
             context.topology(),
             ids,
             context.held,
+            encounter_ids,
             index,
             aggregation,
         ))
