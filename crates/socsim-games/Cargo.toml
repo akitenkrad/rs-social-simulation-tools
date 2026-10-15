@@ -17,6 +17,7 @@ llm = ["core", "dep:socsim-llm", "dep:sha2"]
 live = ["llm", "socsim-llm/live"]
 factory = ["engine", "dep:socsim-runner", "dep:socsim-config"]
 config = ["factory", "dep:toml"]
+export = ["dep:serde_json"]
 
 [dependencies]
 microlp = "0.6"
@@ -264,6 +265,11 @@ required-features = ["config", "net", "grid"]
 name = "spec_counting"
 path = "tests/spec_counting.rs"
 required-features = ["config", "metrics", "net", "grid"]
+
+[[test]]
+name = "export_spec"
+path = "tests/export_spec.rs"
+required-features = ["export"]
 
 [[example]]
 name = "ipd_pair"

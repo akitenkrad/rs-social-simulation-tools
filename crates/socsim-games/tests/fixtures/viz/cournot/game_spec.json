@@ -1,0 +1,50 @@
+{
+  "schema": "socsim-games.game-spec",
+  "version": 1,
+  "kind": "continuous",
+  "name": "cournot",
+  "n_roles": 3,
+  "role_labels": [
+    "role0",
+    "role1",
+    "role2"
+  ],
+  "bounds": [
+    [
+      [
+        0.0,
+        100.0
+      ]
+    ],
+    [
+      [
+        0.0,
+        100.0
+      ]
+    ],
+    [
+      [
+        0.0,
+        100.0
+      ]
+    ]
+  ],
+  "dimension_labels": [
+    [
+      "x0"
+    ],
+    [
+      "x0"
+    ],
+    [
+      "x0"
+    ]
+  ],
+  "params": {
+    "a": 100.0,
+    "b": 1.0,
+    "c": 10.0,
+    "n": 3,
+    "q_max": 100.0
+  }
+}

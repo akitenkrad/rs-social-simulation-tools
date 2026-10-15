@@ -1,0 +1,77 @@
+{
+  "schema": "socsim-games.game-spec",
+  "version": 1,
+  "kind": "finite",
+  "name": "rock_paper_scissors",
+  "n_roles": 2,
+  "role_labels": [
+    "role0",
+    "role1"
+  ],
+  "action_labels": [
+    [
+      "R",
+      "P",
+      "S"
+    ],
+    [
+      "R",
+      "P",
+      "S"
+    ]
+  ],
+  "payoffs": {
+    "layout": "row_major_role0_outer",
+    "shape": [
+      3,
+      3
+    ],
+    "values": [
+      [
+        0.0,
+        -1.0,
+        1.0,
+        1.0,
+        0.0,
+        -1.0,
+        -1.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        -1.0,
+        -1.0,
+        0.0,
+        1.0,
+        1.0,
+        -1.0,
+        0.0
+      ]
+    ]
+  },
+  "symmetric": true,
+  "metric_scheme": "pooled",
+  "metric_actions": [
+    {
+      "id": "a0",
+      "role": null,
+      "action": 0
+    },
+    {
+      "id": "a1",
+      "role": null,
+      "action": 1
+    },
+    {
+      "id": "a2",
+      "role": null,
+      "action": 2
+    }
+  ],
+  "params": {
+    "loss": 1.0,
+    "win": 1.0
+  }
+}

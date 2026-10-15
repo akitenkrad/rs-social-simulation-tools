@@ -3,6 +3,9 @@ pub mod learn;
 pub mod mixed;
 pub mod solve;
 
+#[cfg(feature = "export")]
+pub mod export;
+
 pub use game::catalog;
 pub use game::continuous;
 pub use mixed::MixedStrategy;
@@ -22,6 +25,11 @@ pub use solve::{
     pure_nash_counts, replicator_fixed_points, replicator_integrate, AffineComponent,
     BestResponseOracle, BrIteration, BrIterationOptions, BrResult, BrStatus, CountProfile,
     EssVerdict, FixedPoint, FixedPointSet, GoldenSectionOptions, ReplicatorOptions, ReplicatorRun,
+};
+
+#[cfg(feature = "export")]
+pub use export::{
+    write_artifacts, write_game_spec, write_solutions, EssLabel, ExportError, GameSpec, SolutionSet,
 };
 
 #[cfg(feature = "core")]

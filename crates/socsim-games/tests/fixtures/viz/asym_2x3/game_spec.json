@@ -1,0 +1,76 @@
+{
+  "schema": "socsim-games.game-spec",
+  "version": 1,
+  "kind": "finite",
+  "name": "asym_2x3",
+  "n_roles": 2,
+  "role_labels": [
+    "role0",
+    "role1"
+  ],
+  "action_labels": [
+    [
+      "U",
+      "D"
+    ],
+    [
+      "L",
+      "C",
+      "R"
+    ]
+  ],
+  "payoffs": {
+    "layout": "row_major_role0_outer",
+    "shape": [
+      2,
+      3
+    ],
+    "values": [
+      [
+        2.0,
+        0.0,
+        3.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      [
+        0.0,
+        1.0,
+        2.0,
+        1.0,
+        0.0,
+        0.0
+      ]
+    ]
+  },
+  "symmetric": false,
+  "metric_scheme": "per_role",
+  "metric_actions": [
+    {
+      "id": "r0-a0",
+      "role": 0,
+      "action": 0
+    },
+    {
+      "id": "r0-a1",
+      "role": 0,
+      "action": 1
+    },
+    {
+      "id": "r1-a0",
+      "role": 1,
+      "action": 0
+    },
+    {
+      "id": "r1-a1",
+      "role": 1,
+      "action": 1
+    },
+    {
+      "id": "r1-a2",
+      "role": 1,
+      "action": 2
+    }
+  ]
+}

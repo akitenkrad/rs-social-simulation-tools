@@ -1,0 +1,60 @@
+{
+  "schema": "socsim-games.game-spec",
+  "version": 1,
+  "kind": "finite",
+  "name": "hawk_dove",
+  "n_roles": 2,
+  "role_labels": [
+    "role0",
+    "role1"
+  ],
+  "action_labels": [
+    [
+      "H",
+      "D"
+    ],
+    [
+      "H",
+      "D"
+    ]
+  ],
+  "payoffs": {
+    "layout": "row_major_role0_outer",
+    "shape": [
+      2,
+      2
+    ],
+    "values": [
+      [
+        -1.0,
+        2.0,
+        0.0,
+        1.0
+      ],
+      [
+        -1.0,
+        0.0,
+        2.0,
+        1.0
+      ]
+    ]
+  },
+  "symmetric": true,
+  "metric_scheme": "pooled",
+  "metric_actions": [
+    {
+      "id": "a0",
+      "role": null,
+      "action": 0
+    },
+    {
+      "id": "a1",
+      "role": null,
+      "action": 1
+    }
+  ],
+  "params": {
+    "c": 4.0,
+    "v": 2.0
+  }
+}

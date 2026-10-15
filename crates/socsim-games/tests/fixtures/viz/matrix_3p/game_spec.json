@@ -1,0 +1,80 @@
+{
+  "schema": "socsim-games.game-spec",
+  "version": 1,
+  "kind": "finite",
+  "name": "matrix_3p",
+  "n_roles": 3,
+  "role_labels": [
+    "role0",
+    "role1",
+    "role2"
+  ],
+  "action_labels": [
+    [
+      "a0",
+      "a1"
+    ],
+    [
+      "a0",
+      "a1"
+    ],
+    [
+      "a0",
+      "a1"
+    ]
+  ],
+  "payoffs": {
+    "layout": "row_major_role0_outer",
+    "shape": [
+      2,
+      2,
+      2
+    ],
+    "values": [
+      [
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+        6.0,
+        7.0
+      ],
+      [
+        100.0,
+        101.0,
+        102.0,
+        103.0,
+        104.0,
+        105.0,
+        106.0,
+        107.0
+      ],
+      [
+        200.0,
+        201.0,
+        202.0,
+        203.0,
+        204.0,
+        205.0,
+        206.0,
+        207.0
+      ]
+    ]
+  },
+  "symmetric": false,
+  "metric_scheme": "pooled",
+  "metric_actions": [
+    {
+      "id": "a0",
+      "role": null,
+      "action": 0
+    },
+    {
+      "id": "a1",
+      "role": null,
+      "action": 1
+    }
+  ]
+}
