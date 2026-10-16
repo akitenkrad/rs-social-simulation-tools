@@ -84,9 +84,12 @@ impl ContinuousMetricsOptions {
 
     /// Enables or disables one `game.play` event per materialized encounter.
     ///
-    /// Continuous actions are recorded as arrays of numbers. This requires the
-    /// materialized play path; the first processed step returns an error when
-    /// the simulation uses the implicit path. The default is `false`.
+    /// Its payload is `{ encounter, seats, actions, payoffs, credit }`, with
+    /// every continuous action recorded as an array of numbers. This requires
+    /// the materialized play path, adds one event for every encounter, and is
+    /// unavailable with `async_population_step`. The first processed step
+    /// returns an error when the simulation uses an implicit path. The default
+    /// is `false`.
     pub fn log_plays(mut self, on: bool) -> Self {
         self.log_plays = on;
         self

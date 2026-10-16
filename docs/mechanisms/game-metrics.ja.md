@@ -73,7 +73,7 @@ $\max_k \lvert v_t(k) - v_{t-1}(k)\rvert < \texttt{tol}$ の間カウンター�
 ![game_metrics data flow](../assets/mech-game-metrics.svg)
 
 対戦の表（`seats`，`actions`）— 実体化しない経路では `game_play` がそのステップについて保持した役割ごとの打った行動の数 —，保持行動（`population_share` のため），エージェントごとの `payoff` と `n_played`，最後の集計値の行，`MixedSource::Reported` なら混合戦略の報告を読みます．
-Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCumulative` を設定したときだけ，World に自分の `MetricsState` を書きます．
+Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCumulative` を設定したときだけ，World に自分の `MetricsState` を書きます．任意のイベント記録は，同じ Recorder に `game.roster`，`game.step_actions`，`game.play` を書きます．
 
 ## 4. 6フェーズループにおける位置
 
@@ -95,6 +95,9 @@ Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCum
 | `MetricsState { prev, below, cumulative }` | ✓ | ✓ | `stop` か `PlayedCumulative` を設定したとき，最初のステップで作る．World のフィールド `metrics_state`（それ以外では World の JSON から省かれる）．snapshot と再開を越えて残る． |
 | ステップの履歴，`held` | ✓ | | 連続の形で `stop` のときだけ．各エージェントがそのステップで出した行動（`PerEncounter` では最初の席の行動），なければ前の値，最初のステップでは保持行動． |
 | Recorder の表 `"game"` | | ✓ | ステップごとに `record_row` を 1 回． |
+| Recorder のイベント `game.roster` | | ✓ | `log_actions(true)` のとき，この Mechanism が最初に処理する PostStep で 1 回：`{ agents, kinds, decision_scope }`．snapshot から再開して新しい Mechanism を作るともう一度出る．reader は同じ roster の重複を受け入れる． |
+| Recorder のイベント `game.step_actions` | | ✓ | `log_actions(true)` かつ `t % log_actions_every == 0` のとき：`{ actions, roles, payoffs, n_played }`．配列はすべて roster 順で，`actions` と `roles` には `null` が入り得る．`async_population_step` では，全更新後の行動と，その行動から計算し直した利得になる． |
+| Recorder のイベント `game.play` | | ✓ | `log_plays(true)` のとき，実体化した対戦ごとに 1 回：`{ encounter, seats, actions, payoffs, credit }`．有限の行動は index，連続の行動は配列． |
 | 停止の要求 | | ✓ | 収束のカウンターが `window` に達したとき `StepContext::request_stop`． |
 
 規則の状態，保持行動，対戦，利得は書きません．`game_metrics` を足しても実行の軌跡は変わりません．
@@ -108,6 +111,7 @@ Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCum
 - **同じゲーム：** World に入れたゲームから作ってください．役割数と行動数は毎ステップ照合します（違えば Mechanism のエラー）．
   `eq_distance` の均衡は `new` に渡したゲームから求めます．
 - **シミュレーションに 1 つ：** World の `MetricsState` は 1 つなので，`game_metrics` は 1 つだけ足してください．
+- **記録の検査：** 0 の間隔と人口上限は `GameMetrics::new` が拒否します．人口の大きさ，`PerStep` の行動の意味，役割の曖昧さ，実体化した対戦経路を要する検査は，最初の PostStep でイベントや指標の行を書く前に走ります．したがって，`log_plays` は暗黙の経路では失敗し，`async_population_step` では使えません．
 - **下流：** ゲームの Mechanism はその出力を読みません．`stop` では，停止を求めたステップの後でエンジンが実行を終えます．
 
 ## 7. パラメータ
@@ -121,6 +125,10 @@ Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCum
 | `stop(tol, window)` | なし | control | 席のあるステップで割合の最大変化が `< tol` のものが `window` 回続いたら停止．`tol` は有限で `> 0`，`window ≥ 1`． |
 | `action_entropy(on)` | 有効 | observation | feature `metrics` のときだけ．共通 ID のときだけ． |
 | `population_share(on)` | 無効 | observation | `game.population_share.a<k>`（`k` を保持するエージェント ÷ 全エージェント．集団動学の後）を足す．すべての役割の行動数が等しくなければならない（`GameError::Metrics`）． |
+| `log_actions(on)` | 無効 | observation | `game.roster` と，間引いた `game.step_actions` を出す．エージェントを標本抽出せず，シミュレーションの軌跡を変えない． |
+| `log_actions_every(every)` | `1` | observation | `t % every == 0` のとき `game.step_actions` を出す．`every ≥ 1`． |
+| `log_actions_max_agents(maximum)` | `1000` | guard | 人口が上限を超えると行動の記録を拒否する．`maximum ≥ 1`． |
+| `log_plays(on)` | 無効 | observation | 実体化した対戦ごとに `game.play` を 1 つ出す．`PlayOptions::materialize(true)` が必要で，`async_population_step` では使えない． |
 
 連続の形は `ContinuousMetricsOptions` を受けます．
 
@@ -128,8 +136,11 @@ Recorder の表 `"game"` に 1 行を書き，`stop` か `MixedSource::PlayedCum
 |---|---|---|---|
 | `equilibrium(ContinuousEquilibrium)` | `None` | observation | `Solve`：`new` の中で `best_response_iteration` を 1 回，区間の中点から既定のオプションで．`Converged` でなければ拒否．見つける均衡は 1 つ．`Given(profile)`：役割ごとに長さの合った有限の行動．どちらも `game.eq_distance` を足す． |
 | `stop(tol, window)` | なし | control | どのエージェントの出した行動のどの成分も `tol` 以上変わらないステップが `window` 回続いたら停止．`tol` は有限で `> 0`，`window ≥ 1`． |
+| `log_plays(on)` | 無効 | observation | 実体化した対戦ごとに `game.play` を 1 つ出す．連続の行動は配列になる．`PlayOptions::materialize(true)` が必要． |
 
 区間やオプションが不正なとき，`Given` の形が合わないとき，解が収束しないときは，`ContinuousMetrics::new` が `GameError::Metrics` を返します．
+
+行動の記録は大きくなり得ます．$N$ 人の `game.step_actions` 1 件は，およそ $(20N + 20)$ バイトが目安です．$N = 50$ の実測では記録ステップあたり 0.76〜1.08 KB で，$10^5$ ステップでは 76〜108 MB，指標の行も含めると約 140 MB でした．2 人・50 ステップの例では，`game.step_actions` が 1 行 135〜136 バイト，`game.play` が対戦ごとに 133〜134 バイト，`game.roster` が 140 バイトで，ファイル全体は 551 行，42,761 バイトでした．`log_plays` は対戦ごとに 1 行を足します．長い実行では `log_actions_every` を大きくして間引いてください．
 
 ## 8. 適用方法
 

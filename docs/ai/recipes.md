@@ -1649,9 +1649,10 @@ a result that holds only for `b > 1.8`.
 
 **When to use.** You need a stable, language-neutral game definition and a
 publication-ready payoff matrix, 2×2 best-response diagram, or three-strategy
-replicator field. Rust validates and exports the game and solver results;
-Python reads schema-version-1 JSON and renders it. This recipe stops at figures
-of the game definition and theoretical solutions, without simulation records.
+replicator field, or you need share-series and per-agent-action figures from
+recorded simulations. Rust validates and exports the game and solver results;
+`game_metrics` records metrics and events; Python reads schema-version-1 JSON,
+runvault runs or socsim JSONL and renders them.
 
 **Rust dependency.** Enable `export`; it adds `serde_json` but no `socsim-*`
 crate:
@@ -1748,11 +1749,114 @@ actions, blue / vermilion for roles, `#DDDDDD` for missing data, and `cividis`
 for continuous speed. Pass `font=...` for non-ASCII labels and an explicit
 palette when more than eight distinct action labels are present.
 
+**Recorded-run figures.** Configure finite-game metrics with the four event
+options as needed:
+
+```rust
+let metrics = GameMetrics::new(
+    &game,
+    MetricsOptions::new()
+        .log_actions(true)
+        .log_actions_every(1)
+        .log_actions_max_agents(1_000)
+        .log_plays(true),
+)?;
+```
+
+`log_actions` emits `game.roster { agents, kinds, decision_scope }` followed by
+sampled `game.step_actions { actions, roles, payoffs, n_played }`, all arrays in
+roster order. A newly constructed mechanism emits the roster again after
+snapshot restore. `log_plays` emits
+`game.play { encounter, seats, actions, payoffs, credit }` once per encounter
+and requires `PlayOptions::materialize(true)`; it is unavailable with
+`async_population_step`. All world-dependent checks happen before the first
+PostStep emits an event or metric row. These settings use no RNG and do not
+change the trajectory. For asynchronous population dynamics, step actions and
+payoffs describe the final actions after all in-place updates and the payoffs
+recomputed from them.
+
+For runvault, preserve rounds as the unit:
+
+```rust
+let recorder = RunvaultRecorder::new(run).step_unit("round");
+```
+
+Its `events.jsonl` names the schemas `x.<repo_id>.game.roster`,
+`x.<repo_id>.game.step_actions` and `x.<repo_id>.game.play`, with payload fields
+flattened beside run metadata. Plain socsim JSONL uses the unprefixed `kind`
+and nests these fields under `payload`.
+
+Load, aggregate and plot JSONL seeds from Python:
+
+```python
+from pathlib import Path
+
+from socsim_tools.games.aggregate import aggregate_series
+from socsim_tools.games.plots import plot_share_series
+from socsim_tools.games.records import load_metric_series
+from socsim_tools.games.spec import load_game_spec, load_solutions
+from socsim_tools.games.style import save_figure
+
+source = Path("crates/socsim-games/tests/fixtures/viz/ipd")
+sources = [source / f"seed_{seed}.jsonl" for seed in range(5)]
+spec = load_game_spec(source / "game_spec.json")
+solutions = load_solutions(source / "solutions.json", spec)
+table = load_metric_series(sources, "game.played_share.")
+summary = aggregate_series(table, stat="mean", ci="t", level=0.95)
+assert summary.n_t == [5] * 50
+figure = plot_share_series(
+    table, spec, solutions,
+    family="game.played_share.", stat="mean", ci="t", level=0.95,
+)
+save_figure(figure, "figures/shares-played", formats=("png",))
+```
+
+`ci="t"` is a Student-t confidence interval for the mean;
+`ci="bootstrap"` uses 2,000 deterministic resamples;
+`ci="quantile"` is the empirical central range of runs, not uncertainty in the
+center. `align="available"` keeps times present in only some runs and plots the
+replicate count, but may introduce survivor bias. Non-converged continuous
+theory lines are omitted by default; Python callers may opt in with
+`plot_share_series(..., include_unconverged=True)` or
+`theory_lines(..., include_unconverged=True)`, which labels them
+`not converged`. The CLI has no corresponding option.
+
+The equivalent record-plot commands are:
+
+```sh
+cd tools/socsim_tools
+uv run --extra games socsim-tools plot-shares \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_0.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_1.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_2.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_3.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_4.jsonl \
+  --game-spec ../../crates/socsim-games/tests/fixtures/viz/ipd/game_spec.json \
+  --solutions ../../crates/socsim-games/tests/fixtures/viz/ipd/solutions.json \
+  --output-dir ../../figures --format png
+uv run --extra games socsim-tools plot-actions \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_0.jsonl \
+  --llm-calls tests/fixtures/llm_calls_ipd.jsonl \
+  --game-spec ../../crates/socsim-games/tests/fixtures/viz/ipd/game_spec.json \
+  --output-dir ../../figures --format png
+```
+
+Use `load_step_actions(source, repo_id=...)` for the action records and
+`load_llm_calls` for optional decision marks; `repo_id` selects namespaced
+runvault schemas. One `game.step_actions` event is roughly $(20N + 20)$ bytes;
+measured $N = 50$ records were 0.76--1.08 KB per recorded step. Increase
+`log_actions_every` for long runs, and remember that `log_plays` adds one event
+per encounter.
+
 **Gotchas.** Do not make the Rust simulation render, do not write artifacts
 implicitly from `core`, and do not place post-hoc figures inside an immutable
 run directory. `write_game_spec` / `write_solutions` require an existing parent;
 only `write_artifacts` creates its `socsim_games` directory. `load_solutions`
 must receive the exact `GameSpec` matching the `game` copy in the file.
+`JsonlRecorder::take_error()` exposes retained write failures only while the
+recorder is still owned by the caller; after moving it into a simulation, use
+a `Write` sink with an external shared error handle when failures must be
+surfaced.
 
 ---
 

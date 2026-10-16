@@ -4512,6 +4512,133 @@ uv run --extra games socsim-tools plot-simplex \
 出力の stem は `payoff_matrix`，`best_response_2x2`，`simplex` です．描画関数は
 `matplotlib.figure.Figure` を返し，保存しません．既存の Axes に描くときは `ax` を渡します．
 
+### 記録した run の割合の系列と行動のラスター
+
+[`game_metrics`](mechanisms/game-metrics.ja.md#7-パラメータ) の説明に従い，
+`MetricsOptions` のイベント設定を有効にします．`log_actions(true)` は roster と間引いた
+エージェントごとの行動を出し，`log_plays(true)` は実体化した対戦ごとにイベントを 1 つ足します．
+これらは観察の設定であり，乱数を引かず，シミュレーションの軌跡を変えません．
+
+Python の reader は，runvault の run ディレクトリと socsim の JSONL ファイルの両方を読めます．
+
+| 入力 | 指標 | イベント |
+|---|---|---|
+| socsim JSONL | `{"type":"metric","t":1,"key":"game.played_share.a0","value":0.5}` | `kind` は `game.roster`，`game.step_actions`，`game.play` のいずれかで，イベントのデータは `payload` の下に入る |
+| runvault の run | `step_unit = "round"` の long form の `metrics.csv` | `events.jsonl` の `schema` は `x.<repo_id>.game.step_actions` のように名前空間を付け，payload のフィールドは予約済みの run フィールドと同じ階層に置く |
+
+runvault の run をシミュレーションにつなぐときは，単位を明示します．
+
+```rust
+let recorder = RunvaultRecorder::new(run).step_unit("round");
+```
+
+イベントの payload は次の形です．
+
+- `game.roster`：`{ agents, kinds, decision_scope }`．`agents` は数値の agent ID，
+  `kinds` の各値は登録した名前または `"held"` で，対応する scope は `"per_step"`．
+- `game.step_actions`：`{ actions, roles, payoffs, n_played }`．すべての配列は roster 順．
+  有限の行動と役割は index または `null`，利得は設定したエージェントごとの集約値，
+  `n_played` はエージェントごとの対戦数．
+- `game.play`：`{ encounter, seats, actions, payoffs, credit }`．有限の行動は index，
+  連続の行動は配列で，`credit` は `"all"` または `"center"`．
+
+snapshot からの再開で新しい指標の Mechanism を作ると，roster がもう一度出ます．同一の roster の
+重複は正しく，異なる roster はエラーです．`async_population_step` の
+`game.step_actions.actions` と `payoffs` は，全更新後の行動と，その行動から計算し直した利得です．
+`game.play` は実体化した経路だけで出るため，`PlayOptions::materialize(true)` を有効にします．
+`async_population_step` では使えません．
+
+5 つの JSONL seed は次のように読み，描画できます．`aggregate_series` は図を作らず集約値だけを
+使うときにも使えます．`plot_share_series` は同じ引数で内部からこの関数を呼びます．
+
+```python
+from pathlib import Path
+
+from socsim_tools.games.aggregate import aggregate_series
+from socsim_tools.games.plots import plot_share_series
+from socsim_tools.games.records import load_metric_series
+from socsim_tools.games.spec import load_game_spec, load_solutions
+from socsim_tools.games.style import save_figure
+
+source = Path("crates/socsim-games/tests/fixtures/viz/ipd")
+sources = [source / f"seed_{seed}.jsonl" for seed in range(5)]
+spec = load_game_spec(source / "game_spec.json")
+solutions = load_solutions(source / "solutions.json", spec)
+table = load_metric_series(sources, "game.played_share.")
+summary = aggregate_series(table, stat="mean", ci="t", level=0.95)
+assert summary.n_t == [5] * 50
+figure = plot_share_series(
+    table, spec, solutions,
+    family="game.played_share.", stat="mean", ci="t", level=0.95,
+)
+save_figure(figure, "figures/shares-played", formats=("png",))
+```
+
+**図 1 — seed 間の行動の割合．**
+
+![5 seed にわたる行動の割合](assets/games-viz-share-series.png)
+
+seed 間の区間では，`ci="t"` は Student の t 分布を使った平均の信頼区間です．そのモデルを
+置けるとき，小標本の平均に向きます．`ci="bootstrap"` は決定的な 2,000 回の再標本化を使い，
+平均と中央値のどちらにも使えます．`ci="quantile"` は run の経験的な中央の範囲であり，中心の
+不確かさを表す区間ではありません．帯を描かないときは `ci="none"` を使います．
+`stat="median"` と `ci="t"` は組み合わせられません．既定の `align="intersection"` は全 seed に
+ある時点だけを残します．`align="available"` は時点の和集合を使い，変化する反復数も表示しますが，
+結果に関係する理由で run が早く終わると，後半の値には生き残りの偏りが入り得ます．
+
+理論線は書き出した解から作ります．収束しなかった連続の解は既定では重ねません．Python の
+`plot_share_series(..., include_unconverged=True)` または
+`theory_lines(..., include_unconverged=True)` を明示した場合だけ，`not converged` と表示して重ねます．
+CLI にはこの指定はありません．
+
+`load_step_actions(source, repo_id=...)` は roster と行動イベントを読みます．名前空間を付けた
+runvault の記録では `repo_id` を渡します．`load_llm_calls` は任意の意思決定の試行の印を読みます．
+行動のラスターは，表示するエージェントと記録したラウンドの組ごとにセルを 1 つ描きます．
+
+**図 4 — エージェントごとの行動と LLM の意思決定の試行．**
+
+![LLM の意思決定の印を付けたエージェントごとの行動](assets/games-viz-action-raster.png)
+
+例の fixture に対する同じコマンドは次のとおりです．
+
+```sh
+cd tools/socsim_tools
+uv run --extra games socsim-tools plot-shares \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_0.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_1.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_2.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_3.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_4.jsonl \
+  --game-spec ../../crates/socsim-games/tests/fixtures/viz/ipd/game_spec.json \
+  --solutions ../../crates/socsim-games/tests/fixtures/viz/ipd/solutions.json \
+  --output-dir ../../figures --format png
+uv run --extra games socsim-tools plot-actions \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_0.jsonl \
+  --llm-calls tests/fixtures/llm_calls_ipd.jsonl \
+  --game-spec ../../crates/socsim-games/tests/fixtures/viz/ipd/game_spec.json \
+  --output-dir ../../figures --format png
+```
+
+出力の stem は `shares_played_share` と `actions` です．長い行動ログには大きさの見積もりが要ります．
+$N$ 人の `game.step_actions` 1 件はおよそ $(20N + 20)$ バイトです．$N = 50$ の実測では
+記録ステップあたり 0.76〜1.08 KB，$10^5$ ステップで 76〜108 MB で，指標の行を含めると
+約 140 MB でした．`log_plays` は対戦ごとにイベントを 1 つ足します．
+`log_actions_every` を大きくして間引けます．
+
+`JsonlRecorder` は書込みの失敗を `take_error()` のために保持しますが，`Simulation` に移した
+Recorder は後から取り出せません．ファイルへ直接書く実行で I/O エラーを外へ出す必要があるときは，
+共有されたエラー状態を保持する `Write` の実装などを渡し，外部にエラーを確認する handle を残してください．
+
+実際の runvault の run を使う統合確認は，毎回の CI ではなく手動実行の workflow で走ります．
+リポジトリのルートからソースツリー外のディレクトリを指定して入れ子の workspace を先に実行し，
+その後 Python 側の project で往復のテストを実行します．
+
+```sh
+SOCSIM_GAMES_VIZ_RUN_OUT=<dir> cargo test --manifest-path integration/runvault-viz/Cargo.toml
+cd tools/socsim_tools
+SOCSIM_GAMES_VIZ_RUN=<dir> uv run --extra dev pytest -q tests/test_games_runvault_roundtrip.py
+```
+
 ### 配色と保存
 
 行動の既定の配色は Okabe–Ito の `#0072B2`，`#D55E00`，`#009E73`，`#E69F00`，

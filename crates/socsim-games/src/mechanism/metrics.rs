@@ -159,6 +159,10 @@ impl MetricsOptions {
     /// after snapshot restore. Validation happens before any event or metric
     /// row is emitted at the first processed step.
     ///
+    /// The roster payload is `{ agents, kinds, decision_scope }`. A step payload
+    /// is `{ actions, roles, payoffs, n_played }`, with every array in roster
+    /// order. Actions and roles may contain `null` where no single value exists.
+    ///
     /// For an asynchronous population step, actions and payoffs are the final
     /// values recomputed from the actions held after every update of the step.
     /// The default is `false`.
@@ -179,9 +183,12 @@ impl MetricsOptions {
     /// Sets the maximum population size accepted by action logging.
     ///
     /// The complete roster is recorded; agents are never sampled. A larger
-    /// limit can therefore produce large event logs. The value must be greater
-    /// than zero and is validated by [`GameMetrics::new`]. The default is
-    /// 1,000.
+    /// limit can therefore produce large event logs. As a practical estimate,
+    /// one `game.step_actions` event is about `(20N + 20)` bytes for `N` agents;
+    /// measured records at `N = 50` were 0.76--1.08 KB, or 76--108 MB over
+    /// 100,000 recorded steps before metrics. Use [`Self::log_actions_every`]
+    /// to reduce the volume. The value must be greater than zero and is
+    /// validated by [`GameMetrics::new`]. The default is 1,000.
     pub fn log_actions_max_agents(mut self, maximum: usize) -> Self {
         self.log_actions_max_agents = maximum;
         self
@@ -189,8 +196,10 @@ impl MetricsOptions {
 
     /// Enables or disables one `game.play` event per materialized encounter.
     ///
-    /// This requires the materialized play path. The first processed step
-    /// returns an error when the simulation uses the implicit path. The
+    /// Its payload is `{ encounter, seats, actions, payoffs, credit }`. This
+    /// requires the materialized play path, adds one event for every encounter,
+    /// and is unavailable with `async_population_step`. The first processed
+    /// step returns an error when the simulation uses an implicit path. The
     /// default is `false`.
     pub fn log_plays(mut self, on: bool) -> Self {
         self.log_plays = on;

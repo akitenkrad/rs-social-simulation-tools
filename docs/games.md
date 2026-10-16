@@ -5404,6 +5404,150 @@ The output stems are `payoff_matrix`, `best_response_2x2` and `simplex`.
 Drawing functions return a `matplotlib.figure.Figure` and never save it; pass
 an existing `ax` to draw in an existing axes.
 
+### Recorded runs: share series and action rasters
+
+Enable the event options on `MetricsOptions` as described in
+[`game_metrics`](mechanisms/game-metrics.md#7-parameters). `log_actions(true)`
+emits the roster and sampled per-agent actions; `log_plays(true)` adds one
+event per materialized encounter. These observation settings do not draw RNG
+or change the simulation trajectory.
+
+The Python readers accept either a runvault run directory or a socsim JSONL
+file:
+
+| Source | Metrics | Events |
+|---|---|---|
+| socsim JSONL | `{"type":"metric","t":1,"key":"game.played_share.a0","value":0.5}` | `kind` is `game.roster`, `game.step_actions` or `game.play`; the event data are under `payload` |
+| runvault run | long-form `metrics.csv` with `step_unit = "round"` | `events.jsonl` uses a namespaced `schema`, for example `x.<repo_id>.game.step_actions`; payload fields are flattened beside the reserved run fields |
+
+When connecting a runvault run to a simulation, set the unit explicitly:
+
+```rust
+let recorder = RunvaultRecorder::new(run).step_unit("round");
+```
+
+The event payloads are:
+
+- `game.roster`: `{ agents, kinds, decision_scope }`, where `agents` are numeric
+  agent ids, each kind is its registered name or `"held"`, and the supported
+  scope is `"per_step"`;
+- `game.step_actions`: `{ actions, roles, payoffs, n_played }`, with every
+  array in roster order; finite actions and roles are indices or `null`,
+  payoffs use the configured per-agent aggregation, and `n_played` is the
+  encounter count per agent;
+- `game.play`: `{ encounter, seats, actions, payoffs, credit }`, where finite
+  actions are indices, continuous actions are arrays and `credit` is `"all"`
+  or `"center"`.
+
+After a snapshot restore, a newly constructed metrics mechanism emits the
+roster again. An identical repeated roster is valid; a conflicting roster is
+not. With `async_population_step`, `game.step_actions.actions` and `payoffs`
+are the final actions after all in-place updates and the payoffs recomputed
+from them. `game.play` is emitted only on a materialized play path; enable
+`PlayOptions::materialize(true)`. It is unavailable with
+`async_population_step`.
+
+Load and plot five JSONL seeds as follows. `aggregate_series` is also useful
+when the aggregated values are needed without a figure; `plot_share_series`
+calls it internally with the same arguments.
+
+```python
+from pathlib import Path
+
+from socsim_tools.games.aggregate import aggregate_series
+from socsim_tools.games.plots import plot_share_series
+from socsim_tools.games.records import load_metric_series
+from socsim_tools.games.spec import load_game_spec, load_solutions
+from socsim_tools.games.style import save_figure
+
+source = Path("crates/socsim-games/tests/fixtures/viz/ipd")
+sources = [source / f"seed_{seed}.jsonl" for seed in range(5)]
+spec = load_game_spec(source / "game_spec.json")
+solutions = load_solutions(source / "solutions.json", spec)
+table = load_metric_series(sources, "game.played_share.")
+summary = aggregate_series(table, stat="mean", ci="t", level=0.95)
+assert summary.n_t == [5] * 50
+figure = plot_share_series(
+    table, spec, solutions,
+    family="game.played_share.", stat="mean", ci="t", level=0.95,
+)
+save_figure(figure, "figures/shares-played", formats=("png",))
+```
+
+**Figure 1 — played-action shares across seeds.**
+
+![Played-action shares across five seeds](assets/games-viz-share-series.png)
+
+For intervals across seeds, `ci="t"` estimates a confidence interval for the
+mean using Student's t distribution; it is appropriate for a mean with a
+small replicate count when that model is defensible. `ci="bootstrap"` uses
+2,000 deterministic resamples and works with either the mean or median.
+`ci="quantile"` shows the empirical central range of runs, not uncertainty in
+the center. Use `ci="none"` for no band; `stat="median"` cannot be combined
+with `ci="t"`. The default `align="intersection"` keeps only times present in
+every seed. `align="available"` keeps the union and shows the changing
+replicate count, but late values can be survivor-biased when runs end for
+outcome-related reasons.
+
+Theoretical lines come from exported solutions. Non-converged continuous
+solutions are omitted by default. They can be included, labelled
+`not converged`, only through the Python functions
+`plot_share_series(..., include_unconverged=True)` or
+`theory_lines(..., include_unconverged=True)`; the CLI deliberately has no
+option for this.
+
+`load_step_actions(source, repo_id=...)` reads the roster and action events;
+give `repo_id` for namespaced runvault records. `load_llm_calls` reads optional
+decision-attempt marks. The action raster uses one cell per displayed agent
+and recorded round:
+
+**Figure 4 — per-agent actions and LLM decision attempts.**
+
+![Per-agent actions with LLM decision marks](assets/games-viz-action-raster.png)
+
+The equivalent commands for the example fixture are:
+
+```sh
+cd tools/socsim_tools
+uv run --extra games socsim-tools plot-shares \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_0.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_1.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_2.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_3.jsonl \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_4.jsonl \
+  --game-spec ../../crates/socsim-games/tests/fixtures/viz/ipd/game_spec.json \
+  --solutions ../../crates/socsim-games/tests/fixtures/viz/ipd/solutions.json \
+  --output-dir ../../figures --format png
+uv run --extra games socsim-tools plot-actions \
+  --source ../../crates/socsim-games/tests/fixtures/viz/ipd/seed_0.jsonl \
+  --llm-calls tests/fixtures/llm_calls_ipd.jsonl \
+  --game-spec ../../crates/socsim-games/tests/fixtures/viz/ipd/game_spec.json \
+  --output-dir ../../figures --format png
+```
+
+The stems are `shares_played_share` and `actions`. Long action logs deserve an
+explicit budget: one `game.step_actions` event is roughly $(20N + 20)$ bytes
+for $N$ agents. Measurements at $N = 50$ were 0.76--1.08 KB per recorded
+step, or 76--108 MB for $10^5$ steps; metric rows brought the total to about
+140 MB. `log_plays` adds one event per encounter. Increase
+`log_actions_every` to subsample.
+
+`JsonlRecorder` retains write failures for `take_error()`, but a recorder moved
+into `Simulation` cannot be recovered afterward. For direct-to-file runs that
+must surface I/O failures, provide a `Write` implementation that retains a
+shared error status, or otherwise keep an external error handle.
+
+The real-run integration check is intentionally manual rather than part of
+every CI run. From the repository root, use a directory outside the source
+tree and run the nested workspace first; then run the Python round-trip test
+from its own project:
+
+```sh
+SOCSIM_GAMES_VIZ_RUN_OUT=<dir> cargo test --manifest-path integration/runvault-viz/Cargo.toml
+cd tools/socsim_tools
+SOCSIM_GAMES_VIZ_RUN=<dir> uv run --extra dev pytest -q tests/test_games_runvault_roundtrip.py
+```
+
 ### Colors and saving
 
 The default action palette is the Okabe–Ito sequence `#0072B2`, `#D55E00`,

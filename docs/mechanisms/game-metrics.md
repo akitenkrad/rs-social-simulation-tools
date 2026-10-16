@@ -115,7 +115,8 @@ held actions (for `population_share`), the per-agent `payoff` and
 `n_played`, the last aggregate row and, for `MixedSource::Reported`, the
 mixed-strategy reports. Writes one row to the recorder's table `"game"` and,
 only when `stop` or `MixedSource::PlayedCumulative` is configured, its own
-`MetricsState` in the world.
+`MetricsState` in the world. Optional event logging writes `game.roster`,
+`game.step_actions` and `game.play` through the same recorder.
 
 ## 4. Position in the 6-phase loop
 
@@ -139,6 +140,9 @@ after it.
 | `MetricsState { prev, below, cumulative }` | ✓ | ✓ | Created on the first step when `stop` or `PlayedCumulative` is set; field `metrics_state` of the world (omitted from the world JSON otherwise). Survives snapshot/resume. |
 | step history, `held` | ✓ | | Continuous form with `stop` only: each agent's played action of the step (the first seat's action under `PerEncounter`), or the previous entry, or — on the first step — the held action. |
 | recorder table `"game"` | | ✓ | One `record_row` per step. |
+| recorder event `game.roster` | | ✓ | With `log_actions(true)`, once on the first PostStep processed by this mechanism: `{ agents, kinds, decision_scope }`. A newly constructed mechanism emits it again after snapshot restore; readers accept an identical duplicate roster. |
+| recorder event `game.step_actions` | | ✓ | With `log_actions(true)`, when `t % log_actions_every == 0`: `{ actions, roles, payoffs, n_played }`, all arrays in roster order. `actions` and `roles` may contain `null`. With `async_population_step`, actions and payoffs are the final values recomputed after all in-place updates. |
+| recorder event `game.play` | | ✓ | With `log_plays(true)`, once per materialized encounter: `{ encounter, seats, actions, payoffs, credit }`. Finite actions are indices; continuous actions are arrays. |
 | stop request | | ✓ | `StepContext::request_stop` when the convergence counter reaches `window`. |
 
 Policy states, held actions, plays and payoffs are never written: adding
@@ -157,6 +161,11 @@ Policy states, held actions, plays and payoffs are never written: adding
   equilibria for `eq_distance` come from the game given to `new`.
 - **One per simulation:** the world has a single `MetricsState`, so add one
   `game_metrics`.
+- **Logging checks:** zero sampling intervals or population limits are rejected
+  by `GameMetrics::new`. Checks that need the world — population size,
+  `PerStep` action semantics, role ambiguity and a materialized play path — run
+  before any event or metric row on the first PostStep. `log_plays` therefore
+  fails on an implicit path and is unavailable with `async_population_step`.
 - **Downstream:** no game mechanism reads its output. With `stop`, the engine
   ends the run after the step in which the stop was requested.
 
@@ -171,6 +180,10 @@ Policy states, held actions, plays and payoffs are never written: adding
 | `stop(tol, window)` | off | control | Stop after `window` consecutive seated steps whose largest share change is `< tol`. `tol` finite `> 0`, `window ≥ 1`. |
 | `action_entropy(on)` | on | observation | Feature `metrics` only; pooled ids only. |
 | `population_share(on)` | off | observation | Adds `game.population_share.a<k>` (agents holding `k` ÷ all agents, after any population dynamics). Every role must have the same number of actions (`GameError::Metrics`). |
+| `log_actions(on)` | off | observation | Emits `game.roster` and sampled `game.step_actions` events. It does not sample agents or change the simulation trajectory. |
+| `log_actions_every(every)` | `1` | observation | Emits `game.step_actions` when `t % every == 0`; `every ≥ 1`. |
+| `log_actions_max_agents(maximum)` | `1000` | guard | Rejects action logging when the population is larger; `maximum ≥ 1`. |
+| `log_plays(on)` | off | observation | Emits one `game.play` per materialized encounter. Requires `PlayOptions::materialize(true)` and is unavailable with `async_population_step`. |
 
 The continuous form takes `ContinuousMetricsOptions`:
 
@@ -178,9 +191,19 @@ The continuous form takes `ContinuousMetricsOptions`:
 |---|---|---|---|
 | `equilibrium(ContinuousEquilibrium)` | `None` | observation | `Solve`: `best_response_iteration` once in `new`, from the interval midpoints with the default options; rejected unless `Converged`; finds one equilibrium. `Given(profile)`: one finite action of the right length per role. Either adds `game.eq_distance`. |
 | `stop(tol, window)` | off | control | Stop after `window` consecutive steps in which no component of any agent's played action changes by `tol` or more. `tol` finite `> 0`, `window ≥ 1`. |
+| `log_plays(on)` | off | observation | Emits one `game.play` per materialized encounter, with continuous actions as arrays. Requires `PlayOptions::materialize(true)`. |
 
 Invalid bounds or options, a mismatched `Given` profile and a solve that does
 not converge are `GameError::Metrics` from `ContinuousMetrics::new`.
+
+Action records are intentionally verbose. A useful estimate for one
+`game.step_actions` event is about $(20N + 20)$ bytes for $N$ agents. Measured
+records at $N = 50$ were 0.76--1.08 KB per recorded step: 76--108 MB over
+$10^5$ recorded steps, or about 140 MB when the metric rows are included. In
+the two-agent, 50-step example, `game.step_actions` was 135--136 bytes per
+line, `game.play` 133--134 bytes per encounter and `game.roster` 140 bytes;
+the complete 551-line file was 42,761 bytes. `log_plays` adds one line per
+encounter. Increase `log_actions_every` to subsample long runs.
 
 ## 8. How to apply
 
