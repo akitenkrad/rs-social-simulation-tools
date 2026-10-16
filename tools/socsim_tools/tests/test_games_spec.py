@@ -39,7 +39,7 @@ def _fixture_json(relative: str) -> dict:
 def test_loads_all_game_specs_with_rust_float_values():
     paths = sorted(FIXTURES.glob("*/game_spec.json"))
     specs = {path.parent.name: load_game_spec(path) for path in paths}
-    assert len(specs) == 10
+    assert len(specs) == 11
     assert all(isinstance(spec, GameSpec) for spec in specs.values())
 
     matrix = specs["matrix_3p"]
@@ -66,7 +66,7 @@ def test_loads_every_solution_kind_from_rust_fixtures():
         spec = load_game_spec(path.with_name("game_spec.json"))
         loaded.extend(load_solutions(path, spec))
 
-    assert len(list(FIXTURES.glob("*/solutions.json"))) == 8
+    assert len(list(FIXTURES.glob("*/solutions.json"))) == 9
     assert any(isinstance(value, NashSolution) for value in loaded)
     assert any(isinstance(value, QreSolution) for value in loaded)
     assert any(isinstance(value, PopulationSolution) for value in loaded)
