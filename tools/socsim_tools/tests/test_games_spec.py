@@ -76,7 +76,7 @@ def test_loads_every_solution_kind_from_rust_fixtures():
 
     mixed = next(value for value in loaded if value.id == "se-1")
     assert isinstance(mixed, NashSolution)
-    assert mixed.strategies[0] == [0.6, 0.4000000000000001]
+    assert mixed.strategies[0] == [0.6, 0.40000000000000013]
     qre = next(value for value in loaded if isinstance(value, QreSolution))
     assert qre.lambda_ == 1.0
 

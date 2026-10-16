@@ -91,22 +91,6 @@ fn conversion_methods_use_contract_solver_names_ids_and_values() -> TestResult {
 }
 
 #[test]
-fn rock_paper_scissors_fixture_uses_portable_solution_sources() -> TestResult {
-    let (_, solutions) = viz_games::rock_paper_scissors_artifacts()?;
-    let solutions = serialize(&solutions)?;
-    let ids = solutions["solutions"]
-        .as_array()
-        .expect("solutions is an array")
-        .iter()
-        .map(|solution| solution["id"].as_str().expect("id is a string"))
-        .collect::<Vec<_>>();
-
-    assert!(ids.contains(&"minimax"));
-    assert!(!ids.iter().any(|id| id.starts_with("se-")));
-    Ok(())
-}
-
-#[test]
 fn equilibrium_set_findings_keep_their_index_spaces() -> TestResult {
     let (game, spec) = viz_games::battle_of_sexes()?;
     let solved = support_enumeration(&game)?;

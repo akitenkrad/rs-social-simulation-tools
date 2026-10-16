@@ -109,11 +109,32 @@ pub(crate) fn solve_least_squares(matrix: &[Vec<f64>], rhs: &[f64]) -> LeastSqua
     }
 }
 
+// OS libm hypot can differ in its least significant bit, breaking byte-identical exports.
+fn portable_hypot(x: f64, y: f64) -> f64 {
+    let a = x.abs();
+    let b = y.abs();
+    if a.is_infinite() || b.is_infinite() {
+        return f64::INFINITY;
+    }
+    if a.is_nan() || b.is_nan() {
+        return f64::NAN;
+    }
+
+    let big = a.max(b);
+    let small = a.min(b);
+    if big == 0.0 {
+        return 0.0;
+    }
+
+    let r = small / big;
+    big * (1.0 + r * r).sqrt()
+}
+
 fn column_norm(matrix: &[Vec<f64>], start_row: usize, column: usize) -> f64 {
     matrix
         .iter()
         .skip(start_row)
-        .fold(0.0, |norm, row| norm.hypot(row[column]))
+        .fold(0.0, |norm, row| portable_hypot(norm, row[column]))
 }
 
 fn numerical_rank(qr: &[Vec<f64>], steps: usize) -> usize {
@@ -150,7 +171,7 @@ fn residual_norm(matrix: &[Vec<f64>], rhs: &[f64], solution: &[f64]) -> f64 {
             .zip(solution)
             .map(|(coefficient, value)| coefficient * value)
             .sum::<f64>();
-        norm.hypot(actual - target)
+        portable_hypot(norm, actual - target)
     })
 }
 
@@ -192,9 +213,9 @@ pub(crate) fn symmetric_eigenvalues(matrix: &[Vec<f64>], tolerance: f64) -> Vec<
         let apq = diagonalized[pivot_row][pivot_column];
         let tau = (aqq - app) / (2.0 * apq);
         let tangent = if tau >= 0.0 {
-            1.0 / (tau + tau.hypot(1.0))
+            1.0 / (tau + portable_hypot(tau, 1.0))
         } else {
-            -1.0 / (-tau + tau.hypot(1.0))
+            -1.0 / (-tau + portable_hypot(tau, 1.0))
         };
         let cosine = 1.0 / (1.0 + tangent * tangent).sqrt();
         let sine = tangent * cosine;
@@ -226,7 +247,7 @@ pub(crate) fn symmetric_eigenvalues(matrix: &[Vec<f64>], tolerance: f64) -> Vec<
 
 #[cfg(test)]
 mod tests {
-    use super::{solve_least_squares, symmetric_eigenvalues};
+    use super::{portable_hypot, solve_least_squares, symmetric_eigenvalues};
 
     const EPSILON: f64 = 1e-10;
 
@@ -242,6 +263,28 @@ mod tests {
             (actual - expected).abs() <= EPSILON,
             "expected {expected}, got {actual}"
         );
+    }
+
+    #[test]
+    fn portable_hypot_handles_finite_values() {
+        assert_eq!(portable_hypot(3.0, 4.0), 5.0);
+        assert_eq!(portable_hypot(0.0, 0.0), 0.0);
+        assert_eq!(portable_hypot(-3.0, 4.0), 5.0);
+
+        let large = portable_hypot(1e300, 1e300);
+        assert!(large.is_finite());
+        assert_eq!(large, 1e300 * 2.0_f64.sqrt());
+
+        assert_ne!(portable_hypot(1e-300, 1e-300), 0.0);
+    }
+
+    #[test]
+    fn portable_hypot_handles_infinity_and_nan() {
+        assert_eq!(portable_hypot(f64::INFINITY, 1.0), f64::INFINITY);
+        assert_eq!(portable_hypot(1.0, f64::NEG_INFINITY), f64::INFINITY);
+        assert_eq!(portable_hypot(f64::INFINITY, f64::NAN), f64::INFINITY);
+        assert!(portable_hypot(f64::NAN, 1.0).is_nan());
+        assert!(portable_hypot(1.0, f64::NAN).is_nan());
     }
 
     #[test]

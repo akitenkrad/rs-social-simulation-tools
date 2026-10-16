@@ -164,8 +164,7 @@ pub fn matching_pennies_artifacts() -> TestResult<(GameSpec, SolutionSet)> {
 pub fn rock_paper_scissors_artifacts() -> TestResult<(GameSpec, SolutionSet)> {
     let (game, spec) = rock_paper_scissors()?;
     let mut solutions = SolutionSet::new(&spec);
-    // RPS support enumeration uses the OS libm's hypot, so this fixture would not
-    // be byte-identical across platforms.
+    solutions.push_equilibrium_set("se", &support_enumeration(&game)?)?;
     solutions.push_minimax("minimax", &zero_sum_minimax(&game)?)?;
     push_replicator_solutions(&mut solutions, &game)?;
     Ok((spec, solutions))
