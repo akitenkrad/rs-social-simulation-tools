@@ -19,29 +19,6 @@
   },
   "solutions": [
     {
-      "id": "se-0",
-      "solver": "support_enumeration",
-      "kind": "nash",
-      "strategies": [
-        [
-          0.33333333333333337,
-          0.33333333333333326,
-          0.33333333333333337
-        ],
-        [
-          0.33333333333333337,
-          0.33333333333333326,
-          0.33333333333333337
-        ]
-      ],
-      "payoffs": [
-        0.0,
-        0.0
-      ],
-      "regret": 1.1102230246251565e-16,
-      "pure": false
-    },
-    {
       "id": "minimax",
       "solver": "zero_sum_minimax",
       "kind": "nash",
