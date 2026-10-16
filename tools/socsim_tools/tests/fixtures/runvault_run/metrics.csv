@@ -1,0 +1,7 @@
+run_uid,step,step_unit,scope,name,value
+fixture-run,1,round,run,game.played_share.a0,0.5
+fixture-run,1,round,run,game.played_share.a1,0.5
+fixture-run,2,round,run,game.played_share.a0,0.0
+fixture-run,2,round,run,game.played_share.a1,1.0
+fixture-run,3,round,run,game.played_share.a0,0.5
+fixture-run,3,round,run,game.played_share.a1,0.5

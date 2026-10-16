@@ -1,0 +1,4 @@
+{"agents":[0,1],"decision_scope":"per_step","kinds":["tit_for_tat","uniform_random"],"run_uid":"fixture-run","schema":"x.socsim-games-viz.game.roster","t":1,"t_unit":"round","ts":"2026-10-16T00:00:00Z"}
+{"actions":[0,1],"n_played":[1,1],"payoffs":[0.0,5.0],"roles":[null,null],"run_uid":"fixture-run","schema":"x.socsim-games-viz.game.step_actions","t":1,"t_unit":"round","ts":"2026-10-16T00:00:01Z"}
+{"actions":[1,1],"n_played":[1,1],"payoffs":[1.0,1.0],"roles":[null,null],"run_uid":"fixture-run","schema":"x.socsim-games-viz.game.step_actions","t":2,"t_unit":"round","ts":"2026-10-16T00:00:02Z"}
+{"actions":[1,0],"n_played":[1,1],"payoffs":[5.0,0.0],"roles":[null,null],"run_uid":"fixture-run","schema":"x.socsim-games-viz.game.step_actions","t":3,"t_unit":"round","ts":"2026-10-16T00:00:03Z"}

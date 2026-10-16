@@ -1,0 +1,62 @@
+{
+  "schema": "socsim-games.game-spec",
+  "version": 1,
+  "kind": "finite",
+  "name": "prisoners_dilemma",
+  "n_roles": 2,
+  "role_labels": [
+    "role0",
+    "role1"
+  ],
+  "action_labels": [
+    [
+      "C",
+      "D"
+    ],
+    [
+      "C",
+      "D"
+    ]
+  ],
+  "payoffs": {
+    "layout": "row_major_role0_outer",
+    "shape": [
+      2,
+      2
+    ],
+    "values": [
+      [
+        3.0,
+        0.0,
+        5.0,
+        1.0
+      ],
+      [
+        3.0,
+        5.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "symmetric": true,
+  "metric_scheme": "pooled",
+  "metric_actions": [
+    {
+      "id": "a0",
+      "role": null,
+      "action": 0
+    },
+    {
+      "id": "a1",
+      "role": null,
+      "action": 1
+    }
+  ],
+  "params": {
+    "punishment": 1.0,
+    "reward": 3.0,
+    "sucker": 0.0,
+    "temptation": 5.0
+  }
+}

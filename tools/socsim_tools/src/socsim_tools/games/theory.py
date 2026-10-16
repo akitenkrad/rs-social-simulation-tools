@@ -4,12 +4,185 @@ from __future__ import annotations
 
 import itertools
 import math
+import warnings
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from socsim_tools.games.spec import GameSpec
+from socsim_tools.games.spec import (
+    ContinuousSolution,
+    GameSpec,
+    InconclusiveSolution,
+    NashSolution,
+    PopulationComponent,
+    PopulationSolution,
+    QreSolution,
+    Solution,
+)
+
+
+@dataclass(frozen=True)
+class TheoryLine:
+    """A solution value mapped to one recorded metric column."""
+
+    solution_id: str
+    metric_id: str
+    value: float
+    linestyle_index: int
+    converged: bool
+
+
+def theory_lines(
+    spec: GameSpec,
+    solutions: Sequence[Solution],
+    family: str,
+    *,
+    include_unconverged: bool = False,
+) -> list[TheoryLine]:
+    """Map compatible exported solutions to horizontal metric lines.
+
+    Inconclusive solutions are ignored silently. Non-converged continuous
+    solutions are also ignored silently unless ``include_unconverged`` is
+    true. Population components and other solutions that cannot be mapped to
+    ``family`` are listed in one ``UserWarning``. The supplied ``solutions``
+    sequence selects candidate solutions; ``include_unconverged`` explicitly
+    opts its non-converged continuous candidates into the result.
+    """
+
+    allowed = {
+        "game.played_share.",
+        "game.population_share.",
+        "game.mean_action.",
+        "game.coop_rate",
+    }
+    if family not in allowed:
+        raise ValueError(f"unsupported metric family {family!r}")
+
+    result: list[TheoryLine] = []
+    unmappable: list[str] = []
+    linestyle_index = 0
+    for solution in solutions:
+        if isinstance(solution, InconclusiveSolution) or (
+            isinstance(solution, ContinuousSolution)
+            and not solution.converged
+            and not include_unconverged
+        ):
+            continue
+        values = _solution_metric_values(spec, solution, family)
+        if values is None:
+            unmappable.append(solution.id)
+            continue
+        result.extend(
+            TheoryLine(
+                solution_id=solution.id,
+                metric_id=metric_id,
+                value=float(value),
+                linestyle_index=linestyle_index,
+                converged=(
+                    solution.converged
+                    if isinstance(solution, ContinuousSolution)
+                    else True
+                ),
+            )
+            for metric_id, value in values
+        )
+        linestyle_index += 1
+
+    if unmappable:
+        warnings.warn(
+            "solutions could not be mapped to "
+            f"{family}: {', '.join(unmappable)}",
+            UserWarning,
+            stacklevel=2,
+        )
+    return result
+
+
+def _solution_metric_values(
+    spec: GameSpec, solution: Solution, family: str
+) -> list[tuple[str, float]] | None:
+    if isinstance(solution, PopulationComponent):
+        return None
+    if family == "game.coop_rate":
+        return None
+    if isinstance(solution, (NashSolution, QreSolution)):
+        return _strategy_metric_values(spec, solution.strategies, family)
+    if isinstance(solution, PopulationSolution):
+        if family not in {
+            "game.population_share.",
+            "game.played_share.",
+        }:
+            return None
+        if any(action.role is not None for action in spec.metric_actions):
+            return None
+        return [
+            (action.id, solution.shares[action.action])
+            for action in spec.metric_actions
+        ]
+    if isinstance(solution, ContinuousSolution):
+        if family != "game.mean_action.":
+            return None
+        dimensions = len(solution.actions[0])
+        if any(len(actions) != dimensions for actions in solution.actions):
+            return None
+        return [
+            (
+                str(dimension),
+                float(
+                    np.mean(
+                        [actions[dimension] for actions in solution.actions]
+                    )
+                ),
+            )
+            for dimension in range(dimensions)
+        ]
+    return None
+
+
+def _strategy_metric_values(
+    spec: GameSpec, strategies: list[list[float]], family: str
+) -> list[tuple[str, float]] | None:
+    if family == "game.played_share.":
+        if spec.metric_scheme == "pooled":
+            return [
+                (
+                    action.id,
+                    float(
+                        np.mean(
+                            [strategy[action.action] for strategy in strategies]
+                        )
+                    ),
+                )
+                for action in spec.metric_actions
+            ]
+        if spec.metric_scheme == "per_role":
+            return [
+                (
+                    action.id,
+                    strategies[action.role][action.action],
+                )
+                for action in spec.metric_actions
+                if action.role is not None
+            ]
+        return None
+    if family == "game.population_share.":
+        if not spec.symmetric or not strategies:
+            return None
+        first = np.asarray(strategies[0], dtype=float)
+        if any(
+            not np.allclose(first, strategy, rtol=0.0, atol=1e-9)
+            for strategy in strategies[1:]
+        ):
+            return None
+        if any(action.role is not None for action in spec.metric_actions):
+            return None
+        return [
+            (action.id, strategies[0][action.action])
+            for action in spec.metric_actions
+        ]
+    return None
 
 
 def pure_nash(spec: GameSpec) -> list[tuple[int, ...]]:
@@ -137,9 +310,10 @@ def _payoff_tolerance(spec: GameSpec) -> float:
 
 
 __all__ = [
+    "TheoryLine",
     "best_responses_2x2",
     "pure_nash",
     "replicator_field",
+    "theory_lines",
     "to_barycentric_xy",
 ]
-

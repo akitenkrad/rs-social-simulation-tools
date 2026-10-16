@@ -10,7 +10,8 @@ from pathlib import Path
 
 def test_core_games_imports_do_not_load_optional_dependencies():
     code = (
-        "import socsim_tools, socsim_tools.games, socsim_tools.games.spec, sys; "
+        "import socsim_tools, socsim_tools.games, socsim_tools.games.spec, "
+        "socsim_tools.games.records, sys; "
         "print(json.dumps(sorted(m for m in "
         "('matplotlib', 'numpy', 'scipy') if m in sys.modules)))"
     )
@@ -21,6 +22,20 @@ def test_core_games_imports_do_not_load_optional_dependencies():
         text=True,
     )
     assert json.loads(completed.stdout) == []
+
+
+def test_records_and_aggregate_public_functions_import_from_their_modules():
+    from socsim_tools.games.aggregate import aggregate_series
+    from socsim_tools.games.records import (
+        load_llm_calls,
+        load_metric_series,
+        load_step_actions,
+    )
+
+    assert callable(load_metric_series)
+    assert callable(load_step_actions)
+    assert callable(load_llm_calls)
+    assert callable(aggregate_series)
 
 
 def test_games_package_reexports_only_spec_loaders():
