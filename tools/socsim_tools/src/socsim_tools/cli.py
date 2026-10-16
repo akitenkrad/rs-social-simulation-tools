@@ -92,12 +92,39 @@ def _demo_main(argv: list[str] | None = None) -> None:
     本パッケージは主に各 replication の ``cli.py`` から import して使うライブラリ．
     このエントリポイントはパッケージ情報の表示のみを行う．
     """
-    print(
-        "socsim-tools: shared dispatcher + settings renderer + results I/O for "
-        "socsim replication tools.\n"
-        "主にライブラリとして利用します: "
-        "from socsim_tools.cli import build_dispatcher"
+    argv = sys.argv[1:] if argv is None else argv
+    if not argv:
+        print(
+            "socsim-tools: shared dispatcher + settings renderer + results I/O for "
+            "socsim replication tools.\n"
+            "主にライブラリとして利用します: "
+            "from socsim_tools.cli import build_dispatcher"
+        )
+        return
+
+    main = build_dispatcher(
+        prog="socsim-tools",
+        description="Plot exported socsim normal-form games.",
+        subcommands={
+            "plot-game": (
+                "plot a payoff matrix or best-response arrows",
+                "socsim_tools.games.cli:plot_game_main",
+            ),
+            "plot-simplex": (
+                "plot three-action replicator dynamics",
+                "socsim_tools.games.cli:plot_simplex_main",
+            ),
+        },
     )
+    try:
+        main(argv)
+    except ImportError as error:
+        print(
+            "Game plotting dependencies are unavailable. Install them with "
+            "`pip install \"socsim-tools[games]\"`.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from error
 
 
 if __name__ == "__main__":
