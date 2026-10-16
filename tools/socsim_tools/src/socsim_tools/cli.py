@@ -114,6 +114,14 @@ def _demo_main(argv: list[str] | None = None) -> None:
                 "plot three-action replicator dynamics",
                 "socsim_tools.games.cli:plot_simplex_main",
             ),
+            "plot-shares": (
+                "plot aggregate game metric shares",
+                "socsim_tools.games.cli:plot_shares_main",
+            ),
+            "plot-actions": (
+                "plot per-agent recorded actions",
+                "socsim_tools.games.cli:plot_actions_main",
+            ),
         },
     )
     try:

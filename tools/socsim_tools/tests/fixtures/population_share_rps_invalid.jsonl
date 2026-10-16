@@ -1,0 +1,6 @@
+{"key":"game.population_share.a0","t":1,"type":"metric","value":0.5}
+{"key":"game.population_share.a1","t":1,"type":"metric","value":0.25}
+{"key":"game.population_share.a2","t":1,"type":"metric","value":0.25}
+{"key":"game.population_share.a0","t":2,"type":"metric","value":0.25}
+{"key":"game.population_share.a1","t":2,"type":"metric","value":0.375}
+{"key":"game.population_share.a2","t":2,"type":"metric","value":0.25}

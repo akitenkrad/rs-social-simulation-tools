@@ -20,6 +20,7 @@ from socsim_tools.games.spec import (
     PopulationSolution,
     Solution,
 )
+from socsim_tools.games.records import SeriesTable
 from socsim_tools.games.style import CONTINUOUS_CMAP, style_context
 from socsim_tools.games.theory import replicator_field, to_barycentric_xy
 
@@ -31,7 +32,7 @@ _VERTICES = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, _SQRT_THREE / 2.0]])
 def plot_simplex(
     spec: GameSpec,
     solutions: Sequence[Solution] | None = None,
-    trajectories: Sequence[ArrayLike] | ArrayLike | None = None,
+    trajectories: Sequence[ArrayLike] | ArrayLike | SeriesTable | None = None,
     *,
     ax=None,
     n_grid: int = 15,
@@ -42,10 +43,13 @@ def plot_simplex(
     orbit_t_max: float = 50.0,
     labels: Sequence[str] | None = None,
     font: str | None = None,
+    trajectory_family: str = "game.population_share.",
 ) -> Figure:
     """Plot a three-action symmetric game's replicator dynamics.
 
-    ``trajectories`` accepts one or more arrays of simplex points. ``orbits``
+    ``trajectories`` accepts one or more arrays of simplex points or a
+    :class:`~socsim_tools.games.records.SeriesTable`. Recorded columns are read
+    from ``trajectory_family`` in ``spec.metric_actions`` order. ``orbits``
     accepts initial points and integrates deterministic display trajectories
     with fourth-order Runge--Kutta. The returned figure is not saved.
 
@@ -63,6 +67,9 @@ def plot_simplex(
     all_labels = [*spec.role_labels, *vertex_labels]
     all_labels.extend(solution.id for solution in solutions or [])
     _warn_non_ascii(all_labels, font)
+    trajectory_values = _recorded_trajectories(
+        spec, trajectories, trajectory_family
+    )
 
     if ax is None:
         with style_context(font=font):
@@ -73,7 +80,7 @@ def plot_simplex(
                 spec,
                 payoff_matrix,
                 solutions,
-                trajectories,
+                trajectory_values,
                 n_grid,
                 normalize,
                 color_by_speed,
@@ -89,7 +96,7 @@ def plot_simplex(
         spec,
         payoff_matrix,
         solutions,
-        trajectories,
+        trajectory_values,
         n_grid,
         normalize,
         color_by_speed,
@@ -355,6 +362,41 @@ def _trajectory_arrays(
     if values.ndim == 3 and values.shape[2] == 3:
         return [values[index] for index in range(values.shape[0])]
     raise ValueError("trajectories must contain arrays with shape (n, 3)")
+
+
+def _recorded_trajectories(
+    spec: GameSpec,
+    trajectories: Sequence[ArrayLike] | ArrayLike | SeriesTable | None,
+    family: str,
+) -> Sequence[ArrayLike] | ArrayLike | None:
+    if not isinstance(trajectories, SeriesTable):
+        return trajectories
+    if trajectories.spec is not None and trajectories.spec != spec:
+        raise ValueError("game specification does not match trajectory sources")
+    metric_ids = [action.id for action in spec.metric_actions]
+    names = [f"{family}{metric_id}" for metric_id in metric_ids]
+    if len(names) != 3 or len(set(names)) != 3:
+        raise ValueError(
+            "trajectory SeriesTable requires three metric columns from "
+            "spec.metric_actions"
+        )
+    result = []
+    for series in trajectories.series:
+        if any(name not in series.columns for name in names):
+            raise ValueError(
+                "trajectory SeriesTable requires three metric columns: "
+                + ", ".join(names)
+            )
+        if any(len(series.columns[name]) != len(series.t) for name in names):
+            raise ValueError("trajectory metric columns must align with time values")
+        result.append(
+            np.column_stack(
+                [np.asarray(series.columns[name], dtype=float) for name in names]
+            )
+        )
+    if not result:
+        raise ValueError("trajectory SeriesTable must contain at least one series")
+    return result
 
 
 def _probability_points(values: NDArray[np.float64], context: str) -> NDArray[np.float64]:
