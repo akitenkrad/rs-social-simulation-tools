@@ -1,12 +1,13 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 
-use socsim_core::{Mechanism, Phase, SocsimError, StepContext};
+use socsim_core::{Mechanism, Phase, Recorder, SocsimError, StepContext};
 
 use crate::world::InternalMetricsState;
 use crate::{
-    metric_action_ids, mixed, solve::support_enumeration, ExperimentState, FiniteGame, GameError,
-    GameWorld, MetricScheme, MixedStrategy, PolicyTable,
+    metric_action_ids, mixed, solve::support_enumeration, Credit, ExperimentState, FiniteGame,
+    GameError, GameWorld, MetricScheme, MixedStrategy, PolicyTable,
 };
 
 /// Selects whether metric descriptions refer to actions before or after a
@@ -62,6 +63,10 @@ pub struct MetricsOptions {
     stop_window: u32,
     population_share: bool,
     payoff_timing: PayoffTiming,
+    log_actions: bool,
+    log_actions_every: u32,
+    log_actions_max_agents: usize,
+    log_plays: bool,
     #[cfg(feature = "metrics")]
     action_entropy: bool,
 }
@@ -78,6 +83,10 @@ impl MetricsOptions {
             stop_window: 0,
             population_share: false,
             payoff_timing: PayoffTiming::BeforeUpdate,
+            log_actions: false,
+            log_actions_every: 1,
+            log_actions_max_agents: 1_000,
+            log_plays: false,
             #[cfg(feature = "metrics")]
             action_entropy: true,
         }
@@ -142,6 +151,52 @@ impl MetricsOptions {
         self
     }
 
+    /// Enables or disables per-agent action events.
+    ///
+    /// When enabled, `game.roster` is emitted once at the first step processed
+    /// by this mechanism, followed by `game.step_actions` at the configured
+    /// sampling interval. A newly constructed mechanism emits the roster again
+    /// after snapshot restore. Validation happens before any event or metric
+    /// row is emitted at the first processed step.
+    ///
+    /// For an asynchronous population step, actions and payoffs are the final
+    /// values recomputed from the actions held after every update of the step.
+    /// The default is `false`.
+    pub fn log_actions(mut self, on: bool) -> Self {
+        self.log_actions = on;
+        self
+    }
+
+    /// Sets the interval for `game.step_actions` events.
+    ///
+    /// An event is emitted when `t % every == 0`. The value must be greater
+    /// than zero and is validated by [`GameMetrics::new`]. The default is one.
+    pub fn log_actions_every(mut self, every: u32) -> Self {
+        self.log_actions_every = every;
+        self
+    }
+
+    /// Sets the maximum population size accepted by action logging.
+    ///
+    /// The complete roster is recorded; agents are never sampled. A larger
+    /// limit can therefore produce large event logs. The value must be greater
+    /// than zero and is validated by [`GameMetrics::new`]. The default is
+    /// 1,000.
+    pub fn log_actions_max_agents(mut self, maximum: usize) -> Self {
+        self.log_actions_max_agents = maximum;
+        self
+    }
+
+    /// Enables or disables one `game.play` event per materialized encounter.
+    ///
+    /// This requires the materialized play path. The first processed step
+    /// returns an error when the simulation uses the implicit path. The
+    /// default is `false`.
+    pub fn log_plays(mut self, on: bool) -> Self {
+        self.log_plays = on;
+        self
+    }
+
     /// Enables or disables Shannon entropy of the pooled played-action shares.
     #[cfg(feature = "metrics")]
     pub fn action_entropy(mut self, on: bool) -> Self {
@@ -166,7 +221,10 @@ struct ActionColumn {
 ///
 /// Add this mechanism to an assembled simulation with
 /// `SimulationBuilder::add_mechanism`. It observes the world in `PostStep` and
-/// does not modify model state.
+/// does not modify model state. Optional action logging emits `game.roster`,
+/// `game.step_actions`, and `game.play` events without drawing randomness.
+/// With an asynchronous population step, `game.step_actions` contains the
+/// final actions and payoffs after all in-place updates of the step.
 #[derive(Clone, Debug)]
 pub struct GameMetrics<G: FiniteGame> {
     expected_actions: Vec<usize>,
@@ -181,6 +239,11 @@ pub struct GameMetrics<G: FiniteGame> {
     stop_window: u32,
     population_columns: Option<Vec<String>>,
     payoff_timing: PayoffTiming,
+    log_actions: bool,
+    log_actions_every: u32,
+    log_actions_max_agents: usize,
+    log_plays: bool,
+    roster_logged: bool,
     #[cfg(feature = "metrics")]
     action_entropy: bool,
     marker: PhantomData<fn() -> G>,
@@ -192,6 +255,16 @@ impl<G: FiniteGame> GameMetrics<G> {
     /// A configured cooperation label must match exactly one action in every
     /// role.
     pub fn new(game: &G, options: MetricsOptions) -> Result<Self, GameError> {
+        if options.log_actions_every == 0 {
+            return Err(GameError::Metrics(
+                "log_actions_every must be greater than zero".to_owned(),
+            ));
+        }
+        if options.log_actions_max_agents == 0 {
+            return Err(GameError::Metrics(
+                "log_actions_max_agents must be greater than zero".to_owned(),
+            ));
+        }
         if let Some(tol) = options.stop_tol {
             if !tol.is_finite() || tol <= 0.0 {
                 return Err(GameError::Metrics(
@@ -299,6 +372,11 @@ impl<G: FiniteGame> GameMetrics<G> {
             stop_window: options.stop_window,
             population_columns,
             payoff_timing: options.payoff_timing,
+            log_actions: options.log_actions,
+            log_actions_every: options.log_actions_every,
+            log_actions_max_agents: options.log_actions_max_agents,
+            log_plays: options.log_plays,
+            roster_logged: false,
             #[cfg(feature = "metrics")]
             action_entropy: options.action_entropy,
             marker: PhantomData,
@@ -438,6 +516,225 @@ impl<G: FiniteGame> GameMetrics<G> {
             )));
         }
         Ok(())
+    }
+
+    fn latest_step_records<'w, X: ExperimentState>(
+        &self,
+        world: &'w GameWorld<G, X>,
+    ) -> socsim_core::Result<Vec<&'w crate::StepRecord<usize>>> {
+        world
+            .ids
+            .iter()
+            .map(|&agent| {
+                world
+                    .history(agent)
+                    .and_then(|history| history.last())
+                    .ok_or_else(|| {
+                        SocsimError::Mechanism(format!(
+                            "game_metrics found no step record for agent {}",
+                            agent.0
+                        ))
+                    })
+            })
+            .collect()
+    }
+
+    fn action_roles<X: ExperimentState>(
+        &self,
+        world: &GameWorld<G, X>,
+    ) -> socsim_core::Result<Vec<Option<usize>>> {
+        let mut roles = vec![None; world.ids.len()];
+        if self.scheme == MetricScheme::Pooled {
+            return Ok(roles);
+        }
+        if world.played_counts.is_some() && world.plays.seats.is_empty() {
+            return Err(SocsimError::Mechanism(
+                "game_metrics log_actions cannot determine per-agent roles on the implicit play path; use log_plays(true) with `PlayOptions::materialize(true)`"
+                    .to_owned(),
+            ));
+        }
+        let agent_indices: HashMap<_, _> = world
+            .ids
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, agent)| (agent, index))
+            .collect();
+        for (seat, &agent) in world.plays.seats.iter().enumerate() {
+            let role = seat % self.expected_actions.len();
+            let agent_index = agent_indices.get(&agent).copied().ok_or_else(|| {
+                SocsimError::Mechanism(format!(
+                    "game_metrics found unknown agent {} in the play arena",
+                    agent.0
+                ))
+            })?;
+            match roles[agent_index] {
+                Some(previous) if previous != role => {
+                    return Err(SocsimError::Mechanism(format!(
+                        "game_metrics log_actions cannot determine one role for agent {}; use log_plays(true) with `PlayOptions::materialize(true)`",
+                        agent.0
+                    )));
+                }
+                Some(_) => {}
+                None => roles[agent_index] = Some(role),
+            }
+        }
+        Ok(roles)
+    }
+
+    fn validate_recording<X: ExperimentState>(
+        &self,
+        world: &GameWorld<G, X>,
+    ) -> socsim_core::Result<Option<Vec<Option<usize>>>> {
+        if self.log_plays && world.played_counts.is_some() && world.plays.seats.is_empty() {
+            return Err(SocsimError::Mechanism(
+                "game_metrics log_plays requires the materialized play path; set `PlayOptions::materialize(true)` (not available with `async_population_step`)"
+                    .to_owned(),
+            ));
+        }
+        if !self.log_actions {
+            return Ok(None);
+        }
+        if world.ids.len() > self.log_actions_max_agents {
+            return Err(SocsimError::Mechanism(format!(
+                "game_metrics log_actions found {} agents, exceeding log_actions_max_agents {}; increase log_actions_max_agents to record every agent",
+                world.ids.len(), self.log_actions_max_agents
+            )));
+        }
+        let records = self.latest_step_records(world)?;
+        if records
+            .iter()
+            .any(|record| record.n_played > 0 && record.action.is_none())
+        {
+            return Err(SocsimError::Mechanism(
+                "game_metrics log_actions requires DecisionScope::PerStep; use log_plays(true) for per-encounter actions"
+                    .to_owned(),
+            ));
+        }
+        self.action_roles(world).map(Some)
+    }
+
+    fn record_roster<X: ExperimentState>(
+        &self,
+        world: &GameWorld<G, X>,
+        t: u64,
+        recorder: &mut dyn Recorder,
+    ) -> bool {
+        if self.roster_logged {
+            return false;
+        }
+        let agents: Vec<_> = world.ids.iter().map(|agent| agent.0).collect();
+        let kinds: Vec<_> = world
+            .ids
+            .iter()
+            .map(|&agent| world.policies.kind(agent).unwrap_or("held"))
+            .collect();
+        recorder.record_event(
+            t,
+            "game.roster",
+            serde_json::json!({
+                "agents": agents,
+                "kinds": kinds,
+                "decision_scope": "per_step",
+            }),
+        );
+        true
+    }
+
+    fn record_step_actions<X: ExperimentState>(
+        &self,
+        world: &GameWorld<G, X>,
+        roles: &[Option<usize>],
+        t: u64,
+        recorder: &mut dyn Recorder,
+    ) -> socsim_core::Result<()> {
+        if !t.is_multiple_of(u64::from(self.log_actions_every)) {
+            return Ok(());
+        }
+        let records = self.latest_step_records(world)?;
+        let actions: Vec<_> = records.iter().map(|record| record.action).collect();
+        let payoffs: Vec<_> = records.iter().map(|record| record.payoff).collect();
+        let n_played: Vec<_> = records.iter().map(|record| record.n_played).collect();
+        recorder.record_event(
+            t,
+            "game.step_actions",
+            serde_json::json!({
+                "actions": actions,
+                "roles": roles,
+                "payoffs": payoffs,
+                "n_played": n_played,
+            }),
+        );
+        Ok(())
+    }
+
+    fn record_plays<X: ExperimentState>(
+        &self,
+        world: &GameWorld<G, X>,
+        t: u64,
+        recorder: &mut dyn Recorder,
+    ) -> socsim_core::Result<()> {
+        for encounter_index in 0..world.plays.n_encounters() {
+            let encounter_id = u32::try_from(encounter_index).map_err(|_| {
+                SocsimError::Mechanism("game_metrics encounter index exceeds u32::MAX".to_owned())
+            })?;
+            let id = crate::EncounterId(encounter_id);
+            let encounter = world.plays.encounter(id).ok_or_else(|| {
+                SocsimError::Mechanism(format!(
+                    "game_metrics could not read encounter {encounter_index}"
+                ))
+            })?;
+            let actions = world.plays.actions(id).ok_or_else(|| {
+                SocsimError::Mechanism(format!(
+                    "game_metrics could not read actions for encounter {encounter_index}"
+                ))
+            })?;
+            let payoffs = world.plays.payoffs(id).ok_or_else(|| {
+                SocsimError::Mechanism(format!(
+                    "game_metrics could not read payoffs for encounter {encounter_index}"
+                ))
+            })?;
+            let seats: Vec<_> = encounter.seats.iter().map(|agent| agent.0).collect();
+            let credit = match encounter.credit {
+                Credit::All => "all",
+                Credit::Center => "center",
+            };
+            recorder.record_event(
+                t,
+                "game.play",
+                serde_json::json!({
+                    "encounter": encounter.id.0,
+                    "seats": seats,
+                    "actions": actions,
+                    "payoffs": payoffs,
+                    "credit": credit,
+                }),
+            );
+        }
+        Ok(())
+    }
+
+    fn record_events<X: ExperimentState>(
+        &self,
+        world: &GameWorld<G, X>,
+        roles: Option<&[Option<usize>]>,
+        t: u64,
+        recorder: &mut dyn Recorder,
+    ) -> socsim_core::Result<bool> {
+        let mut roster_logged = false;
+        if self.log_actions {
+            let roles = roles.ok_or_else(|| {
+                SocsimError::Mechanism(
+                    "game_metrics action roles were not prepared before recording".to_owned(),
+                )
+            })?;
+            roster_logged = self.record_roster(world, t, recorder);
+            self.record_step_actions(world, roles, t, recorder)?;
+        }
+        if self.log_plays {
+            self.record_plays(world, t, recorder)?;
+        }
+        Ok(roster_logged)
     }
 
     /// Returns the per-role played-action counts recorded by the implicit
@@ -1094,6 +1391,7 @@ where
             return Ok(());
         }
         self.check_shape(ctx.world)?;
+        let action_roles = self.validate_recording(ctx.world)?;
 
         let t = ctx.clock.t();
         self.check_report_table(ctx.world, t)?;
@@ -1124,7 +1422,12 @@ where
             .iter()
             .map(|(column, value)| (column.as_ref(), *value))
             .collect();
+        let roster_logged =
+            self.record_events(ctx.world, action_roles.as_deref(), t, &mut *ctx.recorder)?;
         ctx.recorder.record_row(t, "game", &row);
+        if roster_logged {
+            self.roster_logged = true;
+        }
         if should_stop {
             ctx.request_stop();
         }

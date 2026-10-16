@@ -97,6 +97,11 @@ path = "tests/metrics_snapshot.rs"
 required-features = ["core", "engine"]
 
 [[test]]
+name = "metrics_log_actions"
+path = "tests/metrics_log_actions.rs"
+required-features = ["core", "engine"]
+
+[[test]]
 name = "aggregate_table"
 path = "tests/aggregate_table.rs"
 required-features = ["core", "engine"]

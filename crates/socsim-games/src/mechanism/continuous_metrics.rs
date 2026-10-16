@@ -1,13 +1,13 @@
 use std::borrow::Cow;
 use std::marker::PhantomData;
 
-use socsim_core::{Mechanism, Phase, SocsimError, StepContext};
+use socsim_core::{Mechanism, Phase, Recorder, SocsimError, StepContext};
 
 use crate::game::continuous::check_bounds;
 use crate::outcome::kernel::for_each_implicit;
 use crate::world::InternalMetricsState;
 use crate::{
-    best_response_iteration, BrIterationOptions, BrStatus, ContinuousGame, ExperimentState,
+    best_response_iteration, BrIterationOptions, BrStatus, ContinuousGame, Credit, ExperimentState,
     GameError, GameWorld, PayoffTiming,
 };
 
@@ -38,6 +38,7 @@ pub struct ContinuousMetricsOptions {
     stop_tol: Option<f64>,
     stop_window: u32,
     payoff_timing: PayoffTiming,
+    log_plays: bool,
 }
 
 impl ContinuousMetricsOptions {
@@ -49,6 +50,7 @@ impl ContinuousMetricsOptions {
             stop_tol: None,
             stop_window: 0,
             payoff_timing: PayoffTiming::BeforeUpdate,
+            log_plays: false,
         }
     }
 
@@ -77,6 +79,16 @@ impl ContinuousMetricsOptions {
     /// The default is [`PayoffTiming::BeforeUpdate`].
     pub fn payoff_timing(mut self, timing: PayoffTiming) -> Self {
         self.payoff_timing = timing;
+        self
+    }
+
+    /// Enables or disables one `game.play` event per materialized encounter.
+    ///
+    /// Continuous actions are recorded as arrays of numbers. This requires the
+    /// materialized play path; the first processed step returns an error when
+    /// the simulation uses the implicit path. The default is `false`.
+    pub fn log_plays(mut self, on: bool) -> Self {
+        self.log_plays = on;
         self
     }
 }
@@ -122,6 +134,7 @@ pub struct ContinuousMetrics<G: ContinuousGame> {
     stop_tol: Option<f64>,
     stop_window: u32,
     payoff_timing: PayoffTiming,
+    log_plays: bool,
     marker: PhantomData<fn() -> G>,
 }
 
@@ -204,6 +217,7 @@ impl<G: ContinuousGame> ContinuousMetrics<G> {
             stop_tol: options.stop_tol,
             stop_window: options.stop_window,
             payoff_timing: options.payoff_timing,
+            log_plays: options.log_plays,
             marker: PhantomData,
         })
     }
@@ -228,6 +242,65 @@ impl<G: ContinuousGame> ContinuousMetrics<G> {
             )));
         }
         Ok(solved.profile)
+    }
+
+    fn validate_play_recording<X: ExperimentState>(
+        &self,
+        world: &GameWorld<G, X>,
+    ) -> socsim_core::Result<()> {
+        if self.log_plays && world.played_counts.is_some() && world.plays.seats.is_empty() {
+            return Err(SocsimError::Mechanism(
+                "game_metrics log_plays requires the materialized play path; set `PlayOptions::materialize(true)` (not available with `async_population_step`)"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn record_plays<X: ExperimentState>(
+        &self,
+        world: &GameWorld<G, X>,
+        t: u64,
+        recorder: &mut dyn Recorder,
+    ) -> socsim_core::Result<()> {
+        for encounter_index in 0..world.plays.n_encounters() {
+            let encounter_id = u32::try_from(encounter_index).map_err(|_| {
+                SocsimError::Mechanism("game_metrics encounter index exceeds u32::MAX".to_owned())
+            })?;
+            let id = crate::EncounterId(encounter_id);
+            let encounter = world.plays.encounter(id).ok_or_else(|| {
+                SocsimError::Mechanism(format!(
+                    "game_metrics could not read encounter {encounter_index}"
+                ))
+            })?;
+            let actions = world.plays.actions(id).ok_or_else(|| {
+                SocsimError::Mechanism(format!(
+                    "game_metrics could not read actions for encounter {encounter_index}"
+                ))
+            })?;
+            let payoffs = world.plays.payoffs(id).ok_or_else(|| {
+                SocsimError::Mechanism(format!(
+                    "game_metrics could not read payoffs for encounter {encounter_index}"
+                ))
+            })?;
+            let seats: Vec<_> = encounter.seats.iter().map(|agent| agent.0).collect();
+            let credit = match encounter.credit {
+                Credit::All => "all",
+                Credit::Center => "center",
+            };
+            recorder.record_event(
+                t,
+                "game.play",
+                serde_json::json!({
+                    "encounter": encounter.id.0,
+                    "seats": seats,
+                    "actions": actions,
+                    "payoffs": payoffs,
+                    "credit": credit,
+                }),
+            );
+        }
+        Ok(())
     }
 
     /// Returns the equilibrium profile used by `game.eq_distance`, if any.
@@ -743,6 +816,7 @@ where
             return Ok(());
         }
         self.check_shape(ctx.world)?;
+        self.validate_play_recording(ctx.world)?;
         let t = ctx.clock.t();
         let mut owned_row = Vec::new();
         let seats = self.seats(ctx.world)?;
@@ -769,6 +843,9 @@ where
             .iter()
             .map(|(column, value)| (column.as_ref(), *value))
             .collect();
+        if self.log_plays {
+            self.record_plays(ctx.world, t, &mut *ctx.recorder)?;
+        }
         ctx.recorder.record_row(t, "game", &row);
         if should_stop {
             ctx.request_stop();
