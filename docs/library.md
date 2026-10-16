@@ -989,7 +989,7 @@ write_json(&collector.summary(), run_dir.join("llm_meta.json"))?;  // the RunMet
 refresh_latest_symlink("results", &ts)?;       // results/latest → <ts>
 ```
 
-For analysis/visualisation tooling, a shared Python package lives at [`tools/socsim_tools/`](../tools/socsim_tools/README.md) (a `build_dispatcher` CLI router plus `settings`/`io` helpers) for building each replication's `*-tools` CLI; adopt it as a `uv` git-subdirectory dependency.
+For analysis/visualisation tooling, a shared Python package lives at [`tools/socsim_tools/`](../tools/socsim_tools/README.md) (a `build_dispatcher` CLI router, `settings`/`io` helpers, and the optional `games` extra for exported normal-form games) for building each replication's `*-tools` CLI; adopt it as a `uv` git-subdirectory dependency and install `socsim-tools[games]` when plotting game artifacts.
 
 ---
 

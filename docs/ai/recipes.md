@@ -1645,6 +1645,117 @@ a result that holds only for `b > 1.8`.
 
 ---
 
+## Recipe 11 — Visualising a normal-form game
+
+**When to use.** You need a stable, language-neutral game definition and a
+publication-ready payoff matrix, 2×2 best-response diagram, or three-strategy
+replicator field. Rust validates and exports the game and solver results;
+Python reads schema-version-1 JSON and renders it. This recipe stops at figures
+of the game definition and theoretical solutions, without simulation records.
+
+**Rust dependency.** Enable `export`; it adds `serde_json` but no `socsim-*`
+crate:
+
+```toml
+[dependencies]
+socsim-games = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-games", features = ["export"] }
+```
+
+**Code — export `game_spec.json` and `solutions.json`.** `write_artifacts`
+creates `artifacts/socsim_games/`; nothing is written unless you call it.
+
+```rust
+use std::error::Error;
+use std::path::Path;
+
+use socsim_games::catalog::BattleOfSexes;
+use socsim_games::solve::support_enumeration;
+use socsim_games::{write_artifacts, GameSpec, SolutionSet};
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let game = BattleOfSexes::default();
+    let spec = GameSpec::from_finite(
+        &game,
+        "battle_of_sexes",
+        Some(vec!["row".into(), "column".into()]),
+    )?;
+    let mut solutions = SolutionSet::new(&spec);
+    solutions.push_equilibrium_set("support", &support_enumeration(&game)?)?;
+    write_artifacts(Path::new("artifacts"), &spec, Some(&solutions))?;
+    Ok(())
+}
+```
+
+The contracts are `socsim-games.game-spec` version 1 and
+`socsim-games.solutions` version 1. `SolutionSet` also converts `PureNash`,
+`Equilibrium`, Lemke–Howson, minimax, QRE, replicator fixed points / ESS, and
+continuous best-response iterations; use the matching `push_*` method rather
+than retyping solver output. Within a runvault run, write the files to
+`artifacts/socsim_games/` before `finish()`; rendered figures go outside the
+run via `runvault.read.figures_dir`.
+
+**Python dependency.** Add the shared package with its plotting extra:
+
+```toml
+[project]
+dependencies = ["socsim-tools[games]"]
+
+[tool.uv.sources]
+socsim-tools = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", subdirectory = "tools/socsim_tools" }
+```
+
+**Code — load, draw, save.** Readers validate every key and the copied game
+identity. Drawing functions return a `Figure`; `save_figure` performs the
+explicit write (PNG and deterministic SVG by default).
+
+```python
+from pathlib import Path
+
+from socsim_tools.games import load_game_spec, load_solutions
+from socsim_tools.games.plots import plot_payoff_matrix
+from socsim_tools.games.style import save_figure
+
+source = Path("artifacts/socsim_games")
+spec = load_game_spec(source / "game_spec.json")
+solutions = load_solutions(source / "solutions.json", spec)
+figure = plot_payoff_matrix(spec, solutions)
+save_figure(figure, "figures/payoff_matrix")
+```
+
+For an exported directory made by the in-tree example, the equivalent CLI is:
+
+```sh
+cargo run -q -p socsim-games --features export --example export_games -- exported-games
+
+cd tools/socsim_tools
+uv run --extra games socsim-tools plot-game \
+  --game-spec ../../exported-games/battle_of_sexes/game_spec.json \
+  --solutions ../../exported-games/battle_of_sexes/solutions.json \
+  --output-dir ../../figures
+uv run --extra games socsim-tools plot-game --kind br-arrows \
+  --game-spec ../../exported-games/prisoners_dilemma/game_spec.json \
+  --output-dir ../../figures
+uv run --extra games socsim-tools plot-simplex \
+  --game-spec ../../exported-games/rock_paper_scissors/game_spec.json \
+  --solutions ../../exported-games/rock_paper_scissors/solutions.json \
+  --output-dir ../../figures
+```
+
+The stems are `payoff_matrix`, `best_response_2x2`, and `simplex`; omitting
+`--format` writes PNG and SVG. `plot_simplex` requires a symmetric two-role
+3×3 game and defaults to `n_grid=15`. The default colors are Okabe–Ito for
+actions, blue / vermilion for roles, `#DDDDDD` for missing data, and `cividis`
+for continuous speed. Pass `font=...` for non-ASCII labels and an explicit
+palette when more than eight distinct action labels are present.
+
+**Gotchas.** Do not make the Rust simulation render, do not write artifacts
+implicitly from `core`, and do not place post-hoc figures inside an immutable
+run directory. `write_game_spec` / `write_solutions` require an existing parent;
+only `write_artifacts` creates its `socsim_games` directory. `load_solutions`
+must receive the exact `GameSpec` matching the `game` copy in the file.
+
+---
+
 ## Choosing library mode vs CLI mode
 
 | | **Library mode** | **CLI mode** (`socsim` binary) |

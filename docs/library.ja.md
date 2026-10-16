@@ -986,7 +986,7 @@ write_json(&collector.summary(), run_dir.join("llm_meta.json"))?;  // RunMetadat
 refresh_latest_symlink("results", &ts)?;       // results/latest → <ts>
 ```
 
-分析・可視化ツール向けには，共有 Python パッケージが [`tools/socsim_tools/`](../tools/socsim_tools/README.md) にあります（`build_dispatcher` CLI ルータと `settings`/`io` ヘルパ）．各 replication の `*-tools` CLI を構築するために使い，`uv` の git subdirectory 依存として取り込みます．
+分析・可視化ツール向けには，共有 Python パッケージが [`tools/socsim_tools/`](../tools/socsim_tools/README.ja.md) にあります（`build_dispatcher` CLI ルータ，`settings`/`io` ヘルパ，書き出した戦略形ゲーム用の任意 extra `games`）．各 replication の `*-tools` CLI を構築するために使い，`uv` の git subdirectory 依存として取り込みます．ゲームの artifact を描画するときは `socsim-tools[games]` を入れます．
 
 動作するライブラリモードの例は `crates/socsim-engine/examples/engine_only.rs`（収束する非空間モデル）と `crates/socsim-engine/examples/cellular_automata.rs`（`run_observed` を使い `CellGrid` + `Adjacency` 上に構築したイベント駆動の格子CA）にあります．
 

@@ -30,6 +30,7 @@
 | `metrics` | `GameMetrics` の列 `game.action_entropy`（[指標](#指標) を参照）．`core` を含意 | `socsim-core`，`socsim-metrics`（既定の feature を切ったもの．依存の無い `stats` モジュールだけ） |
 | `llm` | LLM の決定規則，応答ストア，再生の manifest（[LLM による決定](#llm-による決定) を参照）．`core` を含意．Mechanism `game_llm_decide` と `assemble_with_llm` には `engine` も要る | `socsim-core`，`socsim-llm`（既定の feature だけ．ネットワークなし） |
 | `live` | `live_backend_factory()`（キャッシュなしの Ollama → OpenAI のバックエンド）．`llm` を含意 | `llm` と同じ＋`socsim-llm/live` |
+| `export` | 外部ツール用に検査済み・版付きの `game_spec.json` と `solutions.json` を書き出す機能（[可視化](#可視化) を参照） | **なし** — 外部 crate `serde_json` だけ |
 | `factory` | `GameSimFactory`，`SchedulerChoice`，`NoMatching`（[`GameSimFactory` による組み立て](#gamesimfactory-による組み立て) を参照）．`engine` を含意 | `socsim-core`，`socsim-engine`，`socsim-runner`，`socsim-config` |
 | `config` | `GameTrialFactory`，`RuleRegistry`，`RuleCtor`，`ScenarioConfig`，`ScenarioGame` — Scenario ファイルから読むシミュレーション（[Scenario ファイル](#scenario-ファイル) を参照）．`factory` を含意 | `factory` と同じ＋`toml` crate |
 
@@ -4384,3 +4385,142 @@ log_path = "runs/{name}_{seed}.jsonl"
 - `minority` や `el_farol` と `random_groups(k)` の組合せは書けません（プレイヤーは `n_agents` 人）．
 - ネットワークは無向です（`Topology::network`）．
 - 未知の最上位のテーブルは socsim-config が無視し，報告しません．
+
+---
+
+## 可視化
+
+可視化は，安定した JSON の契約を境に役割を分けます．Rust の feature
+`export` はゲーム定義，ソルバーの結果，検査，atomic な artifact の書き出しを
+担います．Python の任意パッケージ `socsim_tools.games` はその契約を読み，
+図に必要な理論値を計算し直し，matplotlib で描画します．Rust は図を描かず，
+`socsim-games` は利用者が書き出し関数を呼ばない限り artifact を書きません．
+
+### 書き出しの契約
+
+2 つの UTF-8 ファイルは，2 空白で整形し，末尾に改行を 1 つ付けます．
+
+| ファイル | 契約 | 中身 |
+|---|---|---|
+| `game_spec.json` | `schema = "socsim-games.game-spec"`，`version = 1` | 共通のキーは `kind`，`name`，`n_roles`，`role_labels`．有限ゲームは `action_labels`，`payoffs`（`layout = "row_major_role0_outer"`，`shape`，`values`），`symmetric`，`metric_scheme`，`metric_actions` を加える．連続ゲームは `bounds` と `dimension_labels` を加える．どちらも `params` を付けられる |
+| `solutions.json` | `schema = "socsim-games.solutions"`，`version = 1` | ゲームを照合するための `game` の写しと `solutions` の配列．解の `kind` は `nash`，`qre`，`population`，`population_component`，`continuous`，`inconclusive` |
+
+`GameSpec::from_finite` は空の名前やラベル，非有限の利得，上限を超える利得テンソルを
+拒否します．`GameSpec::continuous` は，役割と次元が 1 つ以上あり，境界が有限で
+`lo < hi` であることも検査します．`SolutionSet::push_*` の各メソッドは，ゲームの
+種類と形，有限の値，一意な ID，非負で和が `1e-9` 以内で 1 になる確率ベクトルを検査します．
+
+`export` を有効にし，artifact を明示的に構築して，`write_artifacts` で 2 ファイルを書きます．
+
+```rust
+use std::error::Error;
+use std::path::Path;
+
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::solve::pure_nash;
+use socsim_games::{write_artifacts, GameSpec, SolutionSet};
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let game = PrisonersDilemma::new(5.0, 3.0, 1.0, 0.0)?;
+    let spec = GameSpec::from_finite(
+        &game,
+        "prisoners_dilemma",
+        Some(vec!["row".into(), "column".into()]),
+    )?;
+    let mut solutions = SolutionSet::new(&spec);
+    solutions.push_pure_nash_all("pure", &pure_nash(&game)?)?;
+
+    // artifacts/socsim_games/{game_spec.json,solutions.json} を作る．
+    write_artifacts(Path::new("artifacts"), &spec, Some(&solutions))?;
+    Ok(())
+}
+```
+
+個別に値を入れるメソッドは `push_nash`，`push_qre`，`push_population`，
+`push_population_component`，`push_continuous`，`push_inconclusive` です．
+ソルバーの結果から変換するメソッドも `SolutionSet` にあり，
+`push_pure_nash_all`，`push_equilibrium`，`push_equilibrium_set`，
+`push_lemke_howson`，`push_minimax`，`push_qre_solution`，
+`push_fixed_point_set`，`push_br_iteration` です．一方のファイルだけを書くときは
+`write_game_spec` または `write_solutions` を使います．これらの親ディレクトリは
+事前に作る必要があります．3 つの書き出し関数は，一意な一時ファイル，`sync_all`，
+rename の順で書きます．
+
+runvault の run では，`finish()` より前に run の artifacts ディレクトリを `write_artifacts` に渡し，
+run の中の `artifacts/socsim_games/` に置きます．後から作る図は不変の artifact ディレクトリに
+置かず，`runvault.read.figures_dir` が返す run の外の図用ディレクトリに置きます．
+
+リポジトリ内の例は，囚人のジレンマ，男女の争い，じゃんけんを書き出します．
+
+```sh
+cargo run -q -p socsim-games --features export --example export_games -- exported-games
+```
+
+### Python の図と CLI
+
+描画用の依存は `socsim-tools[games]` で入れます．パッケージのルートは軽い import を保ち，
+`load_game_spec` と `load_solutions` は標準ライブラリだけを使います．数値計算と描画は
+それぞれのサブモジュールから import します．
+
+```python
+from pathlib import Path
+
+from socsim_tools.games import load_game_spec, load_solutions
+from socsim_tools.games.plots import plot_payoff_matrix
+from socsim_tools.games.style import save_figure
+
+source = Path("exported-games/battle_of_sexes")
+spec = load_game_spec(source / "game_spec.json")
+solutions = load_solutions(source / "solutions.json", spec)
+figure = plot_payoff_matrix(spec, solutions)
+save_figure(figure, "figures/battle-of-sexes")
+```
+
+`plot_payoff_matrix` は，役割ごとに色を分けた利得，すべての最適応答の下線，純粋 Nash 均衡の枠，
+書き出した混合均衡の一覧を描きます．2×2 ゲームの `plot_best_response_2x2` は，
+単独の逸脱を矢印，同点を破線，吸い込みを黒丸で描きます．
+
+![男女の争いの利得行列](assets/games-viz-payoff-matrix.png)
+
+![囚人のジレンマの最適応答の矢印図](assets/games-viz-best-response-2x2.png)
+
+`plot_simplex` は 2 役対称 3×3 ゲームを受けます．役割 0 の利得行列からレプリケータ場を計算し，
+既定の `n_grid=15` で 136 本の格子の矢印を描きます．書き出した固定点，軌跡，1 次元の
+固定点の成分，表示用の決定的な RK4 軌道も重ねられます．
+
+![じゃんけんのレプリケータ場](assets/games-viz-simplex.png)
+
+同じ図は共有 CLI からも作れます．`--solutions` は任意で，`--output-dir` は必須です．
+`--format` を省くと PNG と SVG を書き，形式を選ぶときは `--format` を繰り返します．
+
+```sh
+uv run --extra games socsim-tools plot-game \
+  --game-spec exported-games/battle_of_sexes/game_spec.json \
+  --solutions exported-games/battle_of_sexes/solutions.json \
+  --output-dir figures
+
+uv run --extra games socsim-tools plot-game --kind br-arrows \
+  --game-spec exported-games/prisoners_dilemma/game_spec.json \
+  --output-dir figures
+
+uv run --extra games socsim-tools plot-simplex \
+  --game-spec exported-games/rock_paper_scissors/game_spec.json \
+  --solutions exported-games/rock_paper_scissors/solutions.json \
+  --output-dir figures
+```
+
+出力の stem は `payoff_matrix`，`best_response_2x2`，`simplex` です．描画関数は
+`matplotlib.figure.Figure` を返し，保存しません．既存の Axes に描くときは `ax` を渡します．
+
+### 配色と保存
+
+行動の既定の配色は Okabe–Ito の `#0072B2`，`#D55E00`，`#009E73`，`#E69F00`，
+`#56B4E9`，`#CC79A7`，`#F0E442`，`#000000` の順です．役割 0 と 1 は最初の 2 色，
+欠損値は `#DDDDDD`，連続量は `cividis` を使います．行動ラベルが 9 つ以上のときは
+利用者が palette を渡す必要があります．既定のフォントは DejaVu Sans で，ASCII 以外のラベルでは
+`font=...` を渡します．
+
+`style_context()` は，matplotlib のグローバルなバックエンドを変えず，10 pt の基準文字，
+1.5 pt の線，6.4×4.8 inch の図を局所的に選びます．
+`save_figure(fig, path_stem, formats=("png", "svg"), dpi=150)` は親ディレクトリを作り，
+変動する metadata を省き，SVG の hash ID とフォントの path を固定して，同じ入力から決定的な SVG を作ります．

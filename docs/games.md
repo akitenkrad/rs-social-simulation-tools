@@ -41,6 +41,7 @@ from a scenario file by `GameTrialFactory` (see [Scenario files](#scenario-files
 | `metrics` | the `game.action_entropy` column of `GameMetrics` (see [Metrics](#metrics)); implies `core` | `socsim-core`, `socsim-metrics` (default features off — only its dependency-free `stats` module) |
 | `llm` | LLM-backed decision rules, the response store and the replay manifest (see [LLM decisions](#llm-decisions-feature-llm)); implies `core`. The `game_llm_decide` mechanism and `assemble_with_llm` also need `engine` | `socsim-core`, `socsim-llm` (default features only — no networking) |
 | `live` | `live_backend_factory()` (the cache-free Ollama → OpenAI backend); implies `llm` | as `llm`, plus `socsim-llm/live` |
+| `export` | validated, versioned `game_spec.json` and `solutions.json` artifacts for external tools (see [Visualization](#visualization)) | **none** — only the external `serde_json` crate |
 | `factory` | `GameSimFactory`, `SchedulerChoice` and `NoMatching` (see [Building with `GameSimFactory`](#building-with-gamesimfactory)); implies `engine` | `socsim-core`, `socsim-engine`, `socsim-runner`, `socsim-config` |
 | `config` | `GameTrialFactory`, `RuleRegistry`, `RuleCtor`, `ScenarioConfig` and `ScenarioGame` — simulations read from scenario files (see [Scenario files](#scenario-files)); implies `factory` | as `factory`, plus the `toml` crate |
 
@@ -5265,3 +5266,154 @@ With `run_trial(&scenario, &factory, 7)` the convergence stop ends the run after
   players are `n_agents`).
 - Networks are undirected (`Topology::network`).
 - Unknown top-level tables are ignored by socsim-config, not reported.
+
+---
+
+## Visualization
+
+Visualization is deliberately split at a stable JSON boundary. Rust owns the
+game definition, solver results, validation and atomic artifact writes through
+the `export` feature. Python's optional `socsim_tools.games` package reads that
+contract, recomputes the theory needed by a figure, and draws it with
+matplotlib. Rust never renders figures, and `socsim-games` never writes an
+artifact unless the caller invokes an export function.
+
+### Export contract
+
+The two UTF-8 files are pretty-printed with two-space indentation and one
+trailing newline:
+
+| File | Contract | Contents |
+|---|---|---|
+| `game_spec.json` | `schema = "socsim-games.game-spec"`, `version = 1` | common keys `kind`, `name`, `n_roles`, `role_labels`; a finite game adds `action_labels`, `payoffs` (`layout = "row_major_role0_outer"`, `shape`, `values`), `symmetric`, `metric_scheme`, `metric_actions`; a continuous game adds `bounds` and `dimension_labels`; either may add `params` |
+| `solutions.json` | `schema = "socsim-games.solutions"`, `version = 1` | a `game` identity copy and a `solutions` array; solution `kind` is `nash`, `qre`, `population`, `population_component`, `continuous` or `inconclusive` |
+
+`GameSpec::from_finite` rejects empty names or labels, non-finite payoffs and
+oversized payoff tensors. `GameSpec::continuous` also checks at least one role
+and dimension and finite bounds with `lo < hi`. Every `SolutionSet::push_*`
+method checks the game kind and shape, finite values, unique ids and probability
+vectors (non-negative and summing to 1 within `1e-9`).
+
+Enable `export`, construct the artifacts explicitly, and write both files with
+`write_artifacts`:
+
+```rust
+use std::error::Error;
+use std::path::Path;
+
+use socsim_games::catalog::PrisonersDilemma;
+use socsim_games::solve::pure_nash;
+use socsim_games::{write_artifacts, GameSpec, SolutionSet};
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let game = PrisonersDilemma::new(5.0, 3.0, 1.0, 0.0)?;
+    let spec = GameSpec::from_finite(
+        &game,
+        "prisoners_dilemma",
+        Some(vec!["row".into(), "column".into()]),
+    )?;
+    let mut solutions = SolutionSet::new(&spec);
+    solutions.push_pure_nash_all("pure", &pure_nash(&game)?)?;
+
+    // Creates artifacts/socsim_games/{game_spec.json,solutions.json}.
+    write_artifacts(Path::new("artifacts"), &spec, Some(&solutions))?;
+    Ok(())
+}
+```
+
+The flat insertion methods are `push_nash`, `push_qre`, `push_population`,
+`push_population_component`, `push_continuous` and `push_inconclusive`.
+Conversions from solver output stay on `SolutionSet`:
+`push_pure_nash_all`, `push_equilibrium`, `push_equilibrium_set`,
+`push_lemke_howson`, `push_minimax`, `push_qre_solution`,
+`push_fixed_point_set` and `push_br_iteration`. Use `write_game_spec` or
+`write_solutions` for a single file; their parent directory must already
+exist. All three writing functions use a unique temporary file, `sync_all` and
+rename.
+
+For a runvault run, pass the run's artifacts directory to `write_artifacts`
+before `finish()`: the files belong in `artifacts/socsim_games/` inside the
+run. A figure produced later does not belong in the immutable run artifact
+directory; place it in the run's external figure directory returned by
+`runvault.read.figures_dir`.
+
+The in-tree example exports the prisoner's dilemma, battle of the sexes and
+rock–paper–scissors:
+
+```sh
+cargo run -q -p socsim-games --features export --example export_games -- exported-games
+```
+
+### Python figures and CLI
+
+Install the plotting dependencies with `socsim-tools[games]`. The package root
+keeps imports light: `load_game_spec` and `load_solutions` use only the standard
+library; numerical theory and plotting are imported from their submodules.
+
+```python
+from pathlib import Path
+
+from socsim_tools.games import load_game_spec, load_solutions
+from socsim_tools.games.plots import plot_payoff_matrix
+from socsim_tools.games.style import save_figure
+
+source = Path("exported-games/battle_of_sexes")
+spec = load_game_spec(source / "game_spec.json")
+solutions = load_solutions(source / "solutions.json", spec)
+figure = plot_payoff_matrix(spec, solutions)
+save_figure(figure, "figures/battle-of-sexes")
+```
+
+`plot_payoff_matrix` draws role-colored payoffs, underlines every best response,
+boxes pure Nash equilibria and lists exported mixed equilibria. For a 2×2 game,
+`plot_best_response_2x2` draws unilateral deviations as arrows, ties as dashed
+edges, and sinks as filled points.
+
+![Battle of the sexes payoff matrix](assets/games-viz-payoff-matrix.png)
+
+![Prisoner's dilemma best-response arrows](assets/games-viz-best-response-2x2.png)
+
+`plot_simplex` accepts a two-role symmetric 3×3 game. It computes the
+replicator field from role 0's payoff matrix, draws all 136 grid arrows at the
+default `n_grid=15`, and can overlay exported fixed points, trajectories,
+one-dimensional fixed-point components and deterministic RK4 display orbits.
+
+![Rock–paper–scissors replicator field](assets/games-viz-simplex.png)
+
+The same plots are available from the shared CLI. `--solutions` is optional;
+`--output-dir` is required. Without `--format`, each command writes both PNG
+and SVG; repeat `--format` to choose formats.
+
+```sh
+uv run --extra games socsim-tools plot-game \
+  --game-spec exported-games/battle_of_sexes/game_spec.json \
+  --solutions exported-games/battle_of_sexes/solutions.json \
+  --output-dir figures
+
+uv run --extra games socsim-tools plot-game --kind br-arrows \
+  --game-spec exported-games/prisoners_dilemma/game_spec.json \
+  --output-dir figures
+
+uv run --extra games socsim-tools plot-simplex \
+  --game-spec exported-games/rock_paper_scissors/game_spec.json \
+  --solutions exported-games/rock_paper_scissors/solutions.json \
+  --output-dir figures
+```
+
+The output stems are `payoff_matrix`, `best_response_2x2` and `simplex`.
+Drawing functions return a `matplotlib.figure.Figure` and never save it; pass
+an existing `ax` to draw in an existing axes.
+
+### Colors and saving
+
+The default action palette is the Okabe–Ito sequence `#0072B2`, `#D55E00`,
+`#009E73`, `#E69F00`, `#56B4E9`, `#CC79A7`, `#F0E442`, `#000000`. Roles 0
+and 1 use the first two colors, missing data uses `#DDDDDD`, and continuous
+speed uses `cividis`. More than eight action labels require an explicit
+palette. The default font is DejaVu Sans; pass `font=...` for non-ASCII labels.
+
+`style_context()` locally selects a 10-point base font, 1.5-point lines and a
+6.4×4.8-inch figure without changing matplotlib's global backend.
+`save_figure(fig, path_stem, formats=("png", "svg"), dpi=150)` creates parent
+directories, omits volatile metadata and fixes SVG hash ids and font paths so
+the same input produces deterministic SVG output.

@@ -1,0 +1,21 @@
+name: Manual checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Python plotting tests live here; later integration checks can be separate jobs.
+  pytest:
+    name: Python game tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Test socsim tools
+        working-directory: tools/socsim_tools
+        run: uv run --extra dev pytest -q

@@ -1,50 +1,72 @@
+**English** | [日本語](README.ja.md)
+
 # socsim-tools
 
-socsim の各 replication が `tools/` パッケージにコピーしていた **~95% 同一の
-ボイラープレート** (CLI dispatcher + 実験設定レンダラ + results I/O) を 1 箇所に
-集約した共有ライブラリ．各 replication はこれを git subdirectory 依存として
-取り込み，固有差分 (config のフィールドラベル) だけを与える．
+`socsim-tools` is the shared Python library for command-line routing,
+experiment-settings rendering, results I/O, and normal-form-game plots used by
+socsim replications. Replications can adopt it as a git subdirectory dependency
+and keep only their model-specific configuration and plots locally.
 
-## 提供する 3 つのヘルパ
+## Helpers
 
-| モジュール | ヘルパ | 役割 |
-|-----------|--------|------|
-| `socsim_tools.cli` | `build_dispatcher(prog, description, subcommands)` | argparse subparser + argv ルーティングを 1 行で構築 |
-| `socsim_tools.settings` | `render_run_metadata` / `render_run_config` / `show_experiment_settings_main` | 実験設定テーブルと一様な LLM メタデータブロックの整形 (既存出力とバイト等価) |
-| `socsim_tools.io` | `resolve_results_dir` / `load_json` / `load_config` / `load_run_metadata` / `load_metrics` | `results/{timestamp}` ・`results/latest` の探索とロード |
+| Module | Helpers | Purpose |
+|---|---|---|
+| `socsim_tools.cli` | `build_dispatcher(prog, description, subcommands)` | build an argparse subparser and argv router |
+| `socsim_tools.settings` | `render_run_metadata` / `render_run_config` / `show_experiment_settings_main` | render experiment settings and the shared LLM metadata block |
+| `socsim_tools.io` | `resolve_results_dir` / `load_json` / `load_config` / `load_run_metadata` / `load_metrics` | find and load `results/{timestamp}` and `results/latest` |
+| `socsim_tools.games` | `load_game_spec` / `load_solutions`; theory, plotting, styling, saving, and CLI subcommands in the package's submodules | read the versioned `socsim-games` export contract and draw payoff matrices, best-response arrows, and replicator fields |
 
-`render_run_metadata` が出力する LLM メタデータブロック
-(`llm_model` / `llm_endpoint` / `llm_temperature` / `llm_seed` / `total_calls` /
-`cache_hits` / `cache_hit_rate`) は全 replication で一様．replication 固有の差は
-`render_run_config` に渡す `field_labels` (config キー → 表示ラベル) のみ．
+`render_run_metadata` emits the same LLM metadata block in every replication:
+`llm_model`, `llm_endpoint`, `llm_temperature`, `llm_seed`, `total_calls`,
+`cache_hits`, and `cache_hit_rate`. The replication-specific part is the
+`field_labels` mapping passed to `render_run_config`.
 
-## 依存
+## Dependencies
 
-コア (dispatcher / settings / config・metadata ロード) は **標準ライブラリのみ**で
-動作する．`load_metrics` のみ `pandas` を遅延 import するため，metrics を扱う
-場合だけ追加インストールする:
+The core dispatcher, settings helpers, and config/metadata readers use only the
+Python standard library. Install an extra only for the corresponding feature:
 
 ```bash
-pip install "socsim-tools[io]"   # pandas を追加
+pip install "socsim-tools[io]"       # pandas for load_metrics
+pip install "socsim-tools[games]"    # matplotlib, numpy, and scipy
 ```
 
-## replication からの取り込み方
+Importing `socsim_tools` or `socsim_tools.games` does not import the numerical
+or plotting dependencies. `load_game_spec` and `load_solutions` remain usable
+without the `games` extra; import `socsim_tools.games.theory`, `.plots`, or
+`.style` only when needed.
 
-`tools/pyproject.toml` に git subdirectory 依存を追加する:
+The game CLI reads the `game_spec.json` and optional `solutions.json` written by
+the Rust `socsim-games` `export` feature:
+
+```bash
+socsim-tools plot-game \
+  --game-spec exported/battle_of_sexes/game_spec.json \
+  --solutions exported/battle_of_sexes/solutions.json \
+  --output-dir figures
+
+socsim-tools plot-simplex \
+  --game-spec exported/rock_paper_scissors/game_spec.json \
+  --solutions exported/rock_paper_scissors/solutions.json \
+  --output-dir figures
+```
+
+## Adopting it in a replication
+
+Add the git subdirectory dependency to `tools/pyproject.toml`:
 
 ```toml
 [project]
 dependencies = [
-    "socsim-tools",
-    # ... matplotlib / numpy / pandas など可視化用の依存
+    "socsim-tools[games]",
+    # ... replication-specific dependencies
 ]
 
 [tool.uv.sources]
 socsim-tools = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", subdirectory = "tools/socsim_tools" }
 ```
 
-そのうえで，これまでコピーしていた `cli.py` / `show_experiment_settings.py` を以下に
-置き換える:
+Then replace copied dispatcher and settings code with the shared helpers:
 
 ```python
 # <pkg>_tools/cli.py
@@ -52,12 +74,16 @@ from socsim_tools.cli import build_dispatcher
 
 main = build_dispatcher(
     prog="chuang-tools",
-    description="Chuang et al. (2024) 可視化・分析ツール",
+    description="Chuang et al. (2024) visualisation and analysis tools",
     subcommands={
-        "visualize": ("単一実行結果の可視化", "chuang_tools.visualize:main"),
-        "visualize-sweep": ("スイープ結果の可視化", "chuang_tools.visualize_sweep:main"),
+        "visualize": ("Visualize one run", "chuang_tools.visualize:main"),
+        "visualize-sweep": (
+            "Visualize a sweep",
+            "chuang_tools.visualize_sweep:main",
+        ),
         "show-experiment-settings": (
-            "実行設定の表示", "chuang_tools.show_experiment_settings:main"
+            "Show experiment settings",
+            "chuang_tools.show_experiment_settings:main",
         ),
     },
 )
@@ -68,19 +94,20 @@ main = build_dispatcher(
 from socsim_tools.settings import show_experiment_settings_main
 
 FIELD_LABELS = {
-    "n_agents": "エージェント数 N ",
-    "topic": "トピック         ",
-    # ... replication 固有のラベル (右コロン位置を揃えてパディング)
+    "n_agents": "Number of agents N ",
+    "topic": "Topic              ",
+    # ... padded labels specific to the replication
 }
 
 
 def main(argv=None):
     return show_experiment_settings_main(
-        argv, field_labels=FIELD_LABELS, prog="chuang-tools show-experiment-settings"
+        argv,
+        field_labels=FIELD_LABELS,
+        prog="chuang-tools show-experiment-settings",
     )
 ```
 
-ラベルは右側コロンの桁を揃えるため空白パディング済み文字列を渡す (既存実装と同様)．
-`Taylor α_π/α_u : {a} / {b}` のような複合行が必要な replication は
-`render_run_config` を使わず `render_run_metadata` だけ共有し，設定テーブルは
-固有実装にしてよい．
+Pass labels padded so their right-hand colons align, as in the existing tools.
+If a replication needs compound rows such as `Taylor α_π/α_u`, share only
+`render_run_metadata` and keep its settings table in the replication.
