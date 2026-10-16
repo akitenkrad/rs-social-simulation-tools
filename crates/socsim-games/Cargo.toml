@@ -38,6 +38,7 @@ toml = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true, features = ["float_roundtrip"] }
+socsim-log = { path = "../socsim-log" }
 tempfile.workspace = true
 trybuild = "1"
 
@@ -100,6 +101,11 @@ required-features = ["core", "engine"]
 name = "metrics_log_actions"
 path = "tests/metrics_log_actions.rs"
 required-features = ["core", "engine"]
+
+[[test]]
+name = "viz_records"
+path = "tests/viz_records.rs"
+required-features = ["core", "engine", "metrics", "export"]
 
 [[test]]
 name = "aggregate_table"
@@ -315,3 +321,8 @@ required-features = ["core", "engine"]
 name = "export_games"
 path = "examples/export_games.rs"
 required-features = ["export"]
+
+[[example]]
+name = "viz_ipd"
+path = "examples/viz_ipd.rs"
+required-features = ["core", "engine", "metrics", "export"]

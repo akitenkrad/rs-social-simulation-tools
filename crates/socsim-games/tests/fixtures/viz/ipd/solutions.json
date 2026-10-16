@@ -1,0 +1,62 @@
+{
+  "schema": "socsim-games.solutions",
+  "version": 1,
+  "game": {
+    "name": "prisoners_dilemma",
+    "n_roles": 2,
+    "action_labels": [
+      [
+        "C",
+        "D"
+      ],
+      [
+        "C",
+        "D"
+      ]
+    ]
+  },
+  "solutions": [
+    {
+      "id": "pure-0",
+      "solver": "pure_nash",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "payoffs": [
+        1.0,
+        1.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    },
+    {
+      "id": "se-0",
+      "solver": "support_enumeration",
+      "kind": "nash",
+      "strategies": [
+        [
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "payoffs": [
+        1.0,
+        1.0
+      ],
+      "regret": 0.0,
+      "pure": true
+    }
+  ]
+}

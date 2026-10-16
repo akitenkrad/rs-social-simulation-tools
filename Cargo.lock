@@ -4435,6 +4435,7 @@ dependencies = [
  "socsim-engine",
  "socsim-grid",
  "socsim-llm",
+ "socsim-log",
  "socsim-metrics",
  "socsim-net",
  "socsim-runner",
