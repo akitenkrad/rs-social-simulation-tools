@@ -1,0 +1,24 @@
+[package]
+name = "socsim-games-runvault-viz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Integration check: socsim-games records written through runvault"
+
+[dev-dependencies]
+socsim-core = { path = "../../crates/socsim-core" }
+socsim-engine = { path = "../../crates/socsim-engine" }
+socsim-log = { path = "../../crates/socsim-log" }
+socsim-games = { path = "../../crates/socsim-games", features = ["core", "engine", "metrics", "export"] }
+runvault-socsim = { git = "https://github.com/akitenkrad/rs-runvault-socsim", branch = "main" }
+runvault = { git = "https://github.com/akitenkrad/rs-runvault", branch = "main" }
+serde = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
+tempfile = "3"
+
+# Standalone workspace: kept out of the root workspace so that the regular
+# build and CI never fetch or compile the runvault crates.
+[workspace]
+
+[patch."https://github.com/akitenkrad/rs-social-simulation-tools"]
+socsim-core = { path = "../../crates/socsim-core" }

@@ -19,3 +19,27 @@ jobs:
       - name: Test socsim tools
         working-directory: tools/socsim_tools
         run: uv run --extra dev pytest -q
+
+  runvault-viz:
+    name: Runvault visualization roundtrip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: integration/runvault-viz -> target
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Record a real runvault run
+        env:
+          SOCSIM_GAMES_VIZ_RUN_OUT: ${{ runner.temp }}/viz_run
+        run: cargo test --manifest-path integration/runvault-viz/Cargo.toml
+      - name: Check the runvault roundtrip
+        working-directory: tools/socsim_tools
+        env:
+          SOCSIM_GAMES_VIZ_RUN: ${{ runner.temp }}/viz_run
+        run: |
+          test -f "$SOCSIM_GAMES_VIZ_RUN/metrics.csv"
+          uv run --extra dev pytest -q -rs tests/test_games_runvault_roundtrip.py
