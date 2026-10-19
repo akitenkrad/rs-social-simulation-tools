@@ -47,6 +47,82 @@ pub use socsim_core::SimRng;
 // Re-export the directedness markers so callers can name the type parameter.
 pub use petgraph::{Directed as DirectedTy, Undirected as UndirectedTy};
 
+struct FenwickTree {
+    tree: Vec<u64>,
+    values: Vec<u64>,
+}
+
+impl FenwickTree {
+    fn new(len: usize) -> Self {
+        Self {
+            tree: vec![0; len + 1],
+            values: vec![0; len],
+        }
+    }
+
+    fn set(&mut self, index: usize, value: u64) {
+        let old = self.values[index];
+        self.values[index] = value;
+
+        let (increase, delta) = if value >= old {
+            (true, value - old)
+        } else {
+            (false, old - value)
+        };
+        let mut tree_index = index + 1;
+        while tree_index < self.tree.len() {
+            if increase {
+                self.tree[tree_index] += delta;
+            } else {
+                self.tree[tree_index] -= delta;
+            }
+            tree_index += tree_index & (!tree_index + 1);
+        }
+    }
+
+    fn total(&self) -> u64 {
+        let mut tree_index = self.values.len();
+        let mut total = 0;
+        while tree_index > 0 {
+            total += self.tree[tree_index];
+            tree_index &= tree_index - 1;
+        }
+        total
+    }
+
+    fn first_prefix_greater_than(&self, r: f64) -> Option<usize> {
+        let len = self.values.len();
+        let total = self.total();
+        // Integer weights and totals below 2^53 are exact in f64.  Advancing
+        // while prefix <= r therefore finds the first prefix strictly above r.
+        // If rounding gives r >= total, there is deliberately no selection.
+        if len == 0 || r >= total as f64 {
+            return None;
+        }
+
+        let mut step = 1;
+        while step <= len / 2 {
+            step *= 2;
+        }
+
+        let mut index = 0;
+        let mut prefix = 0u64;
+        while step > 0 {
+            let next = index + step;
+            if next <= len {
+                let next_prefix = prefix + self.tree[next];
+                if next_prefix as f64 <= r {
+                    index = next;
+                    prefix = next_prefix;
+                }
+            }
+            step /= 2;
+        }
+
+        (index < len).then_some(index)
+    }
+}
+
 // ── Network ─────────────────────────────────────────────────────────────────
 
 /// A social network whose nodes are [`AgentId`]s.
@@ -1001,46 +1077,46 @@ impl Network<(), Undirected> {
             }
         }
 
+        let mut weights = FenwickTree::new(n);
+        for idx in net.graph.node_indices() {
+            weights.set(idx.index(), net.graph.edges(idx).count() as u64 + 1);
+        }
+
         // Preferential attachment for the remaining nodes.
         for &new_id in &ids[seed_n..n] {
             net.add_node(new_id);
             let ni = net.index[&new_id];
 
-            // Build degree-weighted cumulative distribution over existing nodes
-            // (excluding the new node itself).
-            let existing: Vec<NodeIndex> =
-                net.graph.node_indices().filter(|&idx| idx != ni).collect();
-
-            let weights: Vec<f64> = existing
-                .iter()
-                .map(|&idx| (net.graph.edges(idx).count() as f64) + 1.0)
-                .collect();
-            let total: f64 = weights.iter().sum();
+            let existing_len = net.graph.node_count().saturating_sub(1);
+            // NodeIndex order matches node_indices().  A zero weight for ni
+            // excludes it without changing that order; zero can never win the
+            // strict-prefix selection rule.
+            weights.set(ni.index(), 0);
+            let total = weights.total() as f64;
 
             let mut chosen: Vec<NodeIndex> = Vec::with_capacity(m);
             let mut attempts = 0u32;
-            while chosen.len() < m.min(existing.len()) {
+            while chosen.len() < m.min(existing_len) {
                 attempts += 1;
                 if attempts > 10 * m as u32 + 100 {
                     break;
                 }
                 let r = rng.gen::<f64>() * total;
-                let mut cum = 0.0;
-                for (idx_pos, &w) in weights.iter().enumerate() {
-                    cum += w;
-                    if r < cum {
-                        let target = existing[idx_pos];
-                        if !chosen.contains(&target) && net.graph.find_edge(ni, target).is_none() {
-                            chosen.push(target);
-                        }
-                        break;
+                if let Some(target_index) = weights.first_prefix_greater_than(r) {
+                    let target = NodeIndex::new(target_index);
+                    if !chosen.contains(&target) && net.graph.find_edge(ni, target).is_none() {
+                        chosen.push(target);
                     }
                 }
             }
 
-            for target in chosen {
+            for &target in &chosen {
                 net.graph.add_edge(ni, target, ());
             }
+            for target in chosen {
+                weights.set(target.index(), net.graph.edges(target).count() as u64 + 1);
+            }
+            weights.set(ni.index(), net.graph.edges(ni).count() as u64 + 1);
         }
 
         net
@@ -1153,52 +1229,64 @@ impl Network<(), Directed> {
             }
         }
 
+        let mut weights = FenwickTree::new(n);
+        for idx in net.graph.node_indices() {
+            weights.set(
+                idx.index(),
+                net.graph
+                    .neighbors_directed(idx, Direction::Incoming)
+                    .count() as u64
+                    + 1,
+            );
+        }
+
         // Preferential attachment (on in-degree) for the remaining nodes.
         for &new_id in &ids[seed_n..n] {
             net.add_node(new_id);
             let ni = net.index[&new_id];
 
-            // Build in-degree-weighted cumulative distribution over existing
-            // nodes (excluding the new node itself).
-            let existing: Vec<NodeIndex> =
-                net.graph.node_indices().filter(|&idx| idx != ni).collect();
-
-            let weights: Vec<f64> = existing
-                .iter()
-                .map(|&idx| {
-                    (net.graph
-                        .neighbors_directed(idx, Direction::Incoming)
-                        .count() as f64)
-                        + 1.0
-                })
-                .collect();
-            let total: f64 = weights.iter().sum();
+            let existing_len = net.graph.node_count().saturating_sub(1);
+            // Keep ni in its NodeIndex slot with weight zero so exclusion does
+            // not perturb candidate ordering or the strict-prefix rule.
+            weights.set(ni.index(), 0);
+            let total = weights.total() as f64;
 
             let mut chosen: Vec<NodeIndex> = Vec::with_capacity(m);
             let mut attempts = 0u32;
-            while chosen.len() < m.min(existing.len()) {
+            while chosen.len() < m.min(existing_len) {
                 attempts += 1;
                 if attempts > 10 * m as u32 + 100 {
                     break;
                 }
                 let r = rng.gen::<f64>() * total;
-                let mut cum = 0.0;
-                for (idx_pos, &w) in weights.iter().enumerate() {
-                    cum += w;
-                    if r < cum {
-                        let target = existing[idx_pos];
-                        if !chosen.contains(&target) && net.graph.find_edge(ni, target).is_none() {
-                            chosen.push(target);
-                        }
-                        break;
+                if let Some(target_index) = weights.first_prefix_greater_than(r) {
+                    let target = NodeIndex::new(target_index);
+                    if !chosen.contains(&target) && net.graph.find_edge(ni, target).is_none() {
+                        chosen.push(target);
                     }
                 }
             }
 
             // New node follows the chosen nodes: arcs new_id → target.
-            for target in chosen {
+            for &target in &chosen {
                 net.graph.add_edge(ni, target, ());
             }
+            for target in chosen {
+                weights.set(
+                    target.index(),
+                    net.graph
+                        .neighbors_directed(target, Direction::Incoming)
+                        .count() as u64
+                        + 1,
+                );
+            }
+            weights.set(
+                ni.index(),
+                net.graph
+                    .neighbors_directed(ni, Direction::Incoming)
+                    .count() as u64
+                    + 1,
+            );
         }
 
         net
