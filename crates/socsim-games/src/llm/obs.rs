@@ -33,7 +33,9 @@ impl OwnHistoryObs {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// Own-history observation rendered by [`super::MarkdownTableRenderer`].
 pub struct OwnHistory<A> {
-    /// Current zero-based simulation step.
+    /// Current simulation step.
+    ///
+    /// The first step is `1`: the engine advances the clock before mechanisms run.
     pub t: u64,
     /// Role of this decision, or `None` for a shared per-step decision.
     pub role: Option<usize>,

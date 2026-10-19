@@ -67,7 +67,9 @@ pub struct OutcomeContext<'a, G: StageGame, X: ExperimentState> {
 }
 
 impl<'a, G: StageGame, X: ExperimentState> OutcomeContext<'a, G, X> {
-    /// Returns the current zero-based simulation step.
+    /// Returns the current simulation step.
+    ///
+    /// The first step is `1`: the engine advances the clock before mechanisms run.
     pub fn t(&self) -> u64 {
         self.t
     }

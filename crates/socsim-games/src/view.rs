@@ -58,7 +58,9 @@ pub struct DecisionContext<'a, G: StageGame, X: ExperimentState> {
 }
 
 impl<'a, G: StageGame, X: ExperimentState> DecisionContext<'a, G, X> {
-    /// Returns the current zero-based simulation step.
+    /// Returns the current simulation step.
+    ///
+    /// The first step is `1`: the engine advances the clock before mechanisms run.
     pub fn t(&self) -> u64 {
         self.t
     }
@@ -241,7 +243,9 @@ pub struct LearnContext<'a, G: StageGame, X: ExperimentState> {
 }
 
 impl<'a, G: StageGame, X: ExperimentState> LearnContext<'a, G, X> {
-    /// Returns the completed zero-based simulation step.
+    /// Returns the simulation step that just completed.
+    ///
+    /// The first completed step is `1`: the engine advances the clock before mechanisms run.
     pub fn t(&self) -> u64 {
         self.t
     }
