@@ -17,6 +17,10 @@ use crate::{
     OutcomeRule, PlayOptions, PolicyTable, RuleBook, RuleError, StageGame,
 };
 
+/// LLM rule book, replay store, backend factory, and execution settings.
+///
+/// The setup is consumed by [`assemble_with_llm`]. Defaults use sequential
+/// execution, deterministic [`LlmConfig`], and [`ExecutorOptions::default`].
 pub struct LlmSetup<G: StageGame, X: ExperimentState> {
     pub(crate) book: LlmRuleBook<G, X>,
     store: ResponseStore,
@@ -28,6 +32,7 @@ pub struct LlmSetup<G: StageGame, X: ExperimentState> {
 }
 
 impl<G: StageGame, X: ExperimentState> LlmSetup<G, X> {
+    /// Creates a setup with deterministic request and executor defaults.
     pub fn new(
         book: LlmRuleBook<G, X>,
         store: ResponseStore,
@@ -45,16 +50,19 @@ impl<G: StageGame, X: ExperimentState> LlmSetup<G, X> {
         }
     }
 
+    /// Replaces the sequential or threaded batch executor.
     pub fn executor(mut self, executor: LlmExecutor) -> Self {
         self.executor = executor;
         self
     }
 
+    /// Replaces backend retry, timeout, backoff, and queue limits.
     pub fn options(mut self, options: ExecutorOptions) -> Self {
         self.options = options;
         self
     }
 
+    /// Replaces the backend request configuration used for every attempt.
     pub fn config(mut self, config: LlmConfig) -> Self {
         self.config = config;
         self
@@ -583,6 +591,18 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Assembles immediate and LLM decision drivers into one game simulation.
+///
+/// LLM kinds must be assigned in `world`, registered in `llm`, and absent from
+/// `rules`. The current LLM driver supports only per-step decisions. The
+/// response-store manifest is checked before backend work begins and on every
+/// Decision phase after a possible snapshot restore.
+///
+/// # Errors
+///
+/// Returns [`GameError`] for an incompatible manifest, duplicate or missing
+/// kinds, unsupported matching or decision scope, invalid fallbacks, or any
+/// standard assembly validation failure.
 pub fn assemble_with_llm<G, X, M, O>(
     mut world: GameWorld<G, X>,
     matching: M,

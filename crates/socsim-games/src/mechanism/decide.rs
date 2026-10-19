@@ -7,6 +7,11 @@ use crate::{
     OnInvalidAction, PolicyTable, RuleBook, RuleError, StageGame,
 };
 
+/// Engine mechanism that runs native decision rules and their learning callbacks.
+///
+/// Assembly constructs this mechanism as `game_decide`. It chooses in the
+/// Decision phase, learns in Reward, validates every action, and optionally
+/// records post-learning mixed strategies.
 pub struct RuleDriver<G: StageGame, X: ExperimentState> {
     rules: RuleBook<G, X>,
     on_invalid_action: OnInvalidAction<G::Action>,

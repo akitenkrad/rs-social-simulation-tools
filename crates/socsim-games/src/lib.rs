@@ -1,6 +1,97 @@
+//! Game-theoretic models, simulation components, and solvers for socsim.
+//!
+//! A [`StageGame`] defines roles and valid actions; [`NormalFormGame`] adds
+//! payoffs, while [`FiniteGame`] and [`ContinuousGame`] describe discrete and
+//! box-constrained action spaces. In engine-backed simulations,
+//! [`DecisionRule`] implementations choose actions, [`Matching`] creates
+//! encounters, and an [`OutcomeRule`] computes their payoffs. [`GameWorld`]
+//! stores the game, policy state, histories, and topology; [`build_world`] and
+//! [`assemble()`] connect those pieces to the socsim engine.
+//!
+//! The crate also provides synchronous and asynchronous population dynamics,
+//! per-step game metrics, finite- and continuous-game solvers, built-in classic
+//! games, and learning-rule cores. Optional APIs add the type-checked
+//! [`GameSimFactory`], scenario-driven [`GameTrialFactory`], LLM decision rules,
+//! and versioned JSON exports.
+//!
+//! # Cargo features
+//!
+//! - The default build provides game traits and implementations, learning-rule
+//!   cores, mixed strategies, finite-game solvers, and continuous-game solvers.
+//! - `core` adds worlds, rules, matching, outcomes, views, metrics
+//!   configuration, and [`build_world`].
+//! - `engine` implies `core` and adds [`assemble()`], play mechanisms, and
+//!   population-dynamics mechanisms.
+//! - `metrics` adds action entropy to [`GameMetrics`].
+//! - `net` and `grid` add network and lattice topologies and matchings.
+//! - `llm` adds LLM-backed decisions, response storage, and replay manifests;
+//!   `live` additionally enables the live backend factory.
+//! - `factory` adds [`GameSimFactory`]; `config` adds scenario parsing and
+//!   [`GameTrialFactory`].
+//! - `export` adds validated game and solution artifacts.
+//!
+//! # Example
+//!
+//! The example is compiled with every feature combination. Its simulation body
+//! runs when the `engine` feature is enabled and remains a valid empty program
+//! for the default, solver-only build.
+//!
+//! ```
+//! # #[cfg(feature = "engine")]
+//! # {
+//! use std::sync::Arc;
+//! use socsim_games::{
+//!     assemble, build_world, AssignGroup, AssignKind, Assignment, Fixed,
+//!     FixedPlayers, InitialActions, MatrixGame, NormalFormOutcome, PlayOptions,
+//!     RuleBook, TitForTat,
+//! };
+//!
+//! let game = MatrixGame::bimatrix(
+//!     &[vec![3.0, 0.0], vec![5.0, 1.0]],
+//!     &[vec![3.0, 5.0], vec![0.0, 1.0]],
+//! )?;
+//! let mut rules = RuleBook::new();
+//! rules.register("tit_for_tat", Arc::new(TitForTat::new(0)))?;
+//! rules.register("defect", Arc::new(Fixed::new(1)))?;
+//! let world = build_world(
+//!     game,
+//!     2,
+//!     (),
+//!     InitialActions::Same(0),
+//!     &rules,
+//!     &Assignment::Ordered(vec![
+//!         AssignGroup { kind: AssignKind::Rule("tit_for_tat".into()), count: 1 },
+//!         AssignGroup { kind: AssignKind::Rule("defect".into()), count: 1 },
+//!     ]),
+//!     2,
+//!     2,
+//!     1,
+//! )?;
+//! let mut simulation = assemble(
+//!     world,
+//!     FixedPlayers::pairs(&[(0, 1)]),
+//!     rules,
+//!     NormalFormOutcome,
+//!     PlayOptions::new(),
+//!     1,
+//! )?.build();
+//! simulation.step()?;
+//! assert_eq!(simulation.world().payoffs(), &[0.0, 5.0]);
+//! # }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! See the [game guide](https://github.com/akitenkrad/rs-social-simulation-tools/blob/main/docs/games.md)
+//! for the execution model, built-in components, and complete examples.
+
+#![warn(missing_docs)]
+
+/// Stage-game traits, built-in games, matrix games, and game specifications.
 pub mod game;
 pub mod learn;
+/// Probability distributions over finite actions.
 pub mod mixed;
+/// Equilibrium, dominance, evolutionary, and continuous-game solvers.
 pub mod solve;
 
 #[cfg(feature = "export")]
@@ -11,6 +102,7 @@ pub use game::continuous;
 pub use mixed::MixedStrategy;
 
 #[cfg(feature = "llm")]
+/// LLM-backed decisions, deterministic replay storage, and prompt components.
 pub mod llm;
 
 pub use game::{
@@ -33,20 +125,28 @@ pub use export::{
 };
 
 #[cfg(feature = "core")]
+/// World construction and simulation assembly helpers.
 pub mod assemble;
 #[cfg(feature = "core")]
+/// Errors raised while validating or executing a game simulation.
 pub mod error;
 #[cfg(feature = "core")]
+/// Encounter-generation strategies for populations of agents.
 pub mod matching;
 #[cfg(feature = "core")]
+/// Engine mechanisms for decisions, play, learning, dynamics, and metrics.
 pub mod mechanism;
 #[cfg(feature = "core")]
+/// Rules that turn an encounter's action profile into payoffs.
 pub mod outcome;
 #[cfg(feature = "core")]
+/// Immediate, learning, and continuous-action decision rules.
 pub mod rule;
 #[cfg(feature = "core")]
+/// Read-only contexts exposed to decision and learning rules.
 pub mod view;
 #[cfg(feature = "core")]
+/// Persistent game-world state, histories, policy state, and topologies.
 pub mod world;
 
 #[cfg(feature = "config")]

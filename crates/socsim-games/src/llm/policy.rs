@@ -14,7 +14,9 @@ use crate::{
 /// The bounded record of recent LLM-backed decisions for one agent.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LlmConversation {
+    /// Maximum completed turns retained; zero retains no turns.
     pub max_turns: usize,
+    /// Completed turns from oldest to newest.
     pub turns: VecDeque<ConversationTurn>,
 }
 
@@ -28,14 +30,21 @@ impl Default for LlmConversation {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Recorded result of one completed LLM-backed decision.
 pub struct ConversationTurn {
+    /// Zero-based simulation step of the decision.
     pub t: u64,
+    /// Debug representation of the accepted or fallback action.
     pub action: String,
+    /// Number of submitted responses, including the initial attempt.
     pub attempts: u32,
+    /// Whether retry exhaustion selected a fallback action.
     pub gave_up: bool,
+    /// Realized step payoff once Reward completes, or `None` beforehand.
     pub payoff: Option<f64>,
 }
 
+/// Composition of observation, rendering, parsing, retry, and conversation retention.
 pub struct LlmPolicy<G: StageGame, O, R, P> {
     obs: O,
     renderer: R,
@@ -46,6 +55,7 @@ pub struct LlmPolicy<G: StageGame, O, R, P> {
 }
 
 impl<G: StageGame, O, R, P> LlmPolicy<G, O, R, P> {
+    /// Creates a policy retaining 16 turns and retrying once before reusing the previous action.
     pub fn new(obs: O, renderer: R, parser: P) -> Self {
         Self {
             obs,
@@ -57,11 +67,13 @@ impl<G: StageGame, O, R, P> LlmPolicy<G, O, R, P> {
         }
     }
 
+    /// Replaces the response-level retry and terminal fallback protocol.
     pub fn with_retry(mut self, retry: RetryProtocol<G::Action>) -> Self {
         self.retry = retry;
         self
     }
 
+    /// Sets the maximum completed turns retained in each agent's state.
     pub fn with_max_turns(mut self, n: usize) -> Self {
         self.max_turns = n;
         self

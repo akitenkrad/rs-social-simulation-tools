@@ -11,17 +11,38 @@ use super::{Violation, ViolationKind};
 use crate::game::continuous::check_bounds;
 use crate::{ContinuousGame, FiniteGame, RuleError, StageGame};
 
+/// Converts backend text into valid game actions and supplies fallback samples.
+///
+/// Parser authors implement this trait and pass an instance to [`LlmPolicy`](super::LlmPolicy).
+/// The policy calls [`validate`](Self::validate) during initialization,
+/// [`parse`](Self::parse) for each reply, and [`sample_uniform`](Self::sample_uniform)
+/// only for a uniform-random fallback. Implementations must return violations,
+/// rather than panic, for arbitrary backend text.
 pub trait ActionParser<G: StageGame>: Send + Sync {
+    /// Parses `raw` for one role, or reports a structured violation.
+    ///
+    /// `None` means one action must be valid for all roles represented by the
+    /// decision; built-in parsers use role 0's common action space.
     fn parse(&self, raw: &str, game: &G, role: Option<usize>) -> ParseOutcome<G::Action>;
 
+    /// Draws a valid action for the uniform-random fallback.
+    ///
+    /// The driver calls this only after successful [`validate`](Self::validate).
     fn sample_uniform(&self, game: &G, role: Option<usize>, rng: &mut SimRng) -> G::Action;
 
+    /// Checks parser settings against the selected game before simulation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuleError`] when labels, dimensions, or configured bounds are
+    /// incompatible with the game. The default accepts every game.
     fn validate(&self, _game: &G) -> Result<(), RuleError> {
         Ok(())
     }
 }
 
 #[derive(Clone, Debug, Default)]
+/// Parser for finite-action labels in strict JSON or lenient text.
 pub struct LabelParser {
     lenient: bool,
     require_reason: bool,
@@ -29,10 +50,12 @@ pub struct LabelParser {
 }
 
 impl LabelParser {
+    /// Creates a parser requiring an exact JSON string in the `action` field.
     pub fn strict() -> Self {
         Self::default()
     }
 
+    /// Creates a parser that also finds unambiguous action labels in free text.
     pub fn lenient() -> Self {
         Self {
             lenient: true,
@@ -40,11 +63,16 @@ impl LabelParser {
         }
     }
 
+    /// Configures whether a string-valued `reason` field is mandatory.
     pub fn require_reason(mut self, yes: bool) -> Self {
         self.require_reason = yes;
         self
     }
 
+    /// Adds alternative spellings recognized for one canonical action label.
+    ///
+    /// Synonyms affect only lenient matching and replace any earlier synonyms
+    /// registered for `label`.
     pub fn with_synonyms(mut self, label: &str, synonyms: &[&str]) -> Self {
         self.synonyms.insert(
             label.to_owned(),
@@ -193,6 +221,7 @@ impl<G: FiniteGame> ActionParser<G> for LabelParser {
 }
 
 #[derive(Clone, Debug)]
+/// Parser for a finite JSON number used by one-dimensional continuous games.
 pub struct NumberParser {
     field: String,
     bounds: Option<(f64, f64)>,
@@ -201,13 +230,17 @@ pub struct NumberParser {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+/// Handling of a finite numeric reply outside the permitted closed interval.
 pub enum OutOfRange {
+    /// Replace the value with the nearest interval endpoint and set a parse flag.
     Clamp,
+    /// Reject the value as a range violation; this is the default.
     #[default]
     Violation,
 }
 
 impl NumberParser {
+    /// Creates a parser for the named JSON field with game-defined bounds.
     pub fn new(field: &str) -> Self {
         Self {
             field: field.to_owned(),
@@ -216,16 +249,22 @@ impl NumberParser {
         }
     }
 
+    /// Overrides the accepted closed interval.
+    ///
+    /// [`ActionParser::validate`] later requires this interval to be ordered
+    /// and contained within every role's game bounds.
     pub fn bounds(mut self, lo: f64, hi: f64) -> Self {
         self.bounds = Some((lo, hi));
         self
     }
 
+    /// Selects whether out-of-range numbers are clamped or rejected.
     pub fn out_of_range(mut self, policy: OutOfRange) -> Self {
         self.out_of_range = policy;
         self
     }
 
+    /// Parses the configured field using this parser's optional bounds.
     pub fn parse_number(&self, raw: &str) -> ParseOutcome<f64> {
         self.parse_number_within(raw, self.bounds)
     }
@@ -383,15 +422,28 @@ fn format_violation<A>(message: impl Into<String>) -> ParseOutcome<A> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Successful parsed action or a retryable response violation.
 pub enum ParseOutcome<A> {
-    Ok { action: A, flags: ParseFlags },
+    /// Parsing produced an action together with diagnostic properties.
+    Ok {
+        /// Parsed action, already normalized by the parser.
+        action: A,
+        /// Properties of the accepted representation.
+        flags: ParseFlags,
+    },
+    /// The response cannot be used as an action.
     Violation(Violation),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Non-fatal properties recorded for an accepted response.
 pub struct ParseFlags {
+    /// The response consisted of one Markdown code fence.
     pub fenced: bool,
+    /// The selected JSON value was encoded as a string.
     pub value_was_string: bool,
+    /// A numeric value was moved to the nearest configured bound.
     pub clamped: bool,
+    /// A finite label was found through lenient text matching.
     pub lenient_match: bool,
 }

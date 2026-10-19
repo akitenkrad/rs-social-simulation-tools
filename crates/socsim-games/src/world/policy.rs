@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use socsim_core::AgentId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+/// Interned zero-based index into a world's canonical policy-kind table.
 pub struct RuleKindId(pub u32);
 
 /// Policy state for active agents. Held agents have no state slot.
@@ -30,19 +31,23 @@ impl<S> PolicyTable<S> {
         }
     }
 
+    /// Returns the number of active agents with allocated policy state.
     pub fn len(&self) -> usize {
         self.states.len()
     }
 
+    /// Returns `true` when every agent is held rather than rule-controlled.
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()
     }
 
+    /// Returns an active agent's policy state, or `None` for held/unknown agents.
     pub fn state(&self, agent: AgentId) -> Option<&S> {
         let state = *self.slot.get(agent.0 as usize)?;
         (state != Self::HELD).then(|| &self.states[state as usize])
     }
 
+    /// Returns an active agent's canonical kind name, or `None` for held/unknown agents.
     pub fn kind(&self, agent: AgentId) -> Option<&str> {
         let state = *self.slot.get(agent.0 as usize)?;
         if state == Self::HELD {

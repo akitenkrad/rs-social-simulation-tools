@@ -5,13 +5,23 @@ use crate::{ContinuousGame, FiniteGame, StageGame};
 
 pub use crate::game::DescribeGame;
 
+/// Renders game rules, one observation, and retry feedback into prompt text.
+///
+/// Renderer authors implement this trait and pair it with a compatible
+/// [`ObservationProvider`](super::ObservationProvider) inside an
+/// [`LlmPolicy`](super::LlmPolicy). Methods must be deterministic functions of
+/// their arguments because rendered text participates in replay-cache keys.
 pub trait GameRenderer<G: StageGame, Obs>: Send + Sync {
+    /// Builds the stable system-level rules for a game and optional role.
     fn rules(&self, game: &G, role: Option<usize>) -> String;
+    /// Builds the per-decision prompt fragment from an observation.
     fn turn(&self, obs: &Obs, game: &G) -> String;
+    /// Builds corrective text appended after a rejected reply.
     fn feedback(&self, violation: &Violation) -> String;
 }
 
 #[derive(Clone, Debug)]
+/// Renderer that presents finite normal-form payoffs as Markdown tables.
 pub struct MarkdownTableRenderer {
     heading: String,
 }
@@ -81,6 +91,7 @@ impl<G: FiniteGame> GameRenderer<G, OwnHistory<usize>> for MarkdownTableRenderer
 }
 
 #[derive(Clone, Debug)]
+/// Compact renderer that lists available labels and observed action counts.
 pub struct CountsRenderer {
     heading: String,
 }

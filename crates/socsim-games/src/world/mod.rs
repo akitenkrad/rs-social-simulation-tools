@@ -1,3 +1,7 @@
+//! Persistent game-world state and its snapshot-safe supporting types.
+//!
+//! See the [world-building guide](https://github.com/akitenkrad/rs-social-simulation-tools/blob/main/docs/games.md#building-build_world-and-assemble).
+
 mod aggregate_table;
 mod arena;
 mod history;
@@ -130,38 +134,47 @@ impl<G: StageGame, X: ExperimentState> GameWorld<G, X> {
         Ok(self)
     }
 
+    /// Returns the immutable stage game used by every encounter.
     pub fn game(&self) -> &G {
         &self.game
     }
 
+    /// Returns immutable experiment-specific state.
     pub fn x(&self) -> &X {
         &self.x
     }
 
+    /// Returns mutable experiment-specific state.
     pub fn x_mut(&mut self) -> &mut X {
         &mut self.x
     }
 
+    /// Returns each agent's currently held action in agent-ID order.
     pub fn held(&self) -> &[G::Action] {
         &self.held
     }
 
+    /// Returns active policy assignments and snapshot-resident rule state.
     pub fn policies(&self) -> &PolicyTable<X::PolicyState> {
         &self.policies
     }
 
+    /// Returns the current step's materialized arena, possibly empty on an implicit path.
     pub fn plays(&self) -> &PlayArena<G::Action> {
         &self.plays
     }
 
+    /// Returns current-step aggregated payoffs in agent-ID order.
     pub fn payoffs(&self) -> &[f64] {
         &self.payoff
     }
 
+    /// Returns current-step credited encounter counts in agent-ID order.
     pub fn n_played(&self) -> &[u32] {
         &self.n_played
     }
 
+    /// Returns one known agent's retained step history, oldest first.
     pub fn history(&self, agent: AgentId) -> Option<HistoryView<'_, StepRecord<G::Action>>> {
         self.step_history.view(agent)
     }

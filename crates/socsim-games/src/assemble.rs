@@ -182,36 +182,51 @@ pub fn uniform_initial_actions<G: ContinuousGame>(
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
+/// Assignment of policy kinds to agents in stable or seeded-random order.
 pub enum Assignment {
+    /// Assign each group contiguously in the listed order.
     Ordered(Vec<AssignGroup>),
+    /// Expand the groups, then shuffle assignments with a seed-derived stream.
     Shuffled(Vec<AssignGroup>),
 }
 
 #[derive(Clone, Debug)]
+/// One policy-kind group and its exact population count.
 pub struct AssignGroup {
+    /// Active rule kind or inactive held-action designation.
     pub kind: AssignKind,
+    /// Number of agents assigned to this group.
     pub count: usize,
 }
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
+/// Whether assigned agents choose through a rule or retain their held action.
 pub enum AssignKind {
+    /// Use the named kind from the combined rule catalog.
     Rule(String),
+    /// Never call a decision rule; population dynamics may still replace the action.
     Held,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+/// Reduction used when an agent receives payoffs from several encounters.
 pub enum PayoffAggregation {
+    /// Add credited encounter payoffs; this is the default.
     #[default]
     Sum,
+    /// Divide the sum by the number of credited encounters; idle agents receive zero.
     Mean,
 }
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
+/// Policy for an action returned by a rule that the game rejects.
 pub enum OnInvalidAction<A> {
+    /// Stop the step with an error; this is the default.
     Stop,
+    /// Replace invalid actions using a valid action mapped by policy-kind name.
     Fallback(BTreeMap<String, A>),
 }
 
@@ -224,6 +239,11 @@ impl<A> Default for OnInvalidAction<A> {
 }
 
 #[derive(Clone, Debug)]
+/// Cross-cutting options for decisions, payoff aggregation, and play storage.
+///
+/// [`new`](Self::new) uses summed payoffs, stops on invalid actions, chooses
+/// once per agent per step, disables mixed-strategy reports, and permits the
+/// implicit non-materialized play path.
 pub struct PlayOptions<A> {
     pub(crate) aggregation: PayoffAggregation,
     pub(crate) on_invalid_action: OnInvalidAction<A>,
@@ -239,6 +259,7 @@ impl<A> Default for PlayOptions<A> {
 }
 
 impl<A> PlayOptions<A> {
+    /// Creates the documented default play configuration.
     pub fn new() -> Self {
         Self {
             aggregation: PayoffAggregation::Sum,
@@ -249,16 +270,19 @@ impl<A> PlayOptions<A> {
         }
     }
 
+    /// Selects how multiple credited encounter payoffs form one step payoff.
     pub fn payoff_aggregation(mut self, aggregation: PayoffAggregation) -> Self {
         self.aggregation = aggregation;
         self
     }
 
+    /// Selects whether invalid rule actions stop or use kind-specific fallbacks.
     pub fn on_invalid_action(mut self, policy: OnInvalidAction<A>) -> Self {
         self.on_invalid_action = policy;
         self
     }
 
+    /// Selects whether actions are chosen per step, role, or encounter.
     pub fn decision_scope(mut self, scope: DecisionScope) -> Self {
         self.decision_scope = scope;
         self
@@ -730,6 +754,16 @@ where
 }
 
 #[cfg(feature = "engine")]
+/// Builds the standard pairwise-play simulation pipeline.
+///
+/// The returned builder contains matching, decision, play, learning, and
+/// history mechanisms. Its engine RNG is seeded with `seed`; world construction
+/// should use the same root seed so the documented derived streams line up.
+///
+/// # Errors
+///
+/// Returns [`GameError`] when rule kinds, matching capabilities, decision
+/// scope, fallbacks, or world dimensions are inconsistent.
 pub fn assemble<G, X, M, O>(
     world: GameWorld<G, X>,
     matching: M,

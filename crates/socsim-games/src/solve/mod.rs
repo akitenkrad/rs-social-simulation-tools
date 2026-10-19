@@ -1,3 +1,7 @@
+//! Verified solvers and evolutionary analyses for finite and continuous games.
+//!
+//! See the [solver guide](https://github.com/akitenkrad/rs-social-simulation-tools/blob/main/docs/games.md#solving-finite-games).
+
 use thiserror::Error;
 
 use crate::game::MAX_PROFILES;
@@ -7,16 +11,22 @@ use crate::{FiniteGame, MixedStrategy};
 pub mod anonymous;
 /// Damped best-response iteration for games with continuous actions.
 pub mod continuous;
+/// Iterated elimination of strictly dominated pure actions.
 pub mod dominance;
 /// Evolutionary stability of symmetric mixed strategies.
 pub mod ess;
+/// Lemke--Howson pivoting for two-player bimatrix games.
 pub mod lemke_howson;
 mod linalg;
+/// Linear-programming solvers for two-player zero-sum games.
 pub mod minimax;
+/// Exhaustive pure-strategy Nash equilibrium enumeration.
 pub mod pure;
+/// Logit quantal-response equilibrium iteration.
 pub mod qre;
 /// Replicator dynamics of symmetric two-role games: integration and fixed points.
 pub mod replicator;
+/// Support enumeration for mixed equilibria of two-player finite games.
 pub mod support;
 
 pub use anonymous::{pure_nash_counts, CountProfile};
@@ -44,14 +54,19 @@ use crate::mixed::MixedError;
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum LpFailure {
+    /// Constraints admit no feasible point.
     #[error("linear program is infeasible")]
     Infeasible,
+    /// Objective can improve without a finite bound.
     #[error("linear program is unbounded")]
     Unbounded,
+    /// Backend terminated before producing a solution.
     #[error("linear program was interrupted")]
     Interrupted,
+    /// Backend stopped without certifying optimality.
     #[error("linear program did not reach an optimal solution")]
     NotOptimal,
+    /// Backend reported another implementation-specific failure.
     #[error("linear-programming backend failed: {0}")]
     Internal(String),
 }
@@ -60,35 +75,77 @@ pub enum LpFailure {
 #[derive(Clone, Debug, PartialEq, Error)]
 #[non_exhaustive]
 pub enum SolveError {
+    /// Profile or search space exceeds the solver's explicit safety limit.
     #[error("game is too large: {profiles} profiles")]
-    TooLarge { profiles: u128 },
+    TooLarge {
+        /// Number of profiles or support pairs that would be examined.
+        profiles: u128,
+    },
+    /// Solver is defined for a different number of roles.
     #[error("unsupported number of roles: {n_roles}")]
-    UnsupportedRoles { n_roles: usize },
+    UnsupportedRoles {
+        /// Number of roles declared by the game.
+        n_roles: usize,
+    },
+    /// A role has no action and therefore no strategy simplex.
     #[error("role {role} has no actions")]
-    EmptyActions { role: usize },
+    EmptyActions {
+        /// Zero-based role with an empty action set.
+        role: usize,
+    },
+    /// At least one enumerated payoff is NaN or infinite.
     #[error("game has a non-finite payoff")]
     NonFinitePayoff,
+    /// A requested minimax solve failed the zero-sum payoff check.
     #[error("game is not zero-sum")]
     NotZeroSum,
+    /// A tableau label lies outside the combined action-label range.
     #[error("label {label} is invalid for {n_labels} labels")]
-    InvalidLabel { label: usize, n_labels: usize },
+    InvalidLabel {
+        /// Rejected zero-based label.
+        label: usize,
+        /// Total number of valid labels.
+        n_labels: usize,
+    },
+    /// A pivoting algorithm reached its configured iteration cap.
     #[error("maximum pivot limit reached: {limit}")]
-    MaxPivots { limit: usize },
+    MaxPivots {
+        /// Maximum number of permitted pivots.
+        limit: usize,
+    },
+    /// Linear-programming backend failure.
     #[error(transparent)]
     Lp(#[from] LpFailure),
+    /// A candidate failed the solver's final numerical certificate.
     #[error("solution verification failed: duality gap {duality_gap}, regret {regret}")]
-    VerificationFailed { duality_gap: f64, regret: f64 },
+    VerificationFailed {
+        /// Difference between primal and dual objectives.
+        duality_gap: f64,
+        /// Maximum profitable unilateral deviation.
+        regret: f64,
+    },
+    /// An iterative method exhausted its budget before meeting tolerance.
     #[error("solver did not converge: residual {residual}, iterations {iterations}")]
-    NotConverged { residual: f64, iterations: usize },
+    NotConverged {
+        /// Final convergence residual.
+        residual: f64,
+        /// Number of completed iterations.
+        iterations: usize,
+    },
+    /// Solver parameters are non-finite, out of range, or mutually inconsistent.
     #[error("invalid solver options: {0}")]
     InvalidOptions(String),
+    /// Invalid mixed-strategy construction or arithmetic.
     #[error(transparent)]
     Mixed(#[from] MixedError),
     /// No converged best response could be obtained for `role`: the game has
     /// no analytic best response, no oracle was given, and a numerical search
     /// is not available, or the chosen method did not converge.
     #[error("no converged best response is available for role {role}")]
-    NoBestResponse { role: usize },
+    NoBestResponse {
+        /// Zero-based role for which no converged response was available.
+        role: usize,
+    },
     /// The game violates a contract that cannot be expressed in its type, for
     /// example invalid bounds of a continuous game.
     #[error("invalid game: {0}")]
@@ -98,8 +155,11 @@ pub enum SolveError {
 /// A verified equilibrium represented as one mixed strategy per role.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Equilibrium {
+    /// One normalized mixed strategy per role, in role order.
     pub strategies: Vec<MixedStrategy>,
+    /// Expected payoff of each role at the reported strategy profile.
     pub payoffs: Vec<f64>,
+    /// Largest profitable unilateral deviation; bounded by solver tolerance.
     pub regret: f64,
 }
 

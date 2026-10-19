@@ -8,13 +8,21 @@ use crate::learn::{
     roth_erev::RothErevState,
 };
 
-/// Experiment-specific state stored in [`crate::GameWorld`].
+/// Experiment-specific state and per-agent policy-state representation.
+///
+/// Experiment authors implement this trait. [`crate::GameWorld`] owns one `X`,
+/// decision and learning contexts call [`view_for`](Self::view_for), and rule
+/// initialization constructs `PolicyState` values through [`Slot`]. The view
+/// must enforce the intended information boundary for the requesting agent.
 pub trait ExperimentState: Send + Sync + 'static {
+    /// Snapshot-resident state held separately for every agent.
     type PolicyState: Clone + Send + Sync + Debug + 'static;
+    /// Read-only experiment view exposed to one agent for the duration of a borrow.
     type View<'a>
     where
         Self: 'a;
 
+    /// Produces the private experiment view visible to `me`.
     fn view_for(&self, me: AgentId) -> Self::View<'_>;
 }
 
@@ -26,10 +34,13 @@ impl ExperimentState for () {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Zero-sized policy state for rules that retain no per-agent data.
 pub struct Stateless;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Per-agent memory used by Tit-for-Tat.
 pub struct TftState {
+    /// Most recently observed opponent action, or `None` before any encounter.
     pub last_opponent: Option<usize>,
 }
 
@@ -150,22 +161,43 @@ impl AutomatonPolicyState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
+/// Built-in tagged policy-state representation used by `ExperimentState for ()`.
 pub enum BuiltinPolicyState {
+    /// State for fixed and uniformly random rules.
     Stateless(Stateless),
+    /// State for Tit-for-Tat.
     TitForTat(TftState),
+    /// State for fictitious play.
     Belief(BeliefState),
+    /// State for Roth--Erev reinforcement learning.
     Propensity(PropensityState),
+    /// State for logit choice.
     Estimate(EstimateState),
+    /// State for a repeated-game automaton.
     Automaton(AutomatonPolicyState),
     #[cfg(feature = "llm")]
+    /// Persistent conversation state for an LLM policy.
     Llm(crate::llm::LlmConversation),
     /// State of `DampedBestResponse` and `GradientAscent`.
     Continuous(ContinuousState),
 }
 
+/// Embeds one rule-specific state type in an experiment's policy-state type.
+///
+/// Experiment authors implement `Slot<T>` for every decision-rule state `T`
+/// they intend to use. Rules call [`slot`](Self::slot) and
+/// [`slot_mut`](Self::slot_mut) while deciding or learning, and call
+/// [`from_slot`](Self::from_slot) during agent initialization. Implementations
+/// must make `from_slot(value).slot()` return that same value and return `None`
+/// only when the current variant holds another rule's state.
+///
+/// See the [policy-state guide](https://github.com/akitenkrad/rs-social-simulation-tools/blob/main/docs/games.md#policystate-and-slot).
 pub trait Slot<T> {
+    /// Borrows the embedded state when the current variant contains `T`.
     fn slot(&self) -> Option<&T>;
+    /// Mutably borrows the embedded state when the current variant contains `T`.
     fn slot_mut(&mut self) -> Option<&mut T>;
+    /// Wraps freshly initialized rule state in the experiment policy-state type.
     fn from_slot(value: T) -> Self;
 }
 

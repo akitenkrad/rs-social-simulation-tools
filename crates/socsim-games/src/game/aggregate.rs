@@ -28,10 +28,16 @@ pub enum AggregateSpecError {
     InvalidStart,
     /// The aggregate name contains an unsupported character.
     #[error("aggregate name contains an invalid character at byte {index}")]
-    InvalidCharacter { index: usize },
+    InvalidCharacter {
+        /// Byte offset of the first unsupported character.
+        index: usize,
+    },
     /// The aggregate name exceeds the maximum length.
     #[error("aggregate name is {length} bytes long; maximum is 49")]
-    TooLong { length: usize },
+    TooLong {
+        /// UTF-8 byte length of the rejected name.
+        length: usize,
+    },
 }
 
 #[derive(Deserialize)]

@@ -14,13 +14,21 @@ pub enum MixedError {
     /// A role's probability vector has the wrong dimension.
     #[error("role {role} has dimension {actual}, expected {expected}")]
     Dimension {
+        /// Zero-based role with the mismatched distribution.
         role: usize,
+        /// Number of actions declared for that role.
         expected: usize,
+        /// Number of supplied probabilities.
         actual: usize,
     },
     /// The mixed profile has the wrong number of roles.
     #[error("mixed profile has {actual} roles, expected {expected}")]
-    RoleCount { expected: usize, actual: usize },
+    RoleCount {
+        /// Number of roles declared by the game.
+        expected: usize,
+        /// Number of supplied role strategies, or the minimum implied by a bad role index.
+        actual: usize,
+    },
 }
 
 /// A validated probability distribution over one role's finite actions.

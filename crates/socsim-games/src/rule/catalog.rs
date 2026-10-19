@@ -30,6 +30,7 @@ impl<G: StageGame, X: ExperimentState> Default for KindCatalog<G, X> {
 }
 
 impl<G: StageGame, X: ExperimentState> KindCatalog<G, X> {
+    /// Creates an empty combined native/LLM kind catalog.
     pub fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
@@ -94,6 +95,7 @@ impl<G: StageGame, X: ExperimentState> KindCatalog<G, X> {
         self.entries.keys().map(String::as_str)
     }
 
+    /// Returns the interned ID of `kind`, or `None` when it is not registered.
     pub fn kind_id(&self, kind: &str) -> Option<RuleKindId> {
         self.entries
             .keys()
@@ -102,6 +104,7 @@ impl<G: StageGame, X: ExperimentState> KindCatalog<G, X> {
             .map(RuleKindId)
     }
 
+    /// Returns the mechanism name responsible for `kind`.
     pub fn driver_name(&self, kind: &str) -> Option<&'static str> {
         self.entries.get(kind).map(|entry| entry.driver_name)
     }

@@ -12,7 +12,9 @@ const MAX_CONDITION_ESTIMATE: f64 = 1e12;
 /// The verified equilibria and numerical findings from support enumeration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EquilibriumSet {
+    /// Verified equilibrium points, deduplicated within comparison tolerance.
     pub equilibria: Vec<Equilibrium>,
+    /// Degenerate or numerically inconclusive supports encountered by the search.
     pub findings: Vec<SupportFinding>,
 }
 
@@ -28,7 +30,9 @@ impl EquilibriumSet {
 pub enum SupportFinding {
     /// A rank-deficient support whose equilibrium set could not be verified.
     Degenerate {
+        /// Ascending action indices in the support of each role.
         support: Vec<Vec<usize>>,
+        /// Numerical reason a unique equilibrium could not be certified.
         reason: String,
     },
     /// A verified point on a positive-dimensional equilibrium component.
@@ -36,13 +40,18 @@ pub enum SupportFinding {
     /// Each direction is flattened as all role-0 probabilities followed by all
     /// role-1 probabilities. Payoff-variable coordinates are omitted.
     Component {
+        /// Ascending action indices in the support of each role.
         support: Vec<Vec<usize>>,
+        /// Verified point lying on the component.
         base: Equilibrium,
+        /// Basis directions in flattened role-0 then role-1 probability order.
         directions: Vec<Vec<f64>>,
     },
     /// A support whose conditioning or final verification was inconclusive.
     Inconclusive {
+        /// Ascending action indices in the support of each role.
         support: Vec<Vec<usize>>,
+        /// Conditioning or verification failure that prevented certification.
         reason: String,
     },
 }

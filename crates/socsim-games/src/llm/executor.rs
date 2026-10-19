@@ -17,9 +17,12 @@ pub type BackendFactory = Arc<dyn Fn() -> Result<Box<dyn LlmClient>, LlmError> +
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LlmExecutor {
+    /// Complete requests in key order on the calling thread; this is the default.
     #[default]
     Sequential,
+    /// Complete requests on a fixed number of worker threads.
     Threaded {
+        /// Worker count; zero causes every request to return a backend error.
         workers: usize,
     },
 }
@@ -28,9 +31,13 @@ pub enum LlmExecutor {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct ExecutorOptions {
+    /// Maximum wall-clock time from dispatch until one request is abandoned.
     pub timeout: Duration,
+    /// Additional backend attempts after a retryable first failure.
     pub max_backend_retries: u32,
+    /// Initial exponential-backoff duration between backend attempts.
     pub backoff_base: Duration,
+    /// Bounded queued jobs allocated per worker; must be greater than zero.
     pub queue_per_worker: usize,
 }
 

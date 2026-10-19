@@ -13,46 +13,105 @@ pub mod roth_erev;
 #[derive(Clone, Debug, PartialEq, Error)]
 #[non_exhaustive]
 pub enum LearnError {
+    /// A primitive defined only for a fixed number of roles received another size.
     #[error("learning rule requires {expected} roles, but the game has {actual}")]
-    UnsupportedRoleCount { expected: usize, actual: usize },
+    UnsupportedRoleCount {
+        /// Number of roles required by the primitive.
+        expected: usize,
+        /// Number of roles declared by the game.
+        actual: usize,
+    },
+    /// A role index lies outside the game's role range.
     #[error("role {role} is out of range for a game with {n_roles} roles")]
-    InvalidRole { role: usize, n_roles: usize },
+    InvalidRole {
+        /// Rejected zero-based role index.
+        role: usize,
+        /// Number of roles declared by the game.
+        n_roles: usize,
+    },
+    /// A role's action count does not match a learning primitive's fixed size.
     #[error("role {role} must have {expected} actions, but has {actual}")]
     InvalidActionCount {
+        /// Zero-based role with the incompatible action set.
         role: usize,
+        /// Action count required by the primitive.
         expected: usize,
+        /// Action count declared by the game.
         actual: usize,
     },
+    /// An input vector has a different length from its corresponding action set.
     #[error("{what} has length {actual}, expected {expected}")]
     LengthMismatch {
+        /// Name of the vector being validated.
         what: &'static str,
+        /// Required number of entries.
         expected: usize,
+        /// Supplied number of entries.
         actual: usize,
     },
+    /// A fictitious-play prior contains a negative or non-finite count.
     #[error("initial count at index {index} must be finite and non-negative, got {value}")]
-    InvalidInitialCount { index: usize, value: f64 },
+    InvalidInitialCount {
+        /// Zero-based entry containing the invalid count.
+        index: usize,
+        /// Rejected count value.
+        value: f64,
+    },
+    /// A named learning parameter is outside its documented domain.
     #[error("parameter {parameter} has invalid value {value}")]
-    InvalidParameter { parameter: &'static str, value: f64 },
+    InvalidParameter {
+        /// Stable parameter name used in diagnostics.
+        parameter: &'static str,
+        /// Rejected parameter value.
+        value: f64,
+    },
+    /// A Roth--Erev game payoff violates the strict-positivity prerequisite.
     #[error(
         "game payoff must be strictly positive at role {role}, profile {profile:?}; got {payoff}"
     )]
     NonPositivePayoff {
+        /// Role whose payoff violates the positivity requirement.
         role: usize,
+        /// Complete finite-action profile at which validation failed.
         profile: Vec<usize>,
+        /// Non-positive or non-finite payoff returned by the game.
         payoff: f64,
     },
+    /// A realized reinforcement payoff is not finite and strictly positive.
     #[error("realized payoff must be finite and strictly positive, got {payoff}")]
-    InvalidRealizedPayoff { payoff: f64 },
+    InvalidRealizedPayoff {
+        /// Rejected payoff value.
+        payoff: f64,
+    },
+    /// A zero-based action index lies outside its finite action space.
     #[error("action {action} is out of range for {n_actions} actions")]
-    InvalidAction { action: usize, n_actions: usize },
+    InvalidAction {
+        /// Rejected action index.
+        action: usize,
+        /// Number of available actions.
+        n_actions: usize,
+    },
+    /// A binary repeated-game automaton received an index other than 0 or 1.
     #[error("cooperation action must be 0 or 1, got {coop}")]
-    InvalidCooperationAction { coop: usize },
+    InvalidCooperationAction {
+        /// Rejected cooperation-action index.
+        coop: usize,
+    },
+    /// A sampling weight is negative or non-finite.
     #[error("probability at index {index} must be finite and non-negative, got {value}")]
-    InvalidProbability { index: usize, value: f64 },
+    InvalidProbability {
+        /// Zero-based entry containing the invalid weight.
+        index: usize,
+        /// Rejected probability value.
+        value: f64,
+    },
+    /// A probability vector is empty or every entry is zero.
     #[error("probability vector is empty or has no positive mass")]
     EmptyProbabilityMass,
+    /// An integer observation count exceeded its representable range.
     #[error("a learned count overflowed")]
     CountOverflow,
+    /// An intermediate learning calculation produced NaN or infinity.
     #[error("a payoff calculation produced a non-finite value")]
     NonFiniteCalculation,
 }

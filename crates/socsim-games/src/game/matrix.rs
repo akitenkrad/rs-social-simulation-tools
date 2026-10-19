@@ -12,12 +12,21 @@ const MAX_PAYOFF_ELEMENTS: u128 = 10_000_000;
 #[derive(Clone, Debug, PartialEq, Error)]
 #[non_exhaustive]
 pub enum MatrixError {
+    /// Role counts and row-major payoff tensors have inconsistent dimensions.
     #[error("payoff shape does not match the action counts")]
     Shape,
+    /// The profile count or total payoff elements exceed safety limits.
     #[error("matrix too large: {profiles} profiles, {elements} payoff elements")]
-    TooLarge { profiles: u128, elements: u128 },
+    TooLarge {
+        /// Product of every role's action count.
+        profiles: u128,
+        /// Profile count multiplied by the number of roles.
+        elements: u128,
+    },
+    /// At least one payoff is NaN or infinite.
     #[error("non-finite payoff")]
     NonFinite,
+    /// Optional action labels do not provide exactly one label per action.
     #[error("label table does not match the action counts")]
     Labels,
 }
@@ -32,6 +41,15 @@ pub struct MatrixGame {
 }
 
 impl MatrixGame {
+    /// Constructs a validated role-major payoff tensor.
+    ///
+    /// `payoffs[role]` is row-major over complete profiles, with the last role
+    /// varying fastest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatrixError`] for empty action spaces, mismatched tensor
+    /// dimensions, excessive size, or non-finite payoffs.
     pub fn new(n_actions: Vec<usize>, payoffs: Vec<Vec<f64>>) -> Result<Self, MatrixError> {
         if n_actions.is_empty() || n_actions.contains(&0) {
             return Err(MatrixError::Shape);
@@ -66,6 +84,12 @@ impl MatrixGame {
         })
     }
 
+    /// Constructs a two-role game from equally shaped row and column payoff matrices.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatrixError::Shape`] unless both matrices are nonempty,
+    /// rectangular, and equally shaped; other validation errors come from [`new`](Self::new).
     pub fn bimatrix(a: &[Vec<f64>], b: &[Vec<f64>]) -> Result<Self, MatrixError> {
         let (rows, columns) = rectangular_shape(a).ok_or(MatrixError::Shape)?;
         if rectangular_shape(b) != Some((rows, columns)) {
@@ -81,6 +105,12 @@ impl MatrixGame {
         )
     }
 
+    /// Constructs a two-role zero-sum game whose role-1 payoffs are `-a`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatrixError::Shape`] for a non-rectangular or empty matrix and
+    /// otherwise forwards [`new`](Self::new) validation errors.
     pub fn zero_sum(a: &[Vec<f64>]) -> Result<Self, MatrixError> {
         let (rows, columns) = rectangular_shape(a).ok_or(MatrixError::Shape)?;
         let role_0: Vec<f64> = a.iter().flatten().copied().collect();
@@ -88,6 +118,12 @@ impl MatrixGame {
         Self::new(vec![rows, columns], vec![role_0, role_1])
     }
 
+    /// Replaces generated action labels with one label per role and action.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatrixError::Labels`] if either the role count or an action
+    /// label count differs from the game's action spaces.
     pub fn with_labels(mut self, labels: Vec<Vec<String>>) -> Result<Self, MatrixError> {
         if labels.len() != self.n_actions.len()
             || labels

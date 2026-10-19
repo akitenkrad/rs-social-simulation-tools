@@ -4,9 +4,13 @@ use serde::{Deserialize, Serialize};
 use socsim_core::AgentId;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// One agent's aggregate action and payoff record for a completed step.
 pub struct StepRecord<A> {
+    /// Action chosen during the step, or `None` when the agent did not decide.
     pub action: Option<A>,
+    /// Sum or mean of credited encounter payoffs according to play options.
     pub payoff: f64,
+    /// Number of credited encounters contributing to `payoff`.
     pub n_played: u32,
 }
 
@@ -79,33 +83,40 @@ impl<A> NextSlot<'_, A> {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// Chronological borrowed view over a possibly wrapped history ring.
 pub struct HistoryView<'a, T> {
     front: &'a [T],
     back: &'a [T],
 }
 
 impl<'a, T> HistoryView<'a, T> {
+    /// Returns the number of retained records.
     pub fn len(&self) -> usize {
         self.front.len() + self.back.len()
     }
 
+    /// Returns `true` when no completed record is retained.
     pub fn is_empty(&self) -> bool {
         self.front.is_empty() && self.back.is_empty()
     }
 
+    /// Returns the one or two chronological slices that form this view.
     pub fn as_slices(&self) -> (&'a [T], &'a [T]) {
         (self.front, self.back)
     }
 
+    /// Iterates from the oldest retained record to the newest.
     pub fn iter(&self) -> impl Iterator<Item = &'a T> + 'a {
         self.front.iter().chain(self.back.iter())
     }
 
+    /// Returns the newest retained record.
     pub fn last(&self) -> Option<&'a T> {
         self.back.last().or_else(|| self.front.last())
     }
 }
 
+/// Action-only projection of another agent's retained step history.
 pub struct PeerHistory<'a, A> {
     view: HistoryView<'a, StepRecord<A>>,
 }
@@ -115,18 +126,22 @@ impl<'a, A> PeerHistory<'a, A> {
         Self { view }
     }
 
+    /// Returns the number of retained steps.
     pub fn len(&self) -> usize {
         self.view.len()
     }
 
+    /// Returns `true` when the peer has no retained records.
     pub fn is_empty(&self) -> bool {
         self.view.is_empty()
     }
 
+    /// Iterates peer actions oldest first; idle steps yield `None`.
     pub fn actions(&self) -> impl Iterator<Item = Option<&'a A>> + 'a {
         self.view.iter().map(|record| record.action.as_ref())
     }
 
+    /// Returns the newest retained action, distinguishing no record from an idle step.
     pub fn last(&self) -> Option<Option<&'a A>> {
         self.view.last().map(|record| record.action.as_ref())
     }

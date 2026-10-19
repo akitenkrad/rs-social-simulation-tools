@@ -6,21 +6,29 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, Default)]
+/// All unordered pairs of agents in ascending-ID traversal order.
+///
+/// By default each pair plays once with the lower ID in role 0. Enabling both
+/// orders adds the reversed encounter. Self-play is configurable in the API but
+/// currently rejected during assembly.
 pub struct RoundRobin {
     both_orders: bool,
     self_play: bool,
 }
 
 impl RoundRobin {
+    /// Creates the default one-order, no-self-play tournament.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Configures whether each pair also plays with its roles reversed.
     pub fn both_orders(mut self, enabled: bool) -> Self {
         self.both_orders = enabled;
         self
     }
 
+    /// Configures self-play; enabling it currently makes [`Matching::check`] fail.
     pub fn self_play(mut self, enabled: bool) -> Self {
         self.self_play = enabled;
         self

@@ -5,15 +5,20 @@ use super::{inspect_game, SolveError};
 /// One action removed during iterated strict-dominance elimination.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Elimination {
+    /// One-based simultaneous-elimination round.
     pub round: usize,
+    /// Zero-based role whose action was removed.
     pub role: usize,
+    /// Zero-based action removed from that role.
     pub action: usize,
 }
 
 /// The fixed point of iterated elimination by pure-strategy strict dominance.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DominanceResult {
+    /// Remaining action indices for each role, in ascending order.
     pub surviving: Vec<Vec<usize>>,
+    /// Removed actions in round, role, and action order.
     pub eliminated: Vec<Elimination>,
 }
 

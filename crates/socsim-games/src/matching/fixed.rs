@@ -6,15 +6,21 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
+/// Fixed disjoint pairs for a two-role game.
+///
+/// Assembly rejects unknown agents, repeated agents, and games with any role
+/// count other than two. Agents omitted from the pairs sit out every step.
 pub struct FixedPlayers {
     pairs: Vec<[AgentId; 2]>,
 }
 
 impl FixedPlayers {
+    /// Creates fixed pairs from explicit [`AgentId`] seats.
     pub fn new(pairs: Vec<[AgentId; 2]>) -> Self {
         Self { pairs }
     }
 
+    /// Creates fixed pairs from numeric agent IDs.
     pub fn pairs(pairs: &[(u64, u64)]) -> Self {
         Self::new(
             pairs

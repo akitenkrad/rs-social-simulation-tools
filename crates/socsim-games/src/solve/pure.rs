@@ -5,8 +5,11 @@ use super::{advance_profile, inspect_game, SolveError};
 /// A verified pure-strategy Nash equilibrium.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PureNash {
+    /// Zero-based action chosen by each role.
     pub profile: Vec<usize>,
+    /// Role-indexed payoffs at `profile`.
     pub payoffs: Vec<f64>,
+    /// Largest unilateral improvement, at most the game-scaled tolerance.
     pub regret: f64,
 }
 

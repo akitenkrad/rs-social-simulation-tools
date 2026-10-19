@@ -3,6 +3,10 @@ use std::sync::Arc;
 
 use crate::{DecisionRule, ExperimentState, RuleError, StageGame};
 
+/// Native decision rules indexed by canonical policy-kind name.
+///
+/// Names are stored in lexicographic order and become [`crate::RuleKindId`]
+/// order when a world is built.
 pub struct RuleBook<G: StageGame, X: ExperimentState> {
     pub(crate) rules: BTreeMap<String, Arc<dyn DecisionRule<G, X>>>,
 }
@@ -22,12 +26,18 @@ impl<G: StageGame, X: ExperimentState> Default for RuleBook<G, X> {
 }
 
 impl<G: StageGame, X: ExperimentState> RuleBook<G, X> {
+    /// Creates an empty native rule registry.
     pub fn new() -> Self {
         Self {
             rules: BTreeMap::new(),
         }
     }
 
+    /// Registers one shared rule under `kind`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuleError::DuplicateKind`] when the name is already present.
     pub fn register(
         &mut self,
         kind: &str,

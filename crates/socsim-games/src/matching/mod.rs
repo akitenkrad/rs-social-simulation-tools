@@ -1,3 +1,7 @@
+//! Strategies for seating agents into stage-game encounters.
+//!
+//! See the [matching guide](https://github.com/akitenkrad/rs-social-simulation-tools/blob/main/docs/games.md#matching).
+
 mod fixed;
 #[cfg(feature = "grid")]
 mod grid_neighborhood;
@@ -26,8 +30,25 @@ use crate::{
     HistoryView, StageGame, StepRecord, Topology,
 };
 
+/// Generates the ordered encounters played during one simulation step.
+///
+/// Matching authors implement this trait. Assembly calls capability and
+/// configuration checks once, initializes snapshot-resident [`MatchingState`],
+/// then the matching mechanism calls [`encounters_into`](Self::encounters_into)
+/// each step. Implementations must use only the supplied `rng`, emit valid
+/// agents exactly in role order, and keep mutable progress in `state` so that
+/// snapshots resume exactly.
+///
+/// See the [matching guide](https://github.com/akitenkrad/rs-social-simulation-tools/blob/main/docs/games.md#matching).
 pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
+    /// Returns the stable name used in mechanism diagnostics.
     fn name(&self) -> &str;
+    /// Validates the matching against a fully constructed world.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GameError`] for incompatible roles, topology, decision scope,
+    /// agent identifiers, or matching-specific configuration.
     fn check(&self, ctx: &MatchContext<'_, G, X>) -> Result<(), GameError>;
     /// Returns whether this matching can seat a game with `n_roles` roles.
     ///
@@ -68,9 +89,22 @@ pub trait Matching<G: StageGame, X: ExperimentState>: Send + Sync {
     fn implicit(&self) -> Option<ImplicitPattern> {
         None
     }
+    /// Creates persistent state before the first step.
+    ///
+    /// Stateless matchings use the default [`MatchingState::None`].
     fn init_state(&self, _ctx: &MatchContext<'_, G, X>) -> MatchingState {
         MatchingState::None
     }
+    /// Appends this step's encounters to `out` in deterministic traversal order.
+    ///
+    /// Each encounter must contain exactly `ctx.game().n_roles()` known agents.
+    /// Stateful implementations update `state`, and randomized implementations
+    /// draw exclusively from `rng`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a mechanism error if encounter construction or persistent state
+    /// is invalid.
     fn encounters_into(
         &self,
         ctx: &MatchContext<'_, G, X>,
@@ -109,6 +143,7 @@ pub struct EncounterBounds {
     pub max: u32,
 }
 
+/// Read-only world information supplied to matching checks and generation.
 pub struct MatchContext<'a, G: StageGame, X: ExperimentState> {
     pub(crate) t: u64,
     pub(crate) decision_scope: DecisionScope,
@@ -121,34 +156,42 @@ pub struct MatchContext<'a, G: StageGame, X: ExperimentState> {
 }
 
 impl<'a, G: StageGame, X: ExperimentState> MatchContext<'a, G, X> {
+    /// Returns the current zero-based simulation step.
     pub fn t(&self) -> u64 {
         self.t
     }
 
+    /// Returns how often agents choose within a step.
     pub fn decision_scope(&self) -> DecisionScope {
         self.decision_scope
     }
 
+    /// Returns all agent identifiers in stable world order.
     pub fn ids(&self) -> &'a [AgentId] {
         self.ids
     }
 
+    /// Returns the stage game being matched.
     pub fn game(&self) -> &'a G {
         self.game
     }
 
+    /// Returns the world's optional spatial or network topology.
     pub fn topology(&self) -> &'a Topology {
         self.topology
     }
 
+    /// Returns an agent's currently held action, or `None` for an unknown ID.
     pub fn held(&self, agent: AgentId) -> Option<&'a G::Action> {
         self.held.get(agent.0 as usize)
     }
 
+    /// Returns retained step history, or `None` for an unknown ID.
     pub fn history(&self, agent: AgentId) -> Option<HistoryView<'a, StepRecord<G::Action>>> {
         self.history.view(agent)
     }
 
+    /// Returns experiment-specific state shared with the game world.
     pub fn x(&self) -> &'a X {
         self.x
     }
@@ -156,7 +199,13 @@ impl<'a, G: StageGame, X: ExperimentState> MatchContext<'a, G, X> {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
+/// Snapshot-resident mutable state owned by a [`Matching`] implementation.
 pub enum MatchingState {
+    /// No progress is needed for a stateless matching.
     None,
-    RoundRobin { cursor: u64 },
+    /// Progress state reserved for [`RoundRobin`].
+    RoundRobin {
+        /// Number of completed round-robin generations.
+        cursor: u64,
+    },
 }

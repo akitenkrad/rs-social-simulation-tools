@@ -23,8 +23,11 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static MERGE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Backend identity included in cache keys and replay manifests.
 pub struct BackendIdentity {
+    /// Provider-specific model name.
     pub model: String,
+    /// Backend endpoint or stable endpoint label.
     pub endpoint: String,
 }
 
@@ -34,23 +37,38 @@ pub struct BackendIdentity {
 /// fields in this order when [`Self::canonical_json`] is called.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CacheKeyV1 {
+    /// Cache-key schema version; current writers use `1`.
     pub version: u32,
+    /// Model and endpoint that would serve a cache miss.
     pub backend: BackendIdentity,
+    /// Optional system instruction supplied separately from the user prompt.
     pub system: Option<String>,
+    /// Exact user prompt bytes interpreted as UTF-8.
     pub prompt: String,
+    /// Bit-preserving representation of the request temperature.
     pub temperature_bits: u32,
+    /// Requested backend seed, even when `omit_seed` prevents sending it.
     pub seed: u64,
+    /// Whether the backend request omits its seed parameter.
     pub omit_seed: bool,
+    /// Optional completion-token limit.
     pub max_tokens: Option<u32>,
+    /// Optional backend reasoning-mode request.
     pub think: Option<bool>,
+    /// Whether an empty or whitespace-only completion is accepted.
     pub allow_blank: bool,
 }
 
 impl CacheKeyV1 {
+    /// Serializes the key in stable declaration order for comparison and hashing.
     pub fn canonical_json(&self) -> String {
         serde_json::to_string(self).expect("CacheKeyV1 contains only JSON-serializable fields")
     }
 
+    /// Computes the wrapping 64-bit FNV-1a index of the canonical JSON.
+    ///
+    /// Stores compare canonical JSON after lookup, so a digest collision is
+    /// reported instead of returning the wrong record.
     pub fn digest(&self) -> u64 {
         self.canonical_json()
             .bytes()
@@ -61,41 +79,71 @@ impl CacheKeyV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Persisted response and metadata for one complete request identity.
 pub struct ResponseRecord {
+    /// Request identity used for lookup and collision verification.
     pub key: CacheKeyV1,
+    /// Completion text returned to the action parser.
     pub text: String,
+    /// Optional reasoning text returned separately by the backend.
     pub thinking: Option<String>,
+    /// Optional token counts reported by the backend.
     pub usage: Option<TokenUsage>,
+    /// Raw normalized call metadata, excluding store-level hit information.
     pub backend_metadata: Option<CallMetadata>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Policy for cache misses in a [`ResponseStore`].
 pub enum ReplayMode {
+    /// Treat every miss as an error and never contact the backend.
     ReplayOnly,
+    /// Call the backend on a miss and append the response to this run's shard.
     RecordMisses,
+    /// Call the backend on a miss without persisting the response.
     Live,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Counts produced by one deterministic shard merge.
 pub struct MergeReport {
+    /// Previously unseen records added to `base.jsonl`.
     pub records_added: usize,
+    /// Idempotent records already present in the base or an earlier shard.
     pub duplicate_records: usize,
+    /// Number of shard files considered, including empty shards.
     pub shards_merged: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
+/// Failure to read, validate, append, or merge response-store data.
 pub enum StoreError {
+    /// Filesystem operation failed.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// A store file is not valid UTF-8 JSON Lines for [`ResponseRecord`].
     #[error("invalid response-store JSON: {0}")]
     Json(String),
+    /// One canonical request key maps to different response data.
     #[error("conflicting responses for cache key {key}")]
-    Conflict { key: String },
+    Conflict {
+        /// Canonical JSON of the conflicting request key.
+        key: String,
+    },
+    /// Two distinct canonical keys produced the same 64-bit digest.
     #[error("FNV-1a cache-key collision for digest {digest:016x}")]
-    KeyCollision { digest: u64 },
+    KeyCollision {
+        /// Colliding FNV-1a digest.
+        digest: u64,
+    },
 }
 
+/// Deterministic lookup table backed by a base JSONL file and per-run shard.
+///
+/// Disk stores load `base.jsonl` and their own shard, append new records before
+/// exposing them in memory, and preserve a digest of the base for snapshot
+/// replay verification. In-memory stores perform no filesystem I/O.
 pub struct ResponseStore {
     store_id: String,
     base_digest: String,
@@ -105,6 +153,7 @@ pub struct ResponseStore {
 }
 
 impl ResponseStore {
+    /// Creates an empty non-persistent store with the supplied stable identity.
     pub fn in_memory(store_id: &str, mode: ReplayMode) -> Self {
         Self {
             store_id: store_id.to_owned(),
@@ -115,6 +164,16 @@ impl ResponseStore {
         }
     }
 
+    /// Opens a disk store and this run's `<run_tag>-<seed>.jsonl` shard.
+    ///
+    /// Unsafe filename characters in `run_tag` are replaced with underscores.
+    /// Existing duplicate records are accepted only when their entire response
+    /// data is identical.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] for filesystem failures, malformed JSON Lines,
+    /// conflicting records, or a digest collision.
     pub fn open(
         dir: impl AsRef<Path>,
         mode: ReplayMode,
@@ -147,18 +206,22 @@ impl ResponseStore {
         })
     }
 
+    /// Returns the persistent identity shared by the store directory.
     pub fn store_id(&self) -> &str {
         &self.store_id
     }
 
+    /// Returns the `sha256:` digest of `base.jsonl` as it was opened.
     pub fn base_digest(&self) -> &str {
         &self.base_digest
     }
 
+    /// Returns the configured miss policy.
     pub fn mode(&self) -> ReplayMode {
         self.mode
     }
 
+    /// Looks up an exact canonical request, rejecting digest collisions.
     pub fn get(&self, key: &CacheKeyV1) -> Option<&ResponseRecord> {
         let record = self.records.get(&key.digest())?;
         (record.key.canonical_json() == key.canonical_json()).then_some(record)
@@ -182,6 +245,16 @@ impl ResponseStore {
         Ok(())
     }
 
+    /// Merges every sorted `shards/*.jsonl` file into `base.jsonl` atomically.
+    ///
+    /// Exact duplicates are counted, new records are ordered by digest, and
+    /// successfully merged shards are removed. Calls in this process are
+    /// serialized by a mutex.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] without replacing the base if records conflict,
+    /// JSON is invalid, a digest collides, or a filesystem operation fails.
     pub fn merge_shards(dir: impl AsRef<Path>) -> Result<MergeReport, StoreError> {
         let _guard = MERGE_LOCK
             .get_or_init(|| Mutex::new(()))

@@ -1,9 +1,18 @@
+//! Stage-game interfaces and reusable game representations.
+//!
+//! Implement a trait from the [`StageGame`] hierarchy to make a new game
+//! available to rules and solvers. Simulation assembly validates actions with
+//! [`StageGame::check_action`] before outcome evaluation.
+//!
+//! See the [stage-games guide](https://github.com/akitenkrad/rs-social-simulation-tools/blob/main/docs/games.md#stage-games).
+
 use std::borrow::Cow;
 use std::fmt::Debug;
 
 use thiserror::Error;
 
 mod aggregate;
+/// Built-in finite stage games and population games.
 pub mod catalog;
 pub mod continuous;
 mod matrix;
@@ -21,40 +30,95 @@ pub use spec::{ContinuousSpec, FiniteSpec};
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ActionError {
+    /// The requested role is not in `0..StageGame::n_roles()`.
     #[error("role {role} is out of range")]
-    InvalidRole { role: usize },
+    InvalidRole {
+        /// The rejected zero-based role index.
+        role: usize,
+    },
+    /// A discrete action is outside the action space of its role.
     #[error("action {action} is invalid for role {role}")]
-    InvalidAction { role: usize, action: usize },
+    InvalidAction {
+        /// The zero-based role whose action was checked.
+        role: usize,
+        /// The rejected zero-based action index.
+        action: usize,
+    },
     /// A continuous action has a different number of components than the
     /// bounds of its role.
     #[error("action for role {role} has {actual} components, expected {expected}")]
     DimensionMismatch {
+        /// The zero-based role whose action was checked.
         role: usize,
+        /// Number of components declared by the role's bounds.
         expected: usize,
+        /// Number of components supplied by the caller.
         actual: usize,
     },
     /// A component of a continuous action is NaN or infinite.
     #[error("component {dim} of the action for role {role} is not finite")]
-    NonFiniteComponent { role: usize, dim: usize },
+    NonFiniteComponent {
+        /// The zero-based role whose action was checked.
+        role: usize,
+        /// The zero-based component containing a non-finite value.
+        dim: usize,
+    },
     /// A component of a continuous action lies outside the closed bounds of
     /// its role.
     #[error("component {dim} of the action for role {role} is outside its bounds")]
-    OutOfBounds { role: usize, dim: usize },
+    OutOfBounds {
+        /// The zero-based role whose action was checked.
+        role: usize,
+        /// The zero-based component outside its closed interval.
+        dim: usize,
+    },
 }
 
-/// A stage game defines its roles and the actions available to each role.
+/// Defines the roles and legal actions of one encounter.
+///
+/// Game authors implement this base trait. Decision rules and world builders
+/// call it to validate every held or newly chosen action. Role indices are
+/// zero-based in `0..n_roles()`; an implementation must reject every other
+/// role rather than indexing unchecked state.
+///
+/// See the [stage-games guide](https://github.com/akitenkrad/rs-social-simulation-tools/blob/main/docs/games.md#stage-games).
 pub trait StageGame: Send + Sync + 'static {
+    /// Value chosen by one role, such as a finite action index or real vector.
     type Action: Clone + Send + Sync + Debug + 'static;
 
+    /// Returns the fixed number of seats in each encounter.
+    ///
+    /// Implementations must return a stable value for their lifetime.
     fn n_roles(&self) -> usize;
 
+    /// Validates `action` for the zero-based `role`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ActionError::InvalidRole`] for an unknown role and an
+    /// action-specific variant when the value is outside that role's action
+    /// space or otherwise malformed.
     fn check_action(&self, role: usize, action: &Self::Action) -> Result<(), ActionError>;
 }
 
-/// A normal-form game assigns a payoff to every role and action profile.
+/// Assigns a payoff to every role and complete action profile.
+///
+/// Game authors implement this after [`StageGame`]. Outcome rules and solvers
+/// call it only with a valid role and a profile of exactly [`n_roles`](StageGame::n_roles)
+/// actions that have passed [`StageGame::check_action`]. Returned payoffs must
+/// be finite whenever the game is used by simulation metrics or solvers.
 pub trait NormalFormGame: StageGame {
+    /// Computes the payoff of one role for a complete valid profile.
+    ///
+    /// The payoff unit is defined by the game. Implementations may panic for a
+    /// role or profile that violates the trait contract.
     fn payoff(&self, role: usize, profile: &[Self::Action]) -> f64;
 
+    /// Writes all role payoffs for a complete valid profile into `out`.
+    ///
+    /// The default calls [`payoff`](Self::payoff) for each role. Callers provide
+    /// at least [`n_roles`](StageGame::n_roles) output slots; implementations
+    /// overriding this method must preserve role order.
     fn payoffs_into(&self, profile: &[Self::Action], out: &mut [f64]) {
         for (role, value) in out.iter_mut().enumerate().take(self.n_roles()) {
             *value = self.payoff(role, profile);
@@ -62,14 +126,28 @@ pub trait NormalFormGame: StageGame {
     }
 }
 
-/// A finite normal-form game whose actions are zero-based indices.
+/// A normal-form game whose actions are zero-based finite indices.
+///
+/// Implementations define a nonempty action set for every valid role. Rules
+/// and finite-game solvers use the returned counts to enumerate actions.
 pub trait FiniteGame: NormalFormGame<Action = usize> {
+    /// Returns the number of legal actions for `role`.
+    ///
+    /// Valid actions are exactly `0..n_actions(role)`.
     fn n_actions(&self, role: usize) -> usize;
 
+    /// Returns a display label for a valid action of a role.
+    ///
+    /// The default is `a{action}` and does not inspect `role`.
     fn action_label(&self, _role: usize, action: usize) -> Cow<'_, str> {
         Cow::Owned(format!("a{action}"))
     }
 
+    /// Reports whether permuting roles leaves action spaces and payoffs unchanged.
+    ///
+    /// The default is `false`. Solvers may use `true` to choose a symmetric
+    /// representation, so implementations must not claim symmetry merely
+    /// because all roles have the same number of actions.
     fn is_symmetric(&self) -> bool {
         false
     }

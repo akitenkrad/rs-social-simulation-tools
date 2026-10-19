@@ -10,12 +10,21 @@ use crate::FiniteGame;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AutomatonKind {
+    /// Always cooperate.
     AllC,
+    /// Always defect.
     AllD,
+    /// Cooperate until the opponent first defects, then defect forever.
     Grim,
+    /// Repeat after a rewarding outcome and switch after an unrewarding one.
     Wsls,
+    /// Copy the opponent's preceding action, cooperating initially.
     Tft,
-    Gtft { generosity: f64 },
+    /// Tit-for-Tat that sometimes cooperates after an opponent defection.
+    Gtft {
+        /// Probability of cooperation after defection, in the closed interval `[0, 1]`.
+        generosity: f64,
+    },
 }
 
 /// One automaton's persistent state.

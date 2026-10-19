@@ -9,11 +9,13 @@ use crate::{
 use super::pure_strategy;
 
 #[derive(Clone, Debug)]
+/// Rule that returns the same configured action on every decision.
 pub struct Fixed<A> {
     action: A,
 }
 
 impl<A> Fixed<A> {
+    /// Creates a fixed rule; initialization later validates the action for every role.
     pub fn new(action: A) -> Self {
         Self { action }
     }
@@ -50,6 +52,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug, Default)]
+/// Rule that samples uniformly from the finite actions of its assigned role.
 pub struct UniformRandom;
 
 impl<G, X> DecisionRule<G, X> for UniformRandom
@@ -99,11 +102,15 @@ where
 }
 
 #[derive(Clone, Copy, Debug)]
+/// Two-player, two-action rule that copies the opponent's preceding action.
+///
+/// Before observing an opponent, the rule plays its configured cooperation action.
 pub struct TitForTat {
     cooperate: usize,
 }
 
 impl TitForTat {
+    /// Creates the rule with the zero-based action treated as cooperation.
     pub fn new(coop: usize) -> Self {
         Self { cooperate: coop }
     }
