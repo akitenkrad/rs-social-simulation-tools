@@ -9,13 +9,15 @@ Learning-oriented, follow-along lessons. Each one has you **build and run someth
 ```
 T0 ──▶ T1 ──┬──▶ T2
             ├──▶ T3   ──▶ T5
-            └──▶ T4
+            ├──▶ T4
+            └──▶ T6
 ```
 
 - Do **T0** first to get the tool under your fingers (no Rust).
 - Do **T1** next — every library tutorial builds on its concepts.
 - **T2 / T3 / T4** branch off T1; take them in any order (they each teach one extra crate family).
 - **T5** ties everything into the full-stack CLI path.
+- **T6** applies both CLI and library mode to a normal-form game; take it after T1.
 
 | Tutorial | What you build | Mode |
 |---|---|---|
@@ -25,6 +27,7 @@ T0 ──▶ T1 ──┬──▶ T2
 | [T3 — A spatial grid model](03-spatial-grid.md) | An event-driven voter CA on a lattice, with a spatial metric | Library |
 | [T4 — An LLM-driven agent](04-llm-agent.md) | A gossip model whose agents decide via an LLM, kept deterministic | Library + `socsim-llm` |
 | [T5 — A scenario pack](05-scenario-pack.md) | Package mechanisms into a `ModulePack`, drive it from scenario TOML | Full-stack |
+| [T6 — A normal-form game](06-normal-form-game.md) | An iterated prisoner's dilemma from a scenario and Rust, with recorded metrics and a plot | CLI + `socsim-games` |
 
 ## Where tutorials fit (Diátaxis)
 

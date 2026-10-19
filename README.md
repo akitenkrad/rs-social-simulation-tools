@@ -112,7 +112,7 @@ Three Cournot firms with damped best responses settle at the Nash quantity $q^* 
 
 | Document | Description |
 |---|---|
-| [Tutorials](docs/tutorials/index.md) | **Start here.** Learning-oriented, follow-along lessons: the CLI, your first model, networks, grids, LLM agents, and scenario packs |
+| [Tutorials](docs/tutorials/index.md) | **Start here.** Learning-oriented, follow-along lessons: the CLI, your first model, networks, grids, LLM agents, scenario packs, and normal-form games |
 | [Design overview](docs/design.md) | Concepts & design philosophy, core traits/structs, and the 6-phase execution model |
 | [CLI reference](docs/cli.md) | Every subcommand, flags, JSONL output format |
 | [Use-cases & recipes](docs/usecases.md) | Runbook for common research workflows |

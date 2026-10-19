@@ -112,7 +112,7 @@ t       game.action_sd.0  game.aggregate.price  game.aggregate.total_output  gam
 
 | ドキュメント | 内容 |
 |---|---|
-| [チュートリアル](docs/tutorials/index.ja.md) | **ここから始めてください．** 学習指向の，手を動かして進めるレッスン：CLI，最初のモデル，ネットワーク，グリッド，LLMエージェント，シナリオパック |
+| [チュートリアル](docs/tutorials/index.ja.md) | **ここから始めてください．** 学習指向の，手を動かして進めるレッスン：CLI，最初のモデル，ネットワーク，グリッド，LLMエージェント，シナリオパック，戦略形ゲーム |
 | [設計概要](docs/design.ja.md) | コンセプトと設計思想，主要トレイト/構造体，6フェーズ実行モデル |
 | [CLIリファレンス](docs/cli.ja.md) | 全サブコマンド，フラグ，JSONL出力形式 |
 | [ユースケース＆レシピ](docs/usecases.ja.md) | 代表的な研究ワークフローのランブック |

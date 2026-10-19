@@ -344,6 +344,18 @@ repeated games between learning agents, spatial games, oligopolies — from a
 scenario file alone. Three scenarios ship with it; each runs with the plain
 CLI.
 
+### When to use a game-theoretic simulation
+
+Use this path when outcomes depend on **strategic interaction**: one agent's
+best action changes with the actions, beliefs, or population composition of
+others. Typical questions compare learning rules in a repeated game, study
+cooperation under network or lattice structure, follow evolutionary selection
+between held strategies, or measure convergence toward a Nash equilibrium in a
+continuous-action market. Start with [T6 — A normal-form
+game](tutorials/06-normal-form-game.md) for a guided CLI-to-Rust example. Use
+the [`socsim-games` guide](games.md) when you need the complete rule, matching,
+population-dynamics, solver, metric, and visualization APIs.
+
 ### Repeated prisoner's dilemma — tit for tat against fictitious play
 
 ```sh

@@ -4599,6 +4599,29 @@ runvault の記録では `repo_id` を渡します．`load_llm_calls` は任意�
 
 ![LLM の意思決定の印を付けたエージェントごとの行動](assets/games-viz-action-raster.png)
 
+この例で使う fixture は
+[`viz_ipd`](../crates/socsim-games/examples/viz_ipd.rs) が生成します．
+リポジトリのルートから，例が要求する feature と出力先を明示して作り直します：
+
+```sh
+CARGO_NET_OFFLINE=true cargo run -q -p socsim-games \
+  --features core,engine,metrics,export --example viz_ipd -- \
+  crates/socsim-games/tests/fixtures/viz/ipd
+```
+
+このコマンドは `game_spec.json`，`solutions.json`，`seed_0.jsonl` から
+`seed_4.jsonl` までの7ファイルだけを書きます．比較テストは同じ7ファイルを
+一時ディレクトリに生成し，ファイルの集合を検査した後，すべてをバイト単位で
+比較します：
+
+```sh
+CARGO_NET_OFFLINE=true cargo test -q -p socsim-games \
+  --features core,engine,metrics,export --test viz_records
+```
+
+このガイドの更新時にも例の出力先を一時ディレクトリにして実行し，生成した
+7ファイルがリポジトリの fixture とすべてバイト単位で一致することを確かめました．
+
 例の fixture に対する同じコマンドは次のとおりです．
 
 ```sh
