@@ -68,7 +68,9 @@ jobs:
           DOWNSTREAM_PATH: ${{ matrix.path }}
           DOWNSTREAM_REPO: ${{ matrix.repo }}
         run: |
-          set -uo pipefail
+          # `shell: bash` starts with -e; turn it off so a failed build or test
+          # still reaches the step that records the result.
+          set +e -uo pipefail
 
           if ! patch_output=$(python3 socsim/.github/scripts/downstream.py patch-args socsim); then
             exit 1
