@@ -1,0 +1,169 @@
+# This workflow checks whether downstream repositories build and test against the exact socsim commit just pushed.
+# It lives here because downstream Cargo.lock files pin older socsim revisions, so downstream CI cannot exercise current changes.
+name: Downstream
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/downstream.yml
+      - .github/scripts/downstream.py
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: downstream-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      skipped: ${{ steps.discover.outputs.skipped }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Discover downstream repositories
+        id: discover
+        run: python3 .github/scripts/downstream.py discover --github-output "$GITHUB_OUTPUT"
+
+  check:
+    needs: discover
+    if: ${{ needs.discover.result == 'success' && fromJSON(needs.discover.outputs.matrix).include[0] != null }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: socsim
+
+      - name: Clone downstream repository
+        env:
+          DOWNSTREAM_REPO: ${{ matrix.repo }}
+        run: git clone --depth 1 "https://github.com/${DOWNSTREAM_REPO}" downstream
+
+      # Same toolchain as ci.yml, so a break here is about the code and not
+      # about a newer rustc. Raise the two together.
+      - uses: dtolnay/rust-toolchain@1.99.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: downstream -> target
+          key: ${{ matrix.name }}
+
+      - name: Build and test downstream
+        shell: bash
+        env:
+          DOWNSTREAM_NAME: ${{ matrix.name }}
+          DOWNSTREAM_PATH: ${{ matrix.path }}
+          DOWNSTREAM_REPO: ${{ matrix.repo }}
+        run: |
+          set -uo pipefail
+
+          if ! patch_output=$(python3 socsim/.github/scripts/downstream.py patch-args socsim); then
+            exit 1
+          fi
+          if [[ -z ${patch_output} ]]; then
+            echo "No socsim crates found for Cargo patching" >&2
+            exit 1
+          fi
+          mapfile -t patch_args <<< "${patch_output}"
+          mkdir -p "result/${DOWNSTREAM_NAME}"
+
+          pushd downstream >/dev/null
+          cargo build --all-targets "${patch_args[@]}" 2>&1 | tee ../build-output.txt
+          build_status=${PIPESTATUS[0]}
+
+          passed=0
+          failed=0
+          ignored=0
+          if [[ ${build_status} -eq 0 ]]; then
+            build_result=ok
+            cargo test --no-fail-fast "${patch_args[@]}" 2>&1 | tee ../test-output.txt
+            test_status=${PIPESTATUS[0]}
+            if [[ ${test_status} -eq 0 ]]; then
+              test_result=ok
+            else
+              test_result=fail
+            fi
+            passed=$(awk '/test result:/ { for (i = 1; i <= NF; i++) if ($i == "passed;") total += $(i - 1) } END { print total + 0 }' ../test-output.txt)
+            failed=$(awk '/test result:/ { for (i = 1; i <= NF; i++) if ($i == "failed;") total += $(i - 1) } END { print total + 0 }' ../test-output.txt)
+            ignored=$(awk '/test result:/ { for (i = 1; i <= NF; i++) if ($i == "ignored;") total += $(i - 1) } END { print total + 0 }' ../test-output.txt)
+          else
+            build_result=fail
+            test_result=skip
+          fi
+          popd >/dev/null
+
+          export BUILD_RESULT="${build_result}"
+          export TEST_RESULT="${test_result}"
+          export PASSED_COUNT="${passed}"
+          export FAILED_COUNT="${failed}"
+          export IGNORED_COUNT="${ignored}"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          result = {
+              "name": os.environ["DOWNSTREAM_NAME"],
+              "path": os.environ["DOWNSTREAM_PATH"],
+              "repo": os.environ["DOWNSTREAM_REPO"],
+              "build": os.environ["BUILD_RESULT"],
+              "test": os.environ["TEST_RESULT"],
+              "passed": int(os.environ["PASSED_COUNT"]),
+              "failed": int(os.environ["FAILED_COUNT"]),
+              "ignored": int(os.environ["IGNORED_COUNT"]),
+          }
+          output = Path("result") / result["name"] / "result.json"
+          output.write_text(json.dumps(result, ensure_ascii=False) + "\n", encoding="utf-8")
+          PY
+
+          if [[ ${build_result} != ok || ${test_result} == fail ]]; then
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-${{ matrix.name }}
+          path: result/
+
+  summary:
+    needs: [discover, check]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          merge-multiple: true
+          path: results/
+
+      - name: Summarize downstream results
+        env:
+          SKIPPED_JSON: ${{ needs.discover.outputs.skipped }}
+          EXPECTED_JSON: ${{ needs.discover.outputs.matrix }}
+        run: |
+          if [[ -z "${SKIPPED_JSON}" ]]; then
+            SKIPPED_JSON='[]'
+          fi
+          if [[ -z "${EXPECTED_JSON}" ]]; then
+            EXPECTED_JSON='{"include":[]}'
+          fi
+          python3 .github/scripts/downstream.py summarize results \
+            --skipped "${SKIPPED_JSON}" \
+            --expected "${EXPECTED_JSON}" \
+            --summary "${GITHUB_STEP_SUMMARY}"
