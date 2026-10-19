@@ -114,12 +114,13 @@
 //! | `moran_update` | `update`, `fitness` (`"linear"` or `"exponential"`), `w` (all required), `mutation` (default 0), `gaussian_sd` |
 //! | `game_metrics`, finite games | `cooperate_label`, `regret`, `mixed_source` (`"played"`, `"played_cumulative"`, or `"reported"`), `equilibrium` (`"none"` or `"solve"`), `stop_tol` and `stop_window` (together), `population_share`, `action_entropy` (`metrics` feature) |
 //! | `game_metrics`, continuous games | `equilibrium` (`"none"` or `"solve"`), `stop_tol` and `stop_window` (together) |
+//! | `continuation_probability` | `delta`, a required number in `[0, 1]` |
 //!
 //! Each name may appear once, at most one population dynamic may be listed,
 //! and a population dynamic must be listed after `game_decide`. The order of
 //! the entries does not change the simulation: the mechanisms always run as
-//! `game_match`, `game_decide`, the population dynamic, `game_play`, and
-//! `game_metrics`.
+//! `game_match`, `game_decide`, the population dynamic, `game_play`,
+//! `game_metrics`, and `continuation_probability`.
 //!
 //! # Random streams
 //!
@@ -129,7 +130,9 @@
 //! network, `derive_seed(seed, &[0, 2])` lays out `initial_shares` and draws
 //! `initial_uniform` actions, `derive_seed(seed, &[2])` is the decision root,
 //! `derive_seed(seed, &[3, agent, generation])` initializes rule states, and
-//! `derive_seed(seed, &[1])` seeds the engine.
+//! `derive_seed(seed, &[1])` seeds the engine. When present,
+//! `continuation_probability` derives its private stream from `seed` and the
+//! fixed label `0x636f6e74696e7565` (the bytes `continue`).
 
 mod game;
 mod mechanisms;
@@ -181,6 +184,7 @@ pub struct ScenarioConfig<G: ScenarioGame, X: ExperimentState = ()> {
     counting: Option<<G as SpecGame>::Counting>,
     dynamics: AnyDynamics<<G as SpecGame>::Replicator>,
     metrics: Option<<G as SpecGame>::Metrics>,
+    continuation_probability: Option<f64>,
 }
 
 impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
@@ -231,6 +235,7 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
             counting: mechanisms.counting,
             dynamics: mechanisms.dynamics,
             metrics: mechanisms.metrics,
+            continuation_probability: mechanisms.continuation_probability,
         })
     }
 
@@ -267,6 +272,13 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
     /// generated from `derive_seed(seed, &[0, 1])`.
     pub fn topology(&self, seed: u64) -> Option<Topology> {
         self.topology.resolve(self.n_agents, seed)
+    }
+
+    /// The probability that a completed step is followed by another step.
+    ///
+    /// `None` means the scenario has no `continuation_probability` mechanism.
+    pub fn continuation_probability(&self) -> Option<f64> {
+        self.continuation_probability
     }
 
     /// A [`GameSimFactory`] configured as the scenario describes, for `seed`

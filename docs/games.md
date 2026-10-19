@@ -34,7 +34,7 @@ from a scenario file by `GameTrialFactory` (see [Scenario files](#scenario-files
 | Feature | Adds | socsim dependencies |
 |---|---|---|
 | *(default)* | the stage-game traits (`StageGame`, `NormalFormGame`, `FiniteGame`, `ContinuousGame`, `AggregateGame`, `AnonymousGame`, `CommonActionSpace`, `DescribeGame`), `MatrixGame`, the built-in games (`catalog`, and `continuous` for continuous actions), mixed strategies (`mixed`), the solvers (`solve`, including `pure_nash_counts`, the replicator dynamics, `ess_verdict` and the continuous `best_response_iteration`), the learning-rule cores (`learn`), `AggregateSpec`, the metric action ids (`metric_action_ids`), and `FiniteSpec` / `ContinuousSpec` (the built-in games chosen at run time, used by scenarios) | **none** — the default build depends on no `socsim-*` crate (the solvers' LP backend is the pure-Rust `microlp` crate) |
-| `core` | the world (`GameWorld`, `Topology`), rules (including the learning rules and the continuous rules `DampedBestResponse` / `GradientAscent`), outcome rules, the matchings (`FixedPlayers`, `RoundRobin`, `RandomPairs`, `RandomGroups`, `WholePopulation`), views, `build_world` (with `InitialActions::Shares`), `uniform_initial_actions`, the configuration types of the population dynamics (`ImitateBest`, `FermiUpdate`, `ProportionalImitation`, `MoranUpdate`, `Update`), the metrics mechanism `GameMetrics` and its continuous form `ContinuousMetrics` (with `PayoffTiming`) | `socsim-core` |
+| `core` | the world (`GameWorld`, `Topology`), rules (including the learning rules and the continuous rules `DampedBestResponse` / `GradientAscent`), outcome rules, the matchings (`FixedPlayers`, `RoundRobin`, `RandomPairs`, `RandomGroups`, `WholePopulation`), views, `build_world` (with `InitialActions::Shares`), `uniform_initial_actions`, the configuration types of the population dynamics (`ImitateBest`, `FermiUpdate`, `ProportionalImitation`, `MoranUpdate`, `Update`), the metrics mechanism `GameMetrics` and its continuous form `ContinuousMetrics` (with `PayoffTiming`) | `socsim-core`, `socsim-mechanisms` (generic continuation mechanism) |
 | `engine` | `assemble`, `assemble_with_aggregates`, `assemble_with` and `assemble_async` (all return a `SimulationBuilder`), the play paths (`Pairwise`, `counting_play()`), the population-dynamics mechanisms, and `AsyncPopulationStep` / `AsyncActivation`; implies `core` | `socsim-core`, `socsim-engine` |
 | `net` | `Topology::network` / `Topology::directed_network` and the matching `NetworkEdges` (see [Topology](#topology-gameworldwith_topology)); implies `core` | `socsim-core`, `socsim-net` |
 | `grid` | `Topology::grid` (`GridSpec`) and the matching `GridNeighborhood`; implies `core` | `socsim-core`, `socsim-grid` |
@@ -132,6 +132,30 @@ cargo run -p socsim-games --example ipd_pair --features core,engine
 
 `GameWorld::payoffs()` holds **this step's** payoffs (it is reset every step), so
 cumulative scores are summed by the caller.
+
+### Continuation probability and the shadow of the future
+
+An indefinitely repeated game is often represented by a per-round continuation
+probability δ: after every completed round another round occurs with probability
+δ. Round $t$ is reached with probability $\delta^{t-1}$, so expected lifetime
+payoffs use the same weights as conventional δ-discounted payoffs. A larger δ
+therefore lengthens the **shadow of the future**. For $\delta < 1$, the expected
+number of completed rounds is $1/(1-\delta)$ before the `t_max` cap.
+
+Use the domain-independent
+[`ContinuationProbability`](mechanisms/continuation-probability.md) mechanism
+in library mode. A `normal-form` scenario can add it directly:
+
+```toml
+[[mechanism]]
+name = "continuation_probability"
+[mechanism.params]
+delta = 0.9
+```
+
+It runs in PostStep after `game_metrics`, records `continuation_stop` on the
+last completed round, and uses a private RNG stream. Adding it therefore does
+not change the game trajectory through the stopping round.
 
 ---
 
@@ -4757,6 +4781,7 @@ dropped silently. Put each part in its place:
 | Payoff aggregation and aggregates | `params` of `game_play` |
 | Population dynamic | `params` of `imitate_best`, `fermi_update`, `replicator_update` or `moran_update` |
 | Metrics | `params` of `game_metrics` |
+| Continuation probability | `delta` in the params of `continuation_probability` |
 
 `[simulation] name`, `module_pack` and `[output]` are required by the
 `Scenario` format but not read by `GameTrialFactory`.
@@ -4891,11 +4916,12 @@ Each entry is identified by its `name`; `phase` is ignored.
 
 - `game_match`, `game_decide` and `game_play` are required; at most one
   population dynamic (`imitate_best`, `fermi_update`, `replicator_update`,
-  `moran_update`) and at most one `game_metrics` may be added.
+  `moran_update`), one `game_metrics` and one `continuation_probability` may be added.
 - A name may appear once; an unknown name is an error.
 - A population dynamic must be listed **after** `game_decide`.
 - Otherwise the order of the entries does not matter: the mechanisms always run
-  as `game_match`, `game_decide`, the dynamic, `game_play`, `game_metrics`.
+  as `game_match`, `game_decide`, the dynamic, `game_play`, `game_metrics`,
+  `continuation_probability`.
 
 | Mechanism | Key | Type | Default |
 |---|---|---|---|
@@ -4920,6 +4946,7 @@ Each entry is identified by its `name`; `phase` is ignored.
 | | `gaussian_sd` | number | none; a continuous game with `mutation > 0` needs it, a finite game must not have it |
 | `game_metrics` (finite) | `cooperate_label` (label), `regret` (boolean), `mixed_source` (`"played"`, `"played_cumulative"` or `"reported"`), `equilibrium` (`"none"` or `"solve"`), `stop_tol` (number) and `stop_window` (count, `u32`) together or not at all, `population_share` (boolean), `action_entropy` (boolean, feature `metrics`) | | the defaults of `MetricsOptions::new()` |
 | `game_metrics` (continuous) | `equilibrium` (`"none"` or `"solve"`), `stop_tol` and `stop_window` together | | the defaults of `ContinuousMetricsOptions::new()` |
+| `continuation_probability` | `delta` | finite number in `[0, 1]` | required |
 
 A matching key that belongs to another matching (`pairs` with
 `matching = "round_robin"`, for example) is an error.
@@ -4959,6 +4986,7 @@ mechanism[game_decide].fp_tiebreak: unknown key (known keys: coop_label, decisio
 world.game: catalog condition failed: T > R > P >= S
 mechanism[imitate_best]: a population dynamic must be listed after game_decide
 mechanism[replicator_update]: invalid population dynamics: replicator_update requires beta <= 1 / 16.650000000000002 (the per-step payoff range), got 1
+mechanism[continuation_probability].delta: expected a continuation probability in [0, 1], found 1.1
 ```
 
 (Through `SocsimError`'s `Display`, each message is prefixed with
@@ -4990,10 +5018,13 @@ seed passed to `build_trial`:
 | `derive_seed(seed, &[1])` | the engine (`Trial::engine_seed`) |
 | `derive_seed(seed, &[2])` | the decision root |
 | `derive_seed(seed, &[3, agent, generation])` | the initial rule states |
+| `derive_seed(seed, &[0x636f6e74696e7565])` | the private continuation-probability stream (`continue` as bytes) |
 
-These are the streams of `GameSimFactory` and of `build_world` / `assemble`
-(see [Determinism & RNG streams](#determinism--rng-streams)), which is why the
-two entry points coincide.
+The first six rows are the streams of `GameSimFactory` and of `build_world` /
+`assemble` (see [Determinism & RNG streams](#determinism--rng-streams)). The
+last row belongs to the generic mechanism appended by `GameTrialFactory`; in
+library mode, add `ContinuationProbability::new(delta, seed)` to the builder
+to obtain the same stopping rule.
 
 ### `GameTrialFactory`
 
@@ -5001,7 +5032,7 @@ two entry points coincide.
 |---|---|
 | `GameTrialFactory::<FiniteSpec>::new(RuleRegistry::finite_builtins())` | a factory without experiment state (`X = ()`); `ContinuousSpec` with `RuleRegistry::continuous_builtins()` for continuous games |
 | `GameTrialFactory::with_state(registry, make_x)` | a factory whose trials start from the experiment state that `make_x: Fn(&Scenario) -> Result<X, GameError>` builds; `make_x` runs once per built trial |
-| `TrialFactory::build_trial(&scenario, seed)` | reads the scenario and builds the trial for `seed`: the world from `seed`, the mechanisms in the fixed order, the scheduler of `[simulation] scheduler`, `engine_seed = derive_seed(seed, &[1])` |
+| `TrialFactory::build_trial(&scenario, seed)` | reads the scenario and builds the trial for `seed`: the world from `seed`, the mechanisms in the fixed order (including optional `continuation_probability` last), the scheduler of `[simulation] scheduler`, `engine_seed = derive_seed(seed, &[1])` |
 | `TrialFactory::validate(&scenario)` | see [`validate`](#validate) |
 
 The factory holds only the rule registry, behind an `Arc`, so cloning it is

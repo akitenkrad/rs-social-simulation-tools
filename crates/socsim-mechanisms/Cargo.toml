@@ -15,4 +15,9 @@ group-dynamics = []     # GroupConformity
 
 [dependencies]
 rand.workspace = true
+serde_json.workspace = true
 socsim-core = { path = "../socsim-core" }
+
+[dev-dependencies]
+socsim-engine = { path = "../socsim-engine" }
+socsim-log = { path = "../socsim-log" }

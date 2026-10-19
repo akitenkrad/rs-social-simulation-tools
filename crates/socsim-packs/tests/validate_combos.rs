@@ -462,7 +462,7 @@ fn starter_is_the_bundled_ipd_scenario_byte_for_byte() {
 }
 
 #[test]
-fn mechanism_names_are_exactly_the_non_llm_scenario_mechanisms() {
+fn mechanism_names_are_exactly_the_supported_scenario_mechanisms() {
     assert_eq!(
         NormalFormPack.mechanism_names(),
         [
@@ -474,6 +474,7 @@ fn mechanism_names_are_exactly_the_non_llm_scenario_mechanisms() {
             "replicator_update",
             "moran_update",
             "game_metrics",
+            "continuation_probability",
         ]
     );
 }

@@ -8,12 +8,12 @@
 メカニズムはニューラルネットワーク層のように合成され，各メカニズムが `WorldState` を読み書きし，
 エンジンがそれらを毎ステップ固定順序で実行します．
 
-このカタログでは，socsim に同梱されている**38個**のメカニズムを解説します．内訳は，
-公表された経験的知見に対してキャリブレーション済みの参照用[HR ライフサイクル](usecases.ja.md)メカニズム10個，
+このカタログでは，socsim に同梱されている**39個**のメカニズムを解説します．内訳は，
+公表された経験的知見に基づく参照用[HR ライフサイクル](usecases.ja.md)メカニズム10個，
 [組織的沈黙](packs/organizational-silence.ja.md)メカニズム9個（沈黙動機＋スパイラル＋階層型ネットワーク上の閾値カスケード），
 学習可能な MARL `policy` メカニズム1個，[`socsim-games`](games.ja.md) クレートの戦略形ゲームのメカニズム10個（`game_match`，`game_decide`，`game_llm_decide`，`game_play`，`game_metrics`，集団動学の `imitate_best`，`fermi_update`，`replicator_update`，`moran_update` と，非同期の `async_population_step`），および8個の社会ダイナミクスメカニズム
-（`hegselmann_krause`，`deffuant`，`social_judgement`，`lorenz`，`si_contagion`，`threshold_contagion`，`axelrod`，`group_conformity`）
-— 汎用の非 HR `socsim-mechanisms` クレート — です．
+（`hegselmann_krause`，`deffuant`，`social_judgement`，`lorenz`，`si_contagion`，`threshold_contagion`，`axelrod`，`group_conformity`），
+および汎用の実行制御メカニズム `continuation_probability` — いずれも非 HR の `socsim-mechanisms` クレート — です．
 
 メカニズムは[モジュールパック](packs.ja.md)によって実行可能なモデルへと構成されます．パックは World のデータモデル，既定のメカニズム集合，スターターシナリオをまとめて提供します．
 名前 `org_performance` は [`hr-lifecycle`](packs/hr-lifecycle.ja.md) と
@@ -33,7 +33,7 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 同一フェーズ内ではシナリオでの宣言順（＝挿入順）に発火します．破線の緑矢印は，1ステップ内での**共有状態の受け渡し**を示します．
 たとえば `turnover` が `departed_this_step` を設定し，PostStep で `knowledge_loss` がそれを読み取ります．
 
-## 38個のメカニズム
+## 39個のメカニズム
 
 | メカニズム | フェーズ | 出典 | 種別 | 概要 |
 |---|---|---|---|---|
@@ -75,13 +75,14 @@ Reward → PostStep` に固定されています．メカニズムは `Mechanism
 | [`threshold_contagion`](mechanisms/threshold-contagion.ja.md) | Interaction | Granovetter (1978) | network contagion | 非アクティブなエージェントはアクティブ近傍の割合が θ に達すると活性化する（ライブラリ専用）． |
 | [`axelrod`](mechanisms/axelrod.ja.md) | Interaction | Axelrod (1997) | cultural dissemination | 出会いのたびに類似度に等しい確率で異なる特徴を1つコピーする（ライブラリ専用）． |
 | [`group_conformity`](mechanisms/group-conformity.ja.md) | Interaction | DeGroot (1974) | within-group averaging | 各エージェントが自グループの平均意見へ向けて割合 α だけ移動し，グループは独立に収束する（ライブラリ専用）． |
+| [`continuation_probability`](mechanisms/continuation-probability.ja.md) | PostStep | 繰り返しゲームの規約 | 確率的な実行制御 | 専用 RNG を使い，各ステップ後に確率 δ で継続する．停止時は `continuation_stop` を記録して停止を要求する（normal-form Scenario またはライブラリモード）． |
 
 `game_*` の最初の 4 行は `socsim_games::assemble`，`assemble_with_aggregates`，`assemble_with` のどれか（`game_match`，`game_decide`，`game_play`），または `socsim_games::llm::assemble_with_llm`（4 つすべて）がまとめて登録するものです．`game_metrics` は `GameMetrics::new`（連続ゲームでは `ContinuousMetrics::new`）で作り，返されたビルダーに足します．
 4 つの集団動学（`imitate_best`，`fermi_update`，`replicator_update`，`moran_update`）は，Held のエージェントからなる World について，`socsim_games::assemble_with` が引数 `dynamics` から 1 つずつ登録します．`async_population_step` は前の 3 つの非同期版で，`socsim_games::assemble_async` が `game_match`，`game_decide`，`game_play` と集団動学の代わりに，これだけを登録します．いずれも[戦略形ゲーム](games.ja.md)のページで文脈とともに説明しており，ライブラリ専用です．
-最後の8行は，汎用の（非 HR）[`socsim-mechanisms`](architecture.ja.md#クレートワークスペース)クレートの
-メンバーであり，HR ライフサイクルクレートおよび組織的沈黙クレートとは区別される再利用可能でドメイン非依存な社会ダイナミクスの構成要素
-（意見ダイナミクス，ネットワーク伝播，文化伝播）です．
-すべて**ライブラリ専用**（`ModulePack` ／シナリオ TOML 登録なし）です．
+最後の9行は，汎用の（非 HR）[`socsim-mechanisms`](architecture.ja.md#クレートワークスペース)クレートの
+メンバーです．社会ダイナミクスの8つ（意見ダイナミクス，ネットワーク伝播，文化伝播）と，
+ドメイン非依存の実行制御1つからなります．社会ダイナミクスの8つはライブラリ専用で，
+`continuation_probability` は `normal-form` パックの Scenario からも使えます．
 中央 9 行の組織的沈黙メカニズムはいずれも [`organizational-silence`](packs/organizational-silence.ja.md) パックから提供されます
 （`pack-organizational-silence-llm` フィーチャ下では LLM 版 `voice_decision` も追加）．
 

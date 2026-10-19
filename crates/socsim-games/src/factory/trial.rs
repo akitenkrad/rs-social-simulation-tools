@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use socsim_config::Scenario;
 use socsim_core::SocsimError;
+use socsim_mechanisms::ContinuationProbability;
 use socsim_runner::{scheduler_from_scenario, Trial, TrialFactory};
 
 use crate::config::{RuleRegistry, ScenarioConfig, ScenarioGame, DYNAMICS};
@@ -21,7 +22,7 @@ struct Shared<G: ScenarioGame, X: ExperimentState> {
 ///
 /// `G` is [`FiniteSpec`](crate::FiniteSpec) or [`ContinuousSpec`](crate::ContinuousSpec): the game, the population, the
 /// matching, the rules, the play path, the population dynamic, and the
-/// metrics are all read from the scenario (see the
+/// metrics and optional continuation probability are all read from the scenario (see the
 /// [`config` module](crate::config) for the keys). The factory itself holds
 /// only the [`RuleRegistry`] that turns rule names into rules, behind an
 /// `Arc`, so cloning it is cheap and one factory serves every worker thread.
@@ -32,8 +33,10 @@ struct Shared<G: ScenarioGame, X: ExperimentState> {
 /// configuration of a [`GameSimFactory`](crate::GameSimFactory) and calls its
 /// [`build_trial`](crate::GameSimFactory::build_trial). A scenario and the
 /// same configuration written with the [`GameSimFactory`](crate::GameSimFactory)
-/// setting methods therefore build the same world and the same mechanisms
-/// through the same procedure, and their trajectories coincide step by step.
+/// setting methods therefore build the same game world and game mechanisms
+/// through the same procedure. If the scenario lists
+/// `continuation_probability`, the factory appends that generic PostStep
+/// mechanism after the game metrics.
 /// The rules are constructed once per trial and shared by every agent of
 /// their kind; their state lives in the world.
 ///
@@ -45,7 +48,9 @@ struct Shared<G: ScenarioGame, X: ExperimentState> {
 /// action shares and uniform initial actions, `[2]` for decisions, and
 /// `[3, agent, generation]` for rule states. The trial's
 /// [`engine_seed`](Trial::engine_seed) is `derive_seed(seed, &[1])`, and its
-/// scheduler is the one named by `scenario.simulation.scheduler`.
+/// scheduler is the one named by `scenario.simulation.scheduler`. An optional
+/// `continuation_probability` mechanism derives a separate stream from the
+/// raw trial seed and its fixed label; it never consumes the engine stream.
 ///
 /// # Validation
 ///
@@ -118,7 +123,16 @@ impl<G: ScenarioGame, X: ExperimentState + Clone> GameTrialFactory<G, X> {
         seed: u64,
     ) -> Result<Trial<GameWorld<G, X>>, GameError> {
         let x = (self.shared.make_x)(scenario)?;
-        G::build_trial(config, x, seed)
+        let mut trial = G::build_trial(config, x, seed)?;
+        if let Some(delta) = config.continuation_probability() {
+            let continuation = ContinuationProbability::new(delta, seed).map_err(|error| {
+                GameError::Config(format!(
+                    "mechanism[continuation_probability].delta: {error}"
+                ))
+            })?;
+            trial.mechanisms.push(Box::new(continuation));
+        }
+        Ok(trial)
     }
 
     /// Reads `scenario`, constructs the unassigned rules whose parameters it
@@ -143,8 +157,8 @@ impl<G: ScenarioGame, X: ExperimentState + Clone> TrialFactory<GameWorld<G, X>>
 
     /// Builds the trial for `seed`: the world from `seed`, the mechanisms in
     /// the order `game_match`, `game_decide`, the population dynamic,
-    /// `game_play`, and `game_metrics`, the scenario's scheduler, and the
-    /// engine seed `derive_seed(seed, &[1])`.
+    /// `game_play`, `game_metrics`, and `continuation_probability`, the
+    /// scenario's scheduler, and the engine seed `derive_seed(seed, &[1])`.
     fn build_trial(
         &self,
         scenario: &Scenario,

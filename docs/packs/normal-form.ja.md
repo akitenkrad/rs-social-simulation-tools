@@ -3,7 +3,7 @@
 # `normal-form` パック
 
 > シナリオファイルだけで組み立てる**戦略形ゲームのシミュレーション**です．段階ゲーム，決定規則に従うエージェントか行動を保持するだけのエージェントからなる集団，Matching，利得，任意の集団動学，ステップごとのゲームの指標を備え，繰り返し囚人のジレンマ，格子やネットワーク上の空間ゲーム，連続行動の寡占を Rust を書かずに走らせます．
-> **ワールド：** `GameWorld<FiniteSpec>` か `GameWorld<ContinuousSpec>`（`[world.game] kind` で選ぶ）．**メカニズム：** [`socsim-games`](../games.ja.md) の8つのメカニズム．**Cargo フィーチャ：** `pack-normal-form`（デフォルトで有効）．
+> **ワールド：** `GameWorld<FiniteSpec>` か `GameWorld<ContinuousSpec>`（`[world.game] kind` で選ぶ）．**メカニズム：** [`socsim-games`](../games.ja.md) の8つのメカニズムと汎用の `continuation_probability`．**Cargo フィーチャ：** `pack-normal-form`（デフォルトで有効）．
 
 [← パックカタログに戻る](../packs.ja.md)
 
@@ -11,7 +11,7 @@
 
 `normal-form` パックは [`socsim-games`](../games.ja.md) クレートを `socsim` バイナリから使えるようにします．各ステップで，エージェントは Matching によって対戦に割り当てられ，決定規則（しっぺ返し，仮想プレイ，ロジット選択，Roth–Erev，繰り返しゲームのオートマトン，減衰付き最適応答など）で行動を選ぶか保持している行動をそのまま使い，段階ゲームの利得を受け取って学習します．集団動学を書いた場合は，さらに互いを模倣したり置き換えたりします．ゲーム，集団，トポロジー，規則のパラメータはすべてシナリオから読みます．
 
-ほかの3つのパックと違い，このパックは **`Registry` を持たず**，`ModulePack` も実装しません．`NormalFormPack` は `[world.game] kind` を読み，`socsim-games` の有限ゲーム用か連続ゲーム用の試行ファクトリ（組込みの規則を持つ `GameTrialFactory<FiniteSpec>` か `GameTrialFactory<ContinuousSpec>`）を選んで，シナリオ全体を渡します．このファクトリはライブラリモードのビルダー `GameSimFactory` と同じ手順で組み立てるので，シナリオと，同じ設定を Rust で書いたものは，各ステップで同じワールドと同じ指標の行を与えます．キーの完全な一覧は[戦略形ゲーム § Scenario ファイル](../games.ja.md#scenario-ファイル)にあり，このページではパックが加えるものを扱います．
+ほかの3つのパックと違い，このパックは **`Registry` を持たず**，`ModulePack` も実装しません．`NormalFormPack` は `[world.game] kind` を読み，`socsim-games` の有限ゲーム用か連続ゲーム用の試行ファクトリ（組込みの規則を持つ `GameTrialFactory<FiniteSpec>` か `GameTrialFactory<ContinuousSpec>`）を選んで，シナリオ全体を渡します．ゲーム部分はライブラリモードのビルダー `GameSimFactory` と同じ手順で組み立てるので，シナリオと，同じゲーム設定を Rust で書いたものは，各ステップで同じワールドと同じ指標の行を与えます．任意の `continuation_probability` はその後に追加され，ライブラリモードで汎用メカニズムをビルダーへ足す場合と同じです．キーの完全な一覧は[戦略形ゲーム § Scenario ファイル](../games.ja.md#scenario-ファイル)にあり，このページではパックが加えるものを扱います．
 
 パックには3つのシナリオが同梱されています．
 
@@ -45,7 +45,7 @@
 
 ## 3. パックのメカニズム
 
-`socsim list mechanisms` は，このパックが受け付ける8つの名前を表示します．
+`socsim list mechanisms` は，このパックが受け付ける9つの名前を表示します．
 
 | メカニズム | フェーズ | 挙動 | 必須か | ページ |
 |---|---|---|---|---|
@@ -57,8 +57,9 @@
 | `replicator_update` | Reward | 係数 `beta` の比例模倣（有限ゲームだけ） | 集団動学は1つまで | [→](../mechanisms/replicator-update.ja.md) |
 | `moran_update` | Reward | ステップごとに1回の出生・死亡．適応度は `"linear"` か `"exponential"` | 集団動学は1つまで | [→](../mechanisms/moran-update.ja.md) |
 | `game_metrics` | PostStep | ステップごとのゲームの指標を記録する（§4） | 任意 | [→](../mechanisms/game-metrics.ja.md) |
+| `continuation_probability` | PostStep | 完了したステップの後に確率 `delta` で継続する．停止時は `continuation_stop` を記録して停止を要求する | 任意 | [→](../mechanisms/continuation-probability.ja.md) |
 
-`[[mechanism]]` の項目の順は実行を変えません．メカニズムは常に `game_match`，`game_decide`，集団動学，`game_play`，`game_metrics` の順に走ります．順に関する規則は1つだけで，集団動学は `game_decide` より**後に書く**必要があります．`phase` のキーは無視されます．集団動学は行動を保持するエージェントにだけ作用し，`update = "synchronous"` だけを受け付けます．
+`[[mechanism]]` の項目の順は実行を変えません．メカニズムは常に `game_match`，`game_decide`，集団動学，`game_play`，`game_metrics`，`continuation_probability` の順に走ります．順に関する規則は1つだけで，集団動学は `game_decide` より**後に書く**必要があります．`phase` のキーは無視されます．集団動学は行動を保持するエージェントにだけ作用し，`update = "synchronous"` だけを受け付けます．
 
 このパックは LLM の決定規則，`fixed` と `mixed` の規則，利用者定義のゲーム・利得規則・Matching を提供しません．これらには[ライブラリモード](../games.ja.md)が要ります．
 
@@ -85,7 +86,9 @@
 
 **`[output] metrics` は情報のためのものです．** ほかのパックと同じく，記録する列を選びません．その実行で定義される上の列はすべて JSONL のログと集計に書かれます．同梱のシナリオは，注目する列を書いているだけです．
 
-このパックはイベントを出しません（`Seed 42 — 0 events recorded`）．
+ゲームのメカニズムは既定ではイベントを出しません（`Seed 42 — 0 events recorded`）．
+`continuation_probability` が停止させた場合は，停止したステップに `continuation_stop` を1件記録し，
+payload に `delta` と一様乱数 `u` を入れます．
 
 ### 数え上げの経路：`counting`
 
@@ -189,6 +192,19 @@ t       game.action_entropy    game.coop_rate  game.eq_distance  game.mean_payof
 
 仮想プレイは相手の行動の経験頻度に最適応答し，1回限りの囚人のジレンマではどんな信念に対しても裏切りが最適応答です．ステップ1では2人とも協力し（`played_share.a0 = 1`），ステップ2で仮想プレイが裏切り，ステップ3からしっぺ返しが裏切りで応じます．そのためステップ3以降，2人はナッシュ均衡にとどまります（`eq_distance = 0`，利得はそれぞれ1）．
 
+繰り返しゲームにラウンドごとの継続確率 δ を与えるには，次の任意メカニズムを足します．
+`game_metrics` の後に動くため，停止したラウンドもログに含まれます．
+
+```toml
+[[mechanism]]
+name = "continuation_probability"
+[mechanism.params]
+delta = 0.9
+```
+
+`delta` は必須で，有限かつ `[0, 1]` の範囲でなければなりません．試行の seed から導いた
+専用 RNG を使うため，停止までの Matching，決定，エンジンの乱数列をずらしません．
+
 ほかの2つの同梱シナリオも同じように走ります．その出力は[ユースケースのページ](../usecases.ja.md#8-シナリオから戦略形ゲームを走らせる)にあります．規則・ゲーム・Matching を変えるにはシナリオを書き換えます．キーの一覧は[戦略形ゲーム § Scenario ファイル](../games.ja.md#scenario-ファイル)にあります．
 
 ### スイープ
@@ -211,6 +227,7 @@ socsim sweep scenarios/normal_form_nowak_may.toml \
 | `fermi_update.k` | フェルミ則の雑音 $K$ |
 | `moran_update.w`，`moran_update.mutation` | 選択の強さと突然変異率 |
 | `replicator_update.beta` | 比例模倣の係数 $\beta$（書き換えの後にも上限を検査する） |
+| `continuation_probability.delta` | 次のステップへ進む確率 δ |
 
 文字列と真偽値（`kind`，`matching`，`update`，`counting` など）はスイープできません．条件ごとに別のシナリオファイルを置いてください．知っておくべきことが3つあります．
 
@@ -242,6 +259,7 @@ socsim sweep scenarios/normal_form_nowak_may.toml \
 | 組込みゲームの成立条件（たとえば $T > R > P \ge S$） | `world.game: catalog condition failed: T > R > P >= S` |
 | 利得の幅から決まる上限を超える `replicator_update.beta` | `mechanism[replicator_update]: invalid population dynamics: replicator_update requires beta <= 1 / 16.650000000000002 (the per-step payoff range), got 1` |
 | `fitness` の無い `moran_update`，負になりうる `"linear"` の適応度 | `mechanism[moran_update].fitness: this key is required` |
+| `continuation_probability.delta` が無い，有限でない，または範囲外 | `mechanism[continuation_probability].delta: expected a continuation probability in [0, 1], found 1.1` |
 | メカニズムの params の未知のキー | `mechanism[game_decide].logit_lamda: unknown key (known keys: …)` |
 | 未知のメカニズム名 | `mechanism 'game_decid' is not registered in the 'normal-form' pack; available: [fermi_update, game_decide, …]` |
 
@@ -275,7 +293,7 @@ for point in pack.run_sweep(&scenario, &[axis], &[0, 1], false)? {
 ## 6. 関連項目
 
 - [戦略形ゲーム](../games.ja.md) — `socsim-games` のガイド．[シナリオのキーの一覧](../games.ja.md#scenario-ファイル)を含む．
-- [Mechanism カタログ](../mechanisms.ja.md) — `game_match`，`game_decide`，`game_play`，`game_metrics` と4つの集団動学．
+- [Mechanism カタログ](../mechanisms.ja.md) — `game_match`，`game_decide`，`game_play`，`game_metrics`，`continuation_probability` と4つの集団動学．
 - [CLI リファレンス](../cli.ja.md) — `validate`，`run`，検証付きの `sweep` と実効シナリオのファイル．
 - [ユースケース＆レシピ](../usecases.ja.md#8-シナリオから戦略形ゲームを走らせる) — 同梱の3つのシナリオとその出力．
 - [モジュールパックカタログ](../packs.ja.md) · [アーキテクチャ](../architecture.ja.md)

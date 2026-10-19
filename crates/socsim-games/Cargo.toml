@@ -8,7 +8,7 @@ license.workspace = true
 
 [features]
 default = []
-core = ["dep:socsim-core", "dep:serde_json"]
+core = ["dep:socsim-core", "dep:socsim-mechanisms", "dep:serde_json"]
 engine = ["core", "dep:socsim-engine"]
 metrics = ["core", "dep:socsim-metrics"]
 net = ["core", "dep:socsim-net"]
@@ -25,6 +25,7 @@ serde.workspace = true
 rand.workspace = true
 thiserror.workspace = true
 socsim-core = { path = "../socsim-core", optional = true }
+socsim-mechanisms = { path = "../socsim-mechanisms", optional = true, default-features = false }
 socsim-engine = { path = "../socsim-engine", optional = true }
 socsim-llm = { path = "../socsim-llm", optional = true }
 socsim-metrics = { path = "../socsim-metrics", optional = true, default-features = false }
@@ -271,6 +272,11 @@ required-features = ["config"]
 name = "trial_factory_game"
 path = "tests/trial_factory_game.rs"
 required-features = ["config", "net", "grid"]
+
+[[test]]
+name = "continuation_scenario"
+path = "tests/continuation_scenario.rs"
+required-features = ["config", "metrics"]
 
 [[test]]
 name = "spec_counting"

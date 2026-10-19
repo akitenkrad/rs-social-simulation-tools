@@ -390,6 +390,7 @@ pub const SCENARIO_MECHANISM_NAMES: &[&str] = &[
     "replicator_update",
     "moran_update",
     "game_metrics",
+    "continuation_probability",
 ];
 
 pub(crate) const DYNAMICS: &[&str] = &[
@@ -420,6 +421,7 @@ pub(crate) struct MechanismConfig<G: SpecGame> {
     pub(crate) counting: Option<G::Counting>,
     pub(crate) dynamics: AnyDynamics<G::Replicator>,
     pub(crate) metrics: Option<G::Metrics>,
+    pub(crate) continuation_probability: Option<f64>,
     /// The parameters of `game_decide`, passed to the rule constructors.
     pub(crate) decide: toml::Table,
 }
@@ -537,6 +539,21 @@ pub(crate) fn read_mechanisms<G: SpecGame, X: ExperimentState>(
         None => None,
     };
 
+    let continuation_probability = match reader("continuation_probability") {
+        Some(mut continuation_reader) => {
+            let delta = continuation_reader.require_real("delta")?;
+            if !(0.0..=1.0).contains(&delta) {
+                return Err(continuation_reader.error(
+                    "delta",
+                    format!("expected a continuation probability in [0, 1], found {delta}"),
+                ));
+            }
+            continuation_reader.finish()?;
+            Some(delta)
+        }
+        None => None,
+    };
+
     Ok(MechanismConfig {
         matching,
         play_options: PlayOptions::new()
@@ -548,6 +565,7 @@ pub(crate) fn read_mechanisms<G: SpecGame, X: ExperimentState>(
         counting,
         dynamics,
         metrics,
+        continuation_probability,
         decide: decide.clone(),
     })
 }

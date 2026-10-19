@@ -16,6 +16,8 @@
 //! The catalog is split into four Cargo **feature families** (all on by
 //! default): `opinion-dynamics`, `contagion`, `cultural` and `group-dynamics`.
 //! Disable default features and opt in to compile only the families you need.
+//! [`ContinuationProbability`] is feature-independent and is therefore always
+//! available.
 //!
 //! Four mechanism families ship here:
 //!
@@ -41,6 +43,9 @@
 //! - **Group dynamics** ([`group`] module) — group-partition opinion updates:
 //!   - [`GroupConformityMechanism`] — synchronous DeGroot-style within-group
 //!     averaging: each agent moves a fraction α toward its group's mean opinion.
+//! - **Run control** ([`continuation_probability`] module):
+//!   - [`ContinuationProbability`] — after each step, continue with probability
+//!     δ using a private random-number stream, otherwise request a stop.
 //!
 //! For hybrid models (e.g. `mou2024`, an LLM core + ABM periphery) the bare
 //! message-set **Δ-form** opinion updates ([`updates`] module —
@@ -72,6 +77,7 @@
 
 #[cfg(feature = "contagion")]
 pub mod contagion;
+pub mod continuation_probability;
 #[cfg(feature = "cultural")]
 pub mod culture;
 #[cfg(feature = "group-dynamics")]
@@ -87,6 +93,7 @@ pub mod updates;
 pub use contagion::{
     PerAgentThresholdContagionMechanism, SiContagionMechanism, ThresholdContagionMechanism,
 };
+pub use continuation_probability::ContinuationProbability;
 #[cfg(feature = "cultural")]
 pub use culture::{axelrod_event, is_absorbing, AxelrodMechanism};
 #[cfg(feature = "group-dynamics")]

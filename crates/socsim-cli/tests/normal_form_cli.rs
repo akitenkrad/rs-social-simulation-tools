@@ -156,8 +156,9 @@ fn list_includes_normal_form_pack_and_sorted_mechanisms() {
         .position(|line| *line == "  [normal-form]")
         .expect("normal-form mechanism section");
     assert_eq!(
-        &lines[start + 1..start + 9],
+        &lines[start + 1..start + 10],
         &[
+            "    continuation_probability",
             "    fermi_update",
             "    game_decide",
             "    game_match",

@@ -3,7 +3,7 @@
 # `normal-form` pack
 
 > **Normal-form (strategic-form) game simulations** built from a scenario file alone: a stage game, a population of rule-driven or held agents, a matching protocol, payoffs, an optional population dynamic and per-step game metrics — repeated prisoner's dilemmas, spatial games on lattices and networks, and continuous-action oligopolies, without writing Rust.
-> **World:** `GameWorld<FiniteSpec>` or `GameWorld<ContinuousSpec>`, chosen by `[world.game] kind`. **Mechanisms:** the eight [`socsim-games`](../games.md) mechanisms. **Cargo feature:** `pack-normal-form` (on by default).
+> **World:** `GameWorld<FiniteSpec>` or `GameWorld<ContinuousSpec>`, chosen by `[world.game] kind`. **Mechanisms:** eight [`socsim-games`](../games.md) mechanisms plus the generic `continuation_probability` mechanism. **Cargo feature:** `pack-normal-form` (on by default).
 
 [← Back to the pack catalog](../packs.md)
 
@@ -21,9 +21,11 @@ Unlike the other three packs, this one has **no `Registry`** and implements no
 `ModulePack`. `NormalFormPack` reads `[world.game] kind`, picks the finite or
 the continuous trial factory of `socsim-games` (`GameTrialFactory<FiniteSpec>`
 or `GameTrialFactory<ContinuousSpec>`, with the built-in rules), and hands it
-the whole scenario. The factory builds through the same procedure as the
-library-mode builder `GameSimFactory`, so a scenario and the same configuration
-written in Rust give the same world and the same metric rows at every step.
+the whole scenario. The game part builds through the same procedure as the
+library-mode builder `GameSimFactory`, so a scenario and the same game configuration
+written in Rust give the same world and the same metric rows at every step. An
+optional `continuation_probability` is appended afterwards, as it would be by
+adding the generic mechanism to the library-mode builder.
 The full key reference is
 [normal-form games § Scenario files](../games.md#scenario-files); this page
 covers what the pack adds on top of it.
@@ -78,7 +80,7 @@ The scenario fills it in four places:
 
 ## 3. Mechanisms in the pack
 
-`socsim list mechanisms` shows the eight names the pack accepts:
+`socsim list mechanisms` shows the nine names the pack accepts:
 
 | Mechanism | Phase | Behaviour | Required | Page |
 |---|---|---|---|---|
@@ -90,10 +92,11 @@ The scenario fills it in four places:
 | `replicator_update` | Reward | Proportional imitation with coefficient `beta` (finite games) | at most one dynamic | [→](../mechanisms/replicator-update.md) |
 | `moran_update` | Reward | One birth–death event per step, fitness `"linear"` or `"exponential"` | at most one dynamic | [→](../mechanisms/moran-update.md) |
 | `game_metrics` | PostStep | Records the per-step game metrics (§4) | optional | [→](../mechanisms/game-metrics.md) |
+| `continuation_probability` | PostStep | Continues after a completed step with probability `delta`; otherwise records `continuation_stop` and requests stop | optional | [→](../mechanisms/continuation-probability.md) |
 
 The order of the `[[mechanism]]` entries does not change the run: the
 mechanisms always run as `game_match`, `game_decide`, the dynamic,
-`game_play`, `game_metrics`. The one ordering rule is that a population
+`game_play`, `game_metrics`, `continuation_probability`. The one ordering rule is that a population
 dynamic must be **listed after** `game_decide`. `phase` keys are ignored.
 Population dynamics act only on held agents and take only
 `update = "synchronous"`.
@@ -132,7 +135,9 @@ choose what is recorded: every column above that is defined for the run is
 written to the JSONL log and to the summaries. The bundled scenarios list the
 columns they are about.
 
-The pack emits no events (`Seed 42 — 0 events recorded`).
+The game mechanisms emit no events by default (`Seed 42 — 0 events recorded`).
+When `continuation_probability` stops a run, it emits one `continuation_stop`
+event at the stopping step, with `delta` and the uniform draw `u` in the payload.
 
 ### The counting path: `counting`
 
@@ -247,6 +252,21 @@ Both players cooperate at step 1 (`played_share.a0 = 1`), fictitious play
 defects at step 2 and tit for tat answers from step 3 on, so from step 3 the
 pair sits at the Nash equilibrium (`eq_distance = 0`, payoff 1 each).
 
+To give the repeated game a per-round continuation probability δ, add this
+optional mechanism. It runs after `game_metrics`, so the stopping round is
+included in the log:
+
+```toml
+[[mechanism]]
+name = "continuation_probability"
+[mechanism.params]
+delta = 0.9
+```
+
+`delta` is required, finite and in `[0, 1]`. The mechanism uses a private RNG
+stream derived from the trial seed, so it does not shift matching, decision or
+engine randomness before the stop.
+
 The other two bundled scenarios run the same way; their output is shown on the
 [use-cases page](../usecases.md#8-normal-form-games-from-a-scenario). Swap the
 rules, the game or the matching by editing the scenario; the key reference is
@@ -275,6 +295,7 @@ socsim sweep scenarios/normal_form_nowak_may.toml \
 | `fermi_update.k` | Fermi noise $K$ |
 | `moran_update.w`, `moran_update.mutation` | selection strength and mutation rate |
 | `replicator_update.beta` | proportional-imitation coefficient $\beta$ (its upper bound is checked again after the patch) |
+| `continuation_probability.delta` | probability δ of proceeding to another step |
 
 Strings and booleans (`kind`, `matching`, `update`, `counting`, …) cannot be
 swept; write one scenario file per condition instead. Three things to know:
@@ -321,6 +342,7 @@ mechanism to fix (the CLI prints it under `validation failed for '<file>'` and
 | a built-in game's own conditions (e.g. $T > R > P \ge S$) | `world.game: catalog condition failed: T > R > P >= S` |
 | `replicator_update.beta` above the payoff-range bound | `mechanism[replicator_update]: invalid population dynamics: replicator_update requires beta <= 1 / 16.650000000000002 (the per-step payoff range), got 1` |
 | `moran_update` without `fitness`, or `"linear"` fitness that can turn negative | `mechanism[moran_update].fitness: this key is required` |
+| missing, non-finite or out-of-range `continuation_probability.delta` | `mechanism[continuation_probability].delta: expected a continuation probability in [0, 1], found 1.1` |
 | an unknown key in any mechanism's params | `mechanism[game_decide].logit_lamda: unknown key (known keys: …)` |
 | an unknown mechanism name | `mechanism 'game_decid' is not registered in the 'normal-form' pack; available: [fermi_update, game_decide, …]` |
 
@@ -363,7 +385,7 @@ with your own `RuleRegistry`; see [normal-form games](../games.md).
 ## 6. See also
 
 - [Normal-form games](../games.md) — the `socsim-games` guide, including the full [scenario key reference](../games.md#scenario-files).
-- [Mechanism catalog](../mechanisms.md) — `game_match`, `game_decide`, `game_play`, `game_metrics` and the four population dynamics.
+- [Mechanism catalog](../mechanisms.md) — `game_match`, `game_decide`, `game_play`, `game_metrics`, `continuation_probability` and the four population dynamics.
 - [CLI reference](../cli.md) — `validate`, `run`, checked `sweep` and the effective scenario files.
 - [Use cases & recipes](../usecases.md#8-normal-form-games-from-a-scenario) — the three bundled scenarios with their output.
 - [Module pack catalog](../packs.md) · [Architecture](../architecture.md)

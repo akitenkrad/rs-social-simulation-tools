@@ -9,7 +9,7 @@ a single `apply` method — and is composed with other mechanisms over the share
 like neural-network layers: each reads and writes the `WorldState`, and the
 engine runs them in a fixed order every step.
 
-This catalog documents the **thirty-eight** mechanisms that ship with socsim:
+This catalog documents the **thirty-nine** mechanisms that ship with socsim:
 the ten reference [HR lifecycle](usecases.md) mechanisms (calibrated against
 published empirical findings), the nine
 [organisational-silence](packs/organizational-silence.md) mechanisms (silence
@@ -18,10 +18,11 @@ MARL `policy` mechanism, the ten normal-form game mechanisms of the
 [`socsim-games`](games.md) crate (`game_match`, `game_decide`, `game_llm_decide`, `game_play`, `game_metrics`,
 the population dynamics `imitate_best`, `fermi_update`, `replicator_update`, `moran_update`
 and the asynchronous `async_population_step`),
-and the eight social-dynamics mechanisms
+the eight social-dynamics mechanisms
 (`hegselmann_krause`, `deffuant`, `social_judgement`, `lorenz`, `si_contagion`,
 `threshold_contagion`, `axelrod`, `group_conformity`) — the general, non-HR
-`socsim-mechanisms` crate.
+`socsim-mechanisms` crate — and its domain-independent run-control mechanism
+`continuation_probability`.
 
 Mechanisms are composed into runnable models by [module packs](packs.md), which
 bundle the world data model, a default mechanism set, and starter scenarios.
@@ -45,7 +46,7 @@ within a phase, mechanisms fire in scenario/insertion order. The dashed green
 arrows show **shared-state hand-offs** within a single step — e.g. `turnover`
 populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 
-## The thirty-eight mechanisms
+## The thirty-nine mechanisms
 
 | Mechanism | Phase | Source | Kind | Summary |
 |---|---|---|---|---|
@@ -87,6 +88,7 @@ populates `departed_this_step`, which `knowledge_loss` consumes in PostStep.
 | [`threshold_contagion`](mechanisms/threshold-contagion.md) | Interaction | Granovetter (1978) | network contagion | An inactive agent activates once its fraction of active neighbours reaches θ (library-only). |
 | [`axelrod`](mechanisms/axelrod.md) | Interaction | Axelrod (1997) | cultural dissemination | On each encounter copy one differing feature with probability equal to similarity (library-only). |
 | [`group_conformity`](mechanisms/group-conformity.md) | Interaction | DeGroot (1974) | within-group averaging | Each agent moves a fraction α toward its group's mean opinion; groups converge independently (library-only). |
+| [`continuation_probability`](mechanisms/continuation-probability.md) | PostStep | repeated-game convention | stochastic run control | Continues with probability δ after each completed step using a private RNG stream; otherwise records `continuation_stop` and requests stop (normal-form scenario or library mode). |
 
 The first four `game_*` rows are registered together by `socsim_games::assemble`,
 `assemble_with_aggregates` or `assemble_with` (`game_match`, `game_decide`, `game_play`) or
@@ -99,12 +101,13 @@ one at a time, for worlds of held agents. `async_population_step` is the
 asynchronous form of the first three: `socsim_games::assemble_async` registers
 it as the only mechanism, in place of `game_match`, `game_decide`, `game_play`
 and the dynamic. They are documented in
-context on the [normal-form games](games.md) page and are library-only. The last eight rows are the members of the general (non-HR)
+context on the [normal-form games](games.md) page and are library-only. The last nine rows are the members of the general (non-HR)
 [`socsim-mechanisms`](architecture.md#crate-workspace) crate — reusable,
 domain-agnostic social-dynamics building blocks (opinion dynamics, network contagion,
-and cultural dissemination) distinct from the HR-lifecycle and
-organisational-silence crates. All are **library-only** (no `ModulePack` /
-scenario-TOML registration). The nine organisational-silence rows in the
+and cultural dissemination) plus domain-independent run control, distinct from
+the HR-lifecycle and organisational-silence crates. The eight social-dynamics
+mechanisms are library-only; `continuation_probability` is also accepted by the
+`normal-form` scenario pack. The nine organisational-silence rows in the
 middle of the table all ship from the
 [`organizational-silence`](packs/organizational-silence.md) pack
 (plus the optional LLM `voice_decision` variant under the

@@ -250,6 +250,7 @@ fn public_scenario_metadata_is_exact() {
             "replicator_update",
             "moran_update",
             "game_metrics",
+            "continuation_probability",
         ]
     );
     assert_eq!(

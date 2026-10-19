@@ -23,7 +23,7 @@
 | feature | 追加されるもの | socsim への依存 |
 |---|---|---|
 | *（既定）* | 段階ゲームのトレイト（`StageGame`，`NormalFormGame`，`FiniteGame`，`ContinuousGame`，`AggregateGame`，`AnonymousGame`，`CommonActionSpace`，`DescribeGame`），`MatrixGame`，組込みのゲーム（`catalog`，連続の行動の `continuous`），混合戦略（`mixed`），ソルバー（`solve`．`pure_nash_counts`，レプリケータ動学，`ess_verdict`，連続の `best_response_iteration` を含む），学習則の計算（`learn`），`AggregateSpec`，指標用の行動 ID（`metric_action_ids`），`FiniteSpec` / `ContinuousSpec`（実行時に選ぶ組込みのゲーム．Scenario が使う） | **なし** — 既定のビルドはどの `socsim-*` crate にも依存しません（ソルバーの線形計画のバックエンドは純 Rust の `microlp` crate） |
-| `core` | World（`GameWorld`，`Topology`），規則（学習則と連続の規則 `DampedBestResponse` / `GradientAscent` を含む），利得規則，Matching（`FixedPlayers`，`RoundRobin`，`RandomPairs`，`RandomGroups`，`WholePopulation`），ビュー，`build_world`（`InitialActions::Shares` を含む），`uniform_initial_actions`，集団動学の設定の型（`ImitateBest`，`FermiUpdate`，`ProportionalImitation`，`MoranUpdate`，`Update`），指標の Mechanism `GameMetrics` とその連続版 `ContinuousMetrics`（`PayoffTiming` を含む） | `socsim-core` |
+| `core` | World（`GameWorld`，`Topology`），規則（学習則と連続の規則 `DampedBestResponse` / `GradientAscent` を含む），利得規則，Matching（`FixedPlayers`，`RoundRobin`，`RandomPairs`，`RandomGroups`，`WholePopulation`），ビュー，`build_world`（`InitialActions::Shares` を含む），`uniform_initial_actions`，集団動学の設定の型（`ImitateBest`，`FermiUpdate`，`ProportionalImitation`，`MoranUpdate`，`Update`），指標の Mechanism `GameMetrics` とその連続版 `ContinuousMetrics`（`PayoffTiming` を含む） | `socsim-core`，`socsim-mechanisms`（汎用の継続確率メカニズム） |
 | `engine` | `assemble`，`assemble_with_aggregates`，`assemble_with`，`assemble_async`（どれも `SimulationBuilder` を返す），対戦の評価経路（`Pairwise`，`counting_play()`），集団動学の Mechanism，`AsyncPopulationStep` と `AsyncActivation`．`core` を含意 | `socsim-core`，`socsim-engine` |
 | `net` | `Topology::network` / `Topology::directed_network` と Matching `NetworkEdges`（[トポロジー](#トポロジーgameworldwith_topology) を参照）．`core` を含意 | `socsim-core`，`socsim-net` |
 | `grid` | `Topology::grid`（`GridSpec`）と Matching `GridNeighborhood`．`core` を含意 | `socsim-core`，`socsim-grid` |
@@ -118,6 +118,29 @@ cargo run -p socsim-games --example ipd_pair --features core,engine
 
 `GameWorld::payoffs()` が持つのは**そのステップの**利得です（毎ステップ空にされます）．
 累積の得点は呼び出し側で足し合わせます．
+
+### 継続確率と未来の影
+
+無期限繰り返しゲームは，ラウンドごとの継続確率 δ で表せます．各ラウンドの完了後，
+確率 δ で次のラウンドが行われます．ラウンド $t$ に到達する確率は $\delta^{t-1}$ なので，
+期待される生涯利得は通常の δ 割引による利得と同じ重みを持ちます．δ が大きいほど
+**未来の影**が長くなります．$\delta < 1$ のとき，`t_max` による上限を考えない
+完了ラウンド数の期待値は $1/(1-\delta)$ です．
+
+ライブラリモードでは，ドメイン非依存の
+[`ContinuationProbability`](mechanisms/continuation-probability.ja.md) を使います．
+`normal-form` の Scenario には次の項目を足せます．
+
+```toml
+[[mechanism]]
+name = "continuation_probability"
+[mechanism.params]
+delta = 0.9
+```
+
+これは `game_metrics` より後の PostStep で動き，最後まで完了したラウンドに
+`continuation_stop` を記録します．専用 RNG を使うため，追加しても停止したラウンドまでの
+ゲームの軌跡は変わりません．
 
 ---
 
@@ -3969,6 +3992,7 @@ final coop_rate: 0
 | 利得の集計と集計値 | `game_play` の `params` |
 | 集団動学 | `imitate_best`，`fermi_update`，`replicator_update`，`moran_update` のどれかの `params` |
 | 指標 | `game_metrics` の `params` |
+| 継続確率 | `continuation_probability` の `params` にある `delta` |
 
 `[simulation]` の `name`，`module_pack` と `[output]` は `Scenario` の書式として必須ですが，`GameTrialFactory` は読みません．
 
@@ -4067,10 +4091,10 @@ payoffs = [
 
 各項目は `name` で区別し，`phase` は無視します．
 
-- `game_match`，`game_decide`，`game_play` は必須です．集団動学（`imitate_best`，`fermi_update`，`replicator_update`，`moran_update`）は高々 1 つ，`game_metrics` は高々 1 つ足せます．
+- `game_match`，`game_decide`，`game_play` は必須です．集団動学（`imitate_best`，`fermi_update`，`replicator_update`，`moran_update`），`game_metrics`，`continuation_probability` はそれぞれ高々 1 つ足せます．
 - 同じ名前は 1 回しか書けず，未知の名前はエラーです．
 - 集団動学は `game_decide` より**後**に書かなければなりません．
-- それ以外の点で項目の順は関係ありません．Mechanism は常に `game_match`，`game_decide`，動学，`game_play`，`game_metrics` の順に走ります．
+- それ以外の点で項目の順は関係ありません．Mechanism は常に `game_match`，`game_decide`，動学，`game_play`，`game_metrics`，`continuation_probability` の順に走ります．
 
 | Mechanism | キー | 型 | 既定値 |
 |---|---|---|---|
@@ -4095,6 +4119,7 @@ payoffs = [
 | | `gaussian_sd` | 数 | なし．連続ゲームで `mutation > 0` なら必要で，有限ゲームでは書けない |
 | `game_metrics`（有限） | `cooperate_label`（ラベル），`regret`（真偽値），`mixed_source`（`"played"`，`"played_cumulative"`，`"reported"`），`equilibrium`（`"none"`，`"solve"`），`stop_tol`（数）と `stop_window`（個数．`u32`）は両方書くか両方省略，`population_share`（真偽値），`action_entropy`（真偽値．feature `metrics`） | | `MetricsOptions::new()` の既定値 |
 | `game_metrics`（連続） | `equilibrium`（`"none"`，`"solve"`），`stop_tol` と `stop_window` は両方書くか両方省略 | | `ContinuousMetricsOptions::new()` の既定値 |
+| `continuation_probability` | `delta` | `[0, 1]` の有限な数 | 必須 |
 
 別の Matching のキー（例：`matching = "round_robin"` での `pairs`）はエラーです．
 
@@ -4129,6 +4154,7 @@ mechanism[game_decide].fp_tiebreak: unknown key (known keys: coop_label, decisio
 world.game: catalog condition failed: T > R > P >= S
 mechanism[imitate_best]: a population dynamic must be listed after game_decide
 mechanism[replicator_update]: invalid population dynamics: replicator_update requires beta <= 1 / 16.650000000000002 (the per-step payoff range), got 1
+mechanism[continuation_probability].delta: expected a continuation probability in [0, 1], found 1.1
 ```
 
 （`SocsimError` の `Display` を通すと，どの文言にも `config error: ` が前に付きます．）組み立てのエラーの位置は，エラーの種類で決まります．
@@ -4158,8 +4184,12 @@ Scenario から読んだシミュレーションの乱数は，すべて `build_
 | `derive_seed(seed, &[1])` | エンジン（`Trial::engine_seed`） |
 | `derive_seed(seed, &[2])` | 決定の根 |
 | `derive_seed(seed, &[3, agent, generation])` | 規則の状態の初期値 |
+| `derive_seed(seed, &[0x636f6e74696e7565])` | 継続確率の専用ストリーム（`continue` のバイト列） |
 
-これは `GameSimFactory` と `build_world` / `assemble` のストリーム（[決定論性と乱数ストリーム](#決定論性と乱数ストリーム) を参照）と同じで，そのため 2 つの入口の軌跡が一致します．
+最初の6行は `GameSimFactory` と `build_world` / `assemble` のストリームです
+（[決定論性と乱数ストリーム](#決定論性と乱数ストリーム) を参照）．最後の行は
+`GameTrialFactory` が追加する汎用メカニズムのものです．ライブラリモードでは
+`ContinuationProbability::new(delta, seed)` をビルダーへ足すと，同じ停止規則になります．
 
 ### `GameTrialFactory`
 
@@ -4167,7 +4197,7 @@ Scenario から読んだシミュレーションの乱数は，すべて `build_
 |---|---|
 | `GameTrialFactory::<FiniteSpec>::new(RuleRegistry::finite_builtins())` | 実験状態の無い（`X = ()`）factory．連続ゲームでは `ContinuousSpec` と `RuleRegistry::continuous_builtins()` |
 | `GameTrialFactory::with_state(registry, make_x)` | `make_x: Fn(&Scenario) -> Result<X, GameError>` が作る実験状態から試行を始める factory．`make_x` は試行を作るたびに 1 回呼ばれる |
-| `TrialFactory::build_trial(&scenario, seed)` | Scenario を読んで `seed` の試行を作る．World は `seed` から，Mechanism は決まった順，スケジューラーは `[simulation] scheduler`，`engine_seed = derive_seed(seed, &[1])` |
+| `TrialFactory::build_trial(&scenario, seed)` | Scenario を読んで `seed` の試行を作る．World は `seed` から，Mechanism は決まった順（任意の `continuation_probability` は最後），スケジューラーは `[simulation] scheduler`，`engine_seed = derive_seed(seed, &[1])` |
 | `TrialFactory::validate(&scenario)` | [`validate`](#validate) を参照 |
 
 factory が持つのは `Arc` に包んだ規則のレジストリだけなので，複製は軽く，1 つの factory をすべてのワーカースレッドで使えます．
