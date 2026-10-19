@@ -567,8 +567,11 @@ fn write_jsonl_log(scenario: &Scenario, result: &socsim_runner::RunResult) -> Re
         .with_context(|| format!("failed to create log file '{}'", path.display()))?;
     let mut writer = std::io::BufWriter::new(file);
 
-    // Write metric rows.
-    for (key, ts) in &result.series {
+    // Write metric rows in key order, preserving each series' recorded order.
+    let mut metric_keys: Vec<&String> = result.series.keys().collect();
+    metric_keys.sort();
+    for key in metric_keys {
+        let ts = &result.series[key];
         for &(t, value) in ts {
             let obj = serde_json::json!({
                 "type": "metric",
@@ -763,6 +766,92 @@ log_path = "{log_template}"
     }
 
     // ── sweep rows ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn write_jsonl_log_is_byte_identical_for_equivalent_run_results() {
+        struct TempDir(PathBuf);
+
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        fn equivalent_result() -> socsim_runner::RunResult {
+            let mut series = HashMap::new();
+            for (index, key) in [
+                "zeta", "alpha", "theta", "beta", "eta", "gamma", "iota", "delta", "kappa",
+                "epsilon", "lambda", "mu",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let value = index as f64;
+                series.insert(key.to_owned(), vec![(2, value), (1, value + 0.5)]);
+            }
+
+            socsim_runner::RunResult {
+                seed: 0,
+                final_metrics: series
+                    .iter()
+                    .map(|(key, values)| (key.clone(), values.last().unwrap().1))
+                    .collect(),
+                series,
+                events: vec![
+                    socsim_log::EventRow {
+                        t: 2,
+                        kind: "first".to_owned(),
+                        payload: serde_json::json!({ "order": 1 }),
+                    },
+                    socsim_log::EventRow {
+                        t: 1,
+                        kind: "second".to_owned(),
+                        payload: serde_json::json!({ "order": 2 }),
+                    },
+                ],
+                event_count: 2,
+            }
+        }
+
+        let tmpdir = TempDir(fresh_temp_dir("jsonl_determinism"));
+        let log_template = format!("{}/{{name}}_{{seed}}.jsonl", tmpdir.0.display());
+        let scenario = scenario_with_log(&log_template);
+        let path = tmpdir.0.join("events_jsonl_test_0.jsonl");
+
+        write_jsonl_log(&scenario, &equivalent_result()).expect("first JSONL write");
+        let first = fs::read(&path).expect("read first JSONL output");
+
+        write_jsonl_log(&scenario, &equivalent_result()).expect("second JSONL write");
+        let second = fs::read(&path).expect("read second JSONL output");
+
+        assert_eq!(first, second, "equivalent results must be byte-identical");
+
+        let rows: Vec<serde_json::Value> = String::from_utf8(second)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let metric_key_times: Vec<(&str, u64)> = rows
+            .iter()
+            .filter(|row| row["type"] == "metric")
+            .map(|row| (row["key"].as_str().unwrap(), row["t"].as_u64().unwrap()))
+            .collect();
+        let expected: Vec<(&str, u64)> = [
+            "alpha", "beta", "delta", "epsilon", "eta", "gamma", "iota", "kappa", "lambda", "mu",
+            "theta", "zeta",
+        ]
+        .into_iter()
+        .flat_map(|key| [(key, 2), (key, 1)])
+        .collect();
+        assert_eq!(metric_key_times, expected);
+
+        let event_kinds: Vec<&str> = rows
+            .iter()
+            .filter(|row| row["type"] == "event")
+            .map(|row| row["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(event_kinds, ["first", "second"]);
+    }
 
     use packs::{CliPack, SweepRow};
     use socsim_runner::{MetricStats, Summary, SweepPoint};

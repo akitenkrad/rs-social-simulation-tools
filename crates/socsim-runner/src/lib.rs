@@ -36,7 +36,7 @@
 use std::collections::HashMap;
 
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 use socsim_config::{Registry, Scenario};
 use socsim_core::{Result, WorldState};
@@ -68,9 +68,11 @@ pub struct RunResult {
     pub seed: u64,
 
     /// Time series for each metric key: `key → Vec<(t, value)>`.
+    #[serde(serialize_with = "serialize_string_map_sorted")]
     pub series: HashMap<String, Vec<(u64, f64)>>,
 
     /// Final (last-recorded) value for each metric key.
+    #[serde(serialize_with = "serialize_string_map_sorted")]
     pub final_metrics: HashMap<String, f64>,
 
     /// All events recorded during the run, in the order the mechanisms emitted
@@ -83,6 +85,24 @@ pub struct RunResult {
     /// Total event count recorded during the run (equals `events.len()`,
     /// retained for API compatibility).
     pub event_count: usize,
+}
+
+fn serialize_string_map_sorted<S, V>(
+    map: &HashMap<String, V>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    V: Serialize,
+{
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_by_key(|(key, _)| *key);
+
+    let mut ordered = serializer.serialize_map(Some(entries.len()))?;
+    for (key, value) in entries {
+        ordered.serialize_entry(key, value)?;
+    }
+    ordered.end()
 }
 
 // ── run_once ──────────────────────────────────────────────────────────────────
@@ -427,5 +447,38 @@ mod tests {
         let csv = s.to_csv();
         assert!(csv.starts_with("key,mean,std,min,max,n\n"));
         assert!(csv.contains("foo,"));
+    }
+
+    #[test]
+    fn run_result_json_maps_are_sorted_and_byte_identical() {
+        fn equivalent_result() -> RunResult {
+            let mut series = HashMap::new();
+            let mut final_metrics = HashMap::new();
+            for (index, key) in [
+                "zeta", "alpha", "theta", "beta", "eta", "gamma", "iota", "delta", "kappa",
+                "epsilon", "lambda", "mu",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let value = index as f64;
+                series.insert(key.to_owned(), vec![(0, value)]);
+                final_metrics.insert(key.to_owned(), value);
+            }
+            RunResult {
+                seed: 7,
+                series,
+                final_metrics,
+                events: Vec::new(),
+                event_count: 0,
+            }
+        }
+
+        let first = serde_json::to_string(&equivalent_result()).unwrap();
+        let second = serde_json::to_string(&equivalent_result()).unwrap();
+
+        assert_eq!(first, second);
+        assert!(first.contains(r#""series":{"alpha":[[0,1.0]],"beta":[[0,3.0]],"delta":[[0,7.0]]"#));
+        assert!(first.contains(r#""final_metrics":{"alpha":1.0,"beta":3.0,"delta":7.0"#));
     }
 }
