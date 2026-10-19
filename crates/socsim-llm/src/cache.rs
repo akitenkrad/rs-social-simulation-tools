@@ -3,9 +3,9 @@
 //! The cache is the heart of the determinism contract: a warm cache makes a
 //! non-deterministic backend replay identical responses.  It can live purely
 //! in memory or be backed by a JSON file (load on construction, save on
-//! demand).
+//! demand). Saved files list entries in ascending key order.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,7 @@ pub fn cache_key(prompt: &str, model: &str) -> String {
 /// On-disk representation of the cache: a flat `key → response` map.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct CacheData {
-    entries: HashMap<String, String>,
+    entries: BTreeMap<String, String>,
 }
 
 /// A prompt-keyed response cache.
@@ -163,6 +163,50 @@ mod tests {
 
         let reloaded = PromptCache::open(&path).unwrap();
         assert_eq!(reloaded.get_for("hi", "m"), Some("yo".into()));
+    }
+
+    #[test]
+    fn opens_existing_cache_with_entries_in_arbitrary_json_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cache.json");
+        std::fs::write(
+            &path,
+            r#"{"entries":{"z-key":"last","a-key":"first","m-key":"middle"}}"#,
+        )
+        .unwrap();
+
+        let cache = PromptCache::open(&path).unwrap();
+
+        assert_eq!(cache.get("a-key"), Some("first".to_owned()));
+        assert_eq!(cache.get("m-key"), Some("middle".to_owned()));
+        assert_eq!(cache.get("z-key"), Some("last".to_owned()));
+    }
+
+    #[test]
+    fn saved_files_are_byte_identical_for_different_insertion_orders() {
+        let dir = tempfile::tempdir().unwrap();
+        let first_path = dir.path().join("first.json");
+        let second_path = dir.path().join("second.json");
+        let entries = (0..16)
+            .map(|index| (format!("key-{index:02}"), format!("value-{index:02}")))
+            .collect::<Vec<_>>();
+
+        let mut first = PromptCache::open(&first_path).unwrap();
+        for (key, value) in &entries {
+            first.insert(key.clone(), value.clone());
+        }
+        first.save().unwrap();
+
+        let mut second = PromptCache::open(&second_path).unwrap();
+        for (key, value) in entries.iter().rev() {
+            second.insert(key.clone(), value.clone());
+        }
+        second.save().unwrap();
+
+        assert_eq!(
+            std::fs::read(first_path).unwrap(),
+            std::fs::read(second_path).unwrap()
+        );
     }
 
     #[test]
