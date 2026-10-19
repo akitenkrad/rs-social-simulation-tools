@@ -710,7 +710,7 @@ where
             AssignKind::Rule(kind) => {
                 let kind_id = catalog
                     .kind_id(&kind)
-                    .ok_or_else(|| RuleError::UnknownKind(kind.clone()))?;
+                    .ok_or_else(|| RuleError::unknown_kind(&kind, catalog.kinds()))?;
                 let state_index =
                     u32::try_from(states.len()).map_err(|_| GameError::AgentCount {
                         expected: u32::MAX as usize,
@@ -1114,13 +1114,21 @@ where
         }
         let state_index = state_slot as usize;
         let kind_id = world.policies.kind_of.get(state_index).ok_or_else(|| {
-            GameError::Rule(crate::RuleError::UnknownKind(state_index.to_string()))
+            GameError::Rule(crate::RuleError::unknown_kind(
+                &state_index.to_string(),
+                rules.rules.keys().map(String::as_str),
+            ))
         })?;
         let kind = world
             .policies
             .kinds
             .get(kind_id.0 as usize)
-            .ok_or_else(|| GameError::Rule(crate::RuleError::UnknownKind(kind_id.0.to_string())))?;
+            .ok_or_else(|| {
+                GameError::Rule(crate::RuleError::unknown_kind(
+                    &kind_id.0.to_string(),
+                    rules.rules.keys().map(String::as_str),
+                ))
+            })?;
         rules.get(kind)?;
         active_kinds.insert(kind.as_str());
     }

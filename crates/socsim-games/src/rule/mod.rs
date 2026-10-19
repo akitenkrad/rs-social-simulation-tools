@@ -29,7 +29,7 @@ pub enum RuleError {
     #[error("policy state does not contain slot {0}")]
     MissingSlot(&'static str),
     /// An assignment or lookup named a rule kind absent from its rule book.
-    #[error("unknown rule kind: {0}")]
+    #[error("unknown rule kind {0}")]
     UnknownKind(String),
     /// A rule book or combined kind catalog contains the same kind twice.
     #[error("duplicate rule kind: {0}")]
@@ -58,6 +58,21 @@ pub enum RuleError {
     /// No converged best response could be obtained during a decision.
     #[error("best response unavailable: {0}")]
     BestResponse(String),
+}
+
+impl RuleError {
+    pub(crate) fn unknown_kind<'a>(
+        kind: &str,
+        registered: impl IntoIterator<Item = &'a str>,
+    ) -> Self {
+        let registered = registered.into_iter().collect::<Vec<_>>();
+        let registered = if registered.is_empty() {
+            "<none>".to_owned()
+        } else {
+            registered.join(", ")
+        };
+        Self::UnknownKind(format!("{kind:?}; registered kinds: {registered}"))
+    }
 }
 
 /// Chooses actions for one named policy kind and optionally learns from play.

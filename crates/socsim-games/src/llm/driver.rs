@@ -652,16 +652,22 @@ where
             continue;
         }
         let state_index = state_slot as usize;
-        let kind_id = world
-            .policies
-            .kind_of
-            .get(state_index)
-            .ok_or_else(|| GameError::Rule(RuleError::UnknownKind(state_index.to_string())))?;
+        let kind_id = world.policies.kind_of.get(state_index).ok_or_else(|| {
+            GameError::Rule(RuleError::unknown_kind(
+                &state_index.to_string(),
+                catalog.kinds(),
+            ))
+        })?;
         let kind = world
             .policies
             .kinds
             .get(kind_id.0 as usize)
-            .ok_or_else(|| GameError::Rule(RuleError::UnknownKind(kind_id.0.to_string())))?;
+            .ok_or_else(|| {
+                GameError::Rule(RuleError::unknown_kind(
+                    &kind_id.0.to_string(),
+                    catalog.kinds(),
+                ))
+            })?;
         if rules.get_optional(kind).is_some() {
             active_rule_kinds.insert(kind.as_str());
         }

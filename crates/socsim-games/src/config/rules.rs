@@ -173,7 +173,7 @@ impl<G: StageGame, X: ExperimentState> RuleRegistry<G, X> {
         let entry = self
             .rules
             .get(name)
-            .ok_or_else(|| RuleError::UnknownKind(name.to_owned()))?;
+            .ok_or_else(|| RuleError::unknown_kind(name, self.rules.keys().map(String::as_str)))?;
         (entry.ctor)(params, game)
     }
 

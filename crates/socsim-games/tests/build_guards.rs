@@ -2178,10 +2178,14 @@ mod factory_guards {
             ]))
             .history_len(1)
             .t_max(1);
-        assert!(matches!(
-            factory.build(7),
-            Err(GameError::Rule(RuleError::UnknownKind(kind))) if kind == "ghost"
-        ));
+        let error = factory
+            .build(7)
+            .err()
+            .expect("an unregistered rule kind must be rejected");
+        assert_eq!(
+            error.to_string(),
+            "unknown rule kind \"ghost\"; registered kinds: fixed"
+        );
     }
 
     // (8) A built-in game checks its parameters when it is constructed.

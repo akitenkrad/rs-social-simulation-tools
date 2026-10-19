@@ -293,8 +293,10 @@ pub trait DecisionRule<G: StageGame, X: ExperimentState>: Send + Sync {
 繰り返しゲームのオートマトン `Automaton` — は [学習則と決定の粒度](#学習則と決定の粒度) で説明します．
 連続ゲームでは `Fixed::new(vec![..])` が一定の行動ベクトルを出し，`DampedBestResponse` と `GradientAscent` は [連続ゲーム](#決定規則dampedbestresponse-と-gradientascent) で説明します．
 
-規則は `RuleBook` に**種類の名前**で登録します（`register(kind, Arc<dyn DecisionRule<G, X>>)`．
-重複した種類は `RuleError::DuplicateKind`）．種類の番号は種類名の昇順で振られるので，登録の順序には依存しません．
+規則は `RuleBook` に**種類の名前**で登録します．規則の `name()` をそのまま種類名にするときは
+`add(Arc<dyn DecisionRule<G, X>>)` を使います．同じ型の規則をパラメータ違いで 2 つ登録する場合など，
+種類に別の名前が必要なときは `register(kind, rule)` を使います．重複した種類は `RuleError::DuplicateKind` です．
+種類の番号は種類名の昇順で振られるので，登録の順序には依存しません．
 
 ### 規則をエージェントに割り当てる
 

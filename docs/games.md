@@ -342,10 +342,12 @@ continuous games, `Fixed::new(vec![..])` plays a constant action vector, and
 `DampedBestResponse` and `GradientAscent` are described in
 [Continuous games](#decision-rules-dampedbestresponse-and-gradientascent).
 
-Rules are registered by **kind name** in a `RuleBook`
-(`register(kind, Arc<dyn DecisionRule<G, X>>)`; a duplicate kind is
-`RuleError::DuplicateKind`). Kind ids are assigned in sorted kind-name order, so
-they do not depend on registration order.
+Rules are registered by **kind name** in a `RuleBook`. Use
+`add(Arc<dyn DecisionRule<G, X>>)` when the rule's `name()` is the desired kind
+name. Use `register(kind, rule)` when the kind needs a separate label, such as
+two differently parameterized instances of the same rule type. A duplicate kind
+is `RuleError::DuplicateKind`. Kind ids are assigned in sorted kind-name order,
+so they do not depend on registration order.
 
 ### Assigning rules to agents
 

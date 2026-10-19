@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use socsim_games::{
     assemble, build_world, ActionError, AssignGroup, AssignKind, Assignment, Fixed, FixedPlayers,
-    GameError, InitialActions, MatrixGame, NormalFormOutcome, OnInvalidAction, PlayOptions,
-    RuleBook, RuleError,
+    GameError, InitialActions, KindCatalog, MatrixGame, NormalFormOutcome, OnInvalidAction,
+    PlayOptions, RuleBook, RuleError, TitForTat,
 };
 
 fn prisoners_dilemma() -> MatrixGame {
@@ -78,12 +78,15 @@ fn build_world_rejects_zero_history_length_without_panicking() {
 
 #[test]
 fn build_world_rejects_an_unregistered_rule_kind() {
-    let rules = fixed_rules();
+    let mut rules: RuleBook<MatrixGame, ()> = RuleBook::new();
+    for kind in ["grim", "all_d", "fit_for_tat", "all_c", "fictitious_play"] {
+        rules.register(kind, Arc::new(Fixed::new(0))).unwrap();
+    }
     let assignment = Assignment::Ordered(vec![AssignGroup {
-        kind: AssignKind::Rule("missing".into()),
+        kind: AssignKind::Rule("tit_for_tat".into()),
         count: 2,
     }]);
-    let result = build_world(
+    let error = build_world(
         prisoners_dilemma(),
         2,
         (),
@@ -93,11 +96,13 @@ fn build_world_rejects_an_unregistered_rule_kind() {
         1,
         1,
         1,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "unknown rule kind \"tit_for_tat\"; registered kinds: all_c, all_d, fictitious_play, fit_for_tat, grim"
     );
-    assert!(matches!(
-        result,
-        Err(GameError::Rule(RuleError::UnknownKind(kind))) if kind == "missing"
-    ));
 }
 
 #[test]
@@ -236,6 +241,43 @@ fn rule_book_rejects_duplicate_kind_names() {
         result,
         Err(RuleError::DuplicateKind(kind)) if kind == "same"
     ));
+}
+
+#[test]
+fn rule_book_add_registers_the_rule_name() {
+    let mut rules: RuleBook<MatrixGame, ()> = RuleBook::new();
+    rules.add(Arc::new(TitForTat::new(0))).unwrap();
+
+    assert_eq!(
+        KindCatalog::from_rules(&rules).kinds().collect::<Vec<_>>(),
+        vec!["tit_for_tat"]
+    );
+}
+
+#[test]
+fn rule_book_add_rejects_a_duplicate_rule_name() {
+    let mut rules: RuleBook<MatrixGame, ()> = RuleBook::new();
+    rules.add(Arc::new(TitForTat::new(0))).unwrap();
+    let result = rules.add(Arc::new(TitForTat::new(1)));
+
+    assert!(matches!(
+        result,
+        Err(RuleError::DuplicateKind(kind)) if kind == "tit_for_tat"
+    ));
+}
+
+#[test]
+fn rule_book_add_and_register_can_be_combined() {
+    let mut rules: RuleBook<MatrixGame, ()> = RuleBook::new();
+    rules.add(Arc::new(TitForTat::new(0))).unwrap();
+    rules
+        .register("fixed_defect", Arc::new(Fixed::new(1)))
+        .unwrap();
+
+    assert_eq!(
+        KindCatalog::from_rules(&rules).kinds().collect::<Vec<_>>(),
+        vec!["fixed_defect", "tit_for_tat"]
+    );
 }
 
 #[test]

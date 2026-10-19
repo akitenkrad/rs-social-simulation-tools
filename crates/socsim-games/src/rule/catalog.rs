@@ -118,7 +118,7 @@ impl<G: StageGame, X: ExperimentState> KindCatalog<G, X> {
         let entry = self
             .entries
             .get(kind)
-            .ok_or_else(|| RuleError::UnknownKind(kind.to_owned()))?;
+            .ok_or_else(|| RuleError::unknown_kind(kind, self.kinds()))?;
         match &entry.rule {
             CatalogRule::Rule(rule) => rule.init_state(context, game),
             #[cfg(feature = "llm")]
@@ -130,7 +130,7 @@ impl<G: StageGame, X: ExperimentState> KindCatalog<G, X> {
         let entry = self
             .entries
             .get(kind)
-            .ok_or_else(|| RuleError::UnknownKind(kind.to_owned()))?;
+            .ok_or_else(|| RuleError::unknown_kind(kind, self.kinds()))?;
         Ok(match &entry.rule {
             CatalogRule::Rule(rule) => rule.needs_pair_history(),
             #[cfg(feature = "llm")]

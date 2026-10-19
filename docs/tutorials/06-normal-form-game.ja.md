@@ -122,8 +122,8 @@ fn main() {
     .expect("the prisoner's dilemma matrix is valid");
 
     let mut rules = RuleBook::new();
-    rules.register("tit_for_tat", Arc::new(TitForTat::new(0))).unwrap();
-    rules.register("fixed_defect", Arc::new(Fixed::new(1))).unwrap();
+    rules.add(Arc::new(TitForTat::new(0))).unwrap();
+    rules.add(Arc::new(Fixed::new(1))).unwrap();
 
     let seed = 1;
     let world = build_world(
@@ -134,7 +134,7 @@ fn main() {
         &rules,
         &Assignment::Ordered(vec![
             AssignGroup { kind: AssignKind::Rule("tit_for_tat".into()), count: 1 },
-            AssignGroup { kind: AssignKind::Rule("fixed_defect".into()), count: 1 },
+            AssignGroup { kind: AssignKind::Rule("fixed".into()), count: 1 },
         ]),
         ROUNDS,
         ROUNDS as u64,
