@@ -109,6 +109,16 @@ impl<G: ScenarioGame, X: ExperimentState> GameTrialFactory<G, X> {
 }
 
 impl<G: ScenarioGame, X: ExperimentState + Clone> GameTrialFactory<G, X> {
+    /// Reads the scenario through the same configuration path as a trial and
+    /// returns the metric column patterns described by `game_metrics`.
+    pub fn metric_patterns(&self, scenario: &Scenario) -> socsim_core::Result<Vec<String>> {
+        let config = ScenarioConfig::read(scenario, &self.shared.registry)
+            .map_err(|error| scenario_error(scenario, error))?;
+        config
+            .metric_patterns()
+            .map_err(|error| scenario_error(scenario, error))
+    }
+
     /// Reads `scenario` and builds a trial for `seed` from it.
     fn trial(&self, scenario: &Scenario, seed: u64) -> Result<Trial<GameWorld<G, X>>, GameError> {
         let config = ScenarioConfig::read(scenario, &self.shared.registry)?;

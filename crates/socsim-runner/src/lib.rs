@@ -207,6 +207,31 @@ pub struct Summary {
 }
 
 impl Summary {
+    /// Return a summary containing only existing `keys`, in requested order.
+    ///
+    /// Repeated keys use their first occurrence. Requested keys that are not
+    /// present in this summary are omitted.
+    pub fn select_metrics(&self, keys: &[String]) -> Self {
+        let by_key: HashMap<&str, &MetricStats> = self
+            .metrics
+            .iter()
+            .map(|metric| (metric.key.as_str(), metric))
+            .collect();
+        let mut metrics = Vec::new();
+        for key in keys {
+            if metrics
+                .iter()
+                .any(|metric: &MetricStats| metric.key == *key)
+            {
+                continue;
+            }
+            if let Some(metric) = by_key.get(key.as_str()) {
+                metrics.push((*metric).clone());
+            }
+        }
+        Self { metrics }
+    }
+
     /// Produce a CSV string with columns: `key,mean,std,min,max,n`.
     pub fn to_csv(&self) -> String {
         let mut out = String::from("key,mean,std,min,max,n\n");
@@ -447,6 +472,39 @@ mod tests {
         let csv = s.to_csv();
         assert!(csv.starts_with("key,mean,std,min,max,n\n"));
         assert!(csv.contains("foo,"));
+    }
+
+    #[test]
+    fn summary_selects_existing_metrics_in_requested_order_without_duplicates() {
+        let stats = |key: &str, mean: f64| MetricStats {
+            key: key.to_owned(),
+            mean,
+            std: 0.0,
+            min: mean,
+            max: mean,
+            n: 1,
+        };
+        let summary = Summary {
+            metrics: vec![stats("alpha", 1.0), stats("beta", 2.0), stats("gamma", 3.0)],
+        };
+
+        let selected = summary.select_metrics(&[
+            "gamma".to_owned(),
+            "missing".to_owned(),
+            "alpha".to_owned(),
+            "gamma".to_owned(),
+        ]);
+
+        assert_eq!(
+            selected
+                .metrics
+                .iter()
+                .map(|metric| metric.key.as_str())
+                .collect::<Vec<_>>(),
+            ["gamma", "alpha"]
+        );
+        assert_eq!(selected.metrics[0].mean, 3.0);
+        assert_eq!(selected.metrics[1].mean, 1.0);
     }
 
     #[test]

@@ -130,10 +130,15 @@ With `stop_tol` and `stop_window`, `game_metrics` also ends the run early once
 the actions stop changing (Cournot stops at step 90 of 500). The exact
 definitions are on the [`game_metrics` page](../mechanisms/game-metrics.md).
 
-**`[output] metrics` is informational.** As in the other packs, it does not
-choose what is recorded: every column above that is defined for the run is
-written to the JSONL log and to the summaries. The bundled scenarios list the
-columns they are about.
+**`[output] metrics` selects CLI columns.** When the list is non-empty, the
+single-seed series, multi-seed summary, and sweep table/CSV contain only those
+keys, in the written order; duplicates use their first occurrence. JSONL logs
+still contain every recorded metric. An empty or omitted list preserves the
+all-metric output. `normal-form` rejects keys that match none of the configured
+`game_metrics` patterns before execution; every pack also rejects a requested
+key that appears in no result after execution (after run JSONL logs have been
+written). Thus a concrete but absent action such as `game.played_share.a9`
+passes pattern validation and then fails against the recorded keys.
 
 The game mechanisms emit no events by default (`Seed 42 — 0 events recorded`).
 When `continuation_probability` stops a run, it emits one `continuation_stop`

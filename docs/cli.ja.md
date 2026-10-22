@@ -111,7 +111,7 @@ turnover_rate             0.0083      0.0118      0.0000      0.0250      3
 
 `run` は `Running …` を表示する前に，[`validate`](#validate) とまったく同じ検査を行います．無効なシナリオは終了コード1で止まり，何も実行も書き出しもしません．
 
-各実行後，シナリオTOMLの `output.log_path` で指定されたJSONLログファイルが書き出されます（後述の[JSONL出力形式](#jsonl出力形式)を参照）．
+`[output] metrics` は表示する列を制御します．空でないリストは，単一シードの時系列と複数シードの要約を，記載したキーだけ・記載順に絞ります．重複キーは最初の1回だけを使います．空または省略時は，記録された全指標を表示します．JSONL ログには，従来どおり記録された全指標を書きます．パスはシナリオTOMLの `output.log_path` で指定します（後述の[JSONL出力形式](#jsonl出力形式)を参照）．要求キーがどの結果にも現れなければ，完全なログを書いた後に終了コード1で失敗し，不足キーと記録済みキーを表示します．
 
 ---
 
@@ -123,12 +123,13 @@ turnover_rate             0.0083      0.0118      0.0000      0.0250      3
 socsim validate <SCENARIO>
 ```
 
-検査は2段からなり，この順に行います．
+検査は3段からなり，この順に行います．
 
 1. **汎用のシナリオ検査**（どのパックでも同じ）：すべての `[[mechanism]]` の名前が指定のパックに登録されていること，スケジューラーが既知（`"sequential"` か `"random_activation"`）であること，`t_max > 0` であること．
 2. **パック固有の検査**（`CliPack::validate`）．`hr-lifecycle`，`opinion-dynamics`，`organizational-silence` のパックはここで何も足しません．`normal-form` パックはシナリオ全体を検査します．すべてのキーとその型，未知のキー，ゲーム・規則・Matching・集団動学の組合せ，シナリオの `seed` での1回の乾いた構築です（[normal-form パック § `validate` が拒否するもの](packs/normal-form.ja.md#validate-が拒否するもの)を参照）．
+3. **パックが提供する場合の指標パターン検査**．`normal-form` は，シミュレーションを走らせずに設定済みのゲームと `game_metrics` の記述を組み立て，空でない `[output] metrics` の各キーがいずれかのパターンに一致することを確かめます．ほかのパックは，結果が得られるまでこの検査を保留します．
 
-1段目が失敗すれば2段目は行いません．
+前の段階が失敗すれば，後の段階は行いません．
 
 **例**
 
@@ -153,7 +154,7 @@ Caused by:
     config error: mechanism 'game_decid' is not registered in the 'normal-form' pack; available: [fermi_update, game_decide, game_match, game_metrics, game_play, imitate_best, moran_update, replicator_update]
 ```
 
-**`run` と `sweep` は先に検証します．** どちらのコマンドも，`Running …` / `Sweeping …` を表示する前，試行を走らせる前，ファイルを書く前に同じ2段の検査を行います．失敗すると終了コード1で終わり，JSONL ログも CSV もシナリオのファイルも残しません．`hr-lifecycle`，`opinion-dynamics`，`organizational-silence` のパックでは，有効なシナリオは以前とまったく同じに走ります．無効なシナリオは実行されずに拒否されるようになりました．たとえば `t_max = 0` のシナリオは以前は0ステップ走っていましたが，今は次のように止まります．
+**`run` と `sweep` は先に検証します．** どちらのコマンドも，`Running …` / `Sweeping …` を表示する前，試行を走らせる前，ファイルを書く前に同じ検査を行います．失敗すると終了コード1で終わり，JSONL ログも CSV もシナリオのファイルも残しません．`hr-lifecycle`，`opinion-dynamics`，`organizational-silence` のパックでは，有効なシナリオは以前とまったく同じに走ります．無効なシナリオは実行されずに拒否されるようになりました．たとえば `t_max = 0` のシナリオは以前は0ステップ走っていましたが，今は次のように止まります．
 
 ```
 Error: validation failed for 'hr0.toml'
@@ -161,6 +162,8 @@ Error: validation failed for 'hr0.toml'
 Caused by:
     config error: simulation.t_max must be > 0
 ```
+
+`sweep` では，空でない `[output] metrics` が各要約表と CSV の指標を記載順に絞ります．effective scenario TOML は変更しません．試行終了後，要求キーがどの結果にもなければ，終了コード1で失敗して記録済みキーを表示します．`socsim summarize` はシナリオを読まないため，絞り込みません．
 
 ---
 

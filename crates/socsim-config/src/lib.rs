@@ -25,7 +25,9 @@
 
 pub mod scenario;
 
-pub use scenario::{MechanismEntry, OutputSection, RawParams, Scenario, SimulationSection};
+pub use scenario::{
+    metric_key_matches, MechanismEntry, OutputSection, RawParams, Scenario, SimulationSection,
+};
 
 use std::collections::HashMap;
 

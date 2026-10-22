@@ -111,7 +111,14 @@ turnover_rate             0.0083      0.0118      0.0000      0.0250      3
 
 Before printing `Running …`, `run` checks the scenario exactly as [`validate`](#validate) does; an invalid scenario stops with exit code 1 and nothing is run or written.
 
-After each run, JSONL log files are written as specified by `output.log_path` in the scenario TOML (see [JSONL output format](#jsonl-output-format) below).
+`[output] metrics` controls the displayed columns. A non-empty list selects
+the single-seed series and multi-seed summary keys in written order, with the
+first occurrence of a duplicate winning. An empty or omitted list displays all
+recorded metrics. JSONL log files are still written with every recorded metric
+as specified by `output.log_path` (see [JSONL output format](#jsonl-output-format)
+below). If a requested key appears in no result, `run` exits with code 1 after
+writing those complete logs and reports both the missing key and the recorded
+keys.
 
 ---
 
@@ -123,7 +130,7 @@ Check a scenario TOML without running it.
 socsim validate <SCENARIO>
 ```
 
-The check has two parts, run in this order:
+The check has three parts, run in this order:
 
 1. **The generic scenario check**, the same for every pack: every
    `[[mechanism]]` name is registered in the named pack, the scheduler is
@@ -134,8 +141,13 @@ The check has two parts, run in this order:
    unknown keys, the combination of game, rules, matching and population
    dynamic, and one dry build with the scenario's `seed` (see the
    [normal-form pack § What `validate` rejects](packs/normal-form.md#what-validate-rejects)).
+3. **Known metric patterns, when the pack provides them.** `normal-form`
+   constructs its configured game and `game_metrics` description without
+   running the simulation, then rejects every non-empty `[output] metrics` key
+   that matches none of those patterns. Other packs defer this check until
+   results exist.
 
-If the first part fails, the second is not run.
+If an earlier part fails, later parts are not run.
 
 **Example**
 
@@ -161,7 +173,7 @@ Caused by:
     config error: mechanism 'game_decid' is not registered in the 'normal-form' pack; available: [fermi_update, game_decide, game_match, game_metrics, game_play, imitate_best, moran_update, replicator_update]
 ```
 
-**`run` and `sweep` validate first.** Both commands perform the same two-part
+**`run` and `sweep` validate first.** Both commands perform the same checks
 check before they print `Running …` / `Sweeping …`, run any trial or write any
 file; a failure exits with code 1 and leaves no JSONL log, CSV or scenario file
 behind. For the `hr-lifecycle`, `opinion-dynamics` and `organizational-silence`
@@ -175,6 +187,12 @@ Error: validation failed for 'hr0.toml'
 Caused by:
     config error: simulation.t_max must be > 0
 ```
+
+For `sweep`, a non-empty `[output] metrics` list also selects, in order, the
+metrics written to each summary table and CSV. Effective scenario TOML files
+are unchanged. After trials complete, a requested key absent from every result
+causes exit code 1 and an error listing the recorded keys. `socsim summarize`
+does not read a scenario and remains unfiltered.
 
 ---
 

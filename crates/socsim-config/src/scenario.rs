@@ -117,7 +117,9 @@ pub struct OutputSection {
     /// `"runs/{name}_{seed}.jsonl"`.
     pub log_path: String,
 
-    /// Metric keys to include in run summaries.
+    /// Metric keys to show in run series and run/sweep summaries, in this
+    /// order. Duplicate keys use their first occurrence. An empty list shows
+    /// every recorded metric. JSONL logs always retain every metric.
     #[serde(default)]
     pub metrics: Vec<String>,
 }
@@ -234,11 +236,77 @@ impl std::str::FromStr for Scenario {
     }
 }
 
+/// Returns whether a concrete metric `key` matches a dotted metric `pattern`.
+///
+/// A pattern segment written wholly as `{name}` matches exactly one non-empty
+/// segment. Every other segment is literal, and the segment counts must be
+/// equal. Placeholder segments are not accepted in the concrete key.
+pub fn metric_key_matches(pattern: &str, key: &str) -> bool {
+    let pattern_segments: Vec<&str> = pattern.split('.').collect();
+    let key_segments: Vec<&str> = key.split('.').collect();
+    if pattern_segments.len() != key_segments.len()
+        || key_segments.iter().any(|segment| is_placeholder(segment))
+    {
+        return false;
+    }
+
+    pattern_segments
+        .iter()
+        .zip(key_segments)
+        .all(|(pattern, key)| {
+            if is_placeholder(pattern) {
+                !key.is_empty()
+            } else {
+                *pattern == key
+            }
+        })
+}
+
+fn is_placeholder(segment: &str) -> bool {
+    segment.len() > 2 && segment.starts_with('{') && segment.ends_with('}')
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metric_key_pattern_matches_one_non_empty_segment() {
+        assert!(metric_key_matches(
+            "game.played_share.{action}",
+            "game.played_share.a0"
+        ));
+        assert!(!metric_key_matches(
+            "game.played_share.{action}",
+            "game.played_share."
+        ));
+    }
+
+    #[test]
+    fn metric_key_pattern_requires_the_same_number_of_segments() {
+        assert!(!metric_key_matches(
+            "game.played_share.{action}",
+            "game.played_share"
+        ));
+        assert!(!metric_key_matches(
+            "game.played_share.{action}",
+            "game.played_share.a0.extra"
+        ));
+    }
+
+    #[test]
+    fn metric_key_pattern_requires_literal_segments_and_rejects_user_wildcards() {
+        assert!(!metric_key_matches(
+            "game.played_share.{action}",
+            "game.reported_share.a0"
+        ));
+        assert!(!metric_key_matches(
+            "game.played_share.{action}",
+            "game.played_share.{name}"
+        ));
+    }
     use std::str::FromStr as _;
 
     const MINIMAL_TOML: &str = r#"

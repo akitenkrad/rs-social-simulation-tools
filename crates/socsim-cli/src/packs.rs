@@ -76,6 +76,12 @@ pub trait CliPack: Send + Sync {
         Ok(())
     }
 
+    /// Metric column patterns the scenario can emit, when they can be known
+    /// without running it. `None` defers validation until results exist.
+    fn metric_patterns(&self, _scenario: &Scenario) -> Result<Option<Vec<String>>> {
+        Ok(None)
+    }
+
     /// Run the scenario over the given seeds, returning per-seed results.
     fn run_seeds(
         &self,
@@ -467,6 +473,10 @@ mod normal_form {
         fn validate(&self, scenario: &Scenario) -> Result<()> {
             NormalFormPack.validate(scenario)?;
             Ok(())
+        }
+
+        fn metric_patterns(&self, scenario: &Scenario) -> Result<Option<Vec<String>>> {
+            Ok(Some(NormalFormPack.metric_patterns(scenario)?))
         }
 
         fn run_seeds(

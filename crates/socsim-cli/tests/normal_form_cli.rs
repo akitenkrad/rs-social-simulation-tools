@@ -104,6 +104,34 @@ fn small_nowak_may(dir: &Path, name: &str) -> PathBuf {
     write_scenario(dir, name, scenario)
 }
 
+fn small_normal_form(dir: &Path, name: &str, metrics: Vec<String>) -> PathBuf {
+    let mut scenario = Scenario::parse(include_str!("../../../scenarios/normal_form_ipd.toml"))
+        .expect("bundled normal-form scenario parses");
+    scenario.simulation.t_max = 2;
+    scenario.output.metrics = metrics;
+    write_scenario(dir, name, scenario)
+}
+
+fn series_header(output: &Output) -> Vec<String> {
+    stdout(output)
+        .lines()
+        .find(|line| line.split_whitespace().next() == Some("t"))
+        .expect("series header")
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect()
+}
+
+fn summary_metric_keys(output: &Output) -> Vec<String> {
+    stdout(output)
+        .lines()
+        .filter_map(|line| {
+            let key = line.split_whitespace().next()?;
+            key.starts_with("game.").then(|| key.to_owned())
+        })
+        .collect()
+}
+
 fn assert_no_files_with_extensions(root: &Path, extensions: &[&str]) {
     if !root.exists() {
         return;
@@ -193,6 +221,247 @@ fn init_validate_and_run_normal_form_scenario() {
     }
     assert!(!dir.path().join("game_spec.json").exists());
     assert!(!dir.path().join("solutions.json").exists());
+}
+
+#[test]
+fn every_compiled_pack_starter_validates() {
+    let dir = TempDir::new("all_starters_validate");
+    for pack in [
+        "hr-lifecycle",
+        "opinion-dynamics",
+        "organizational-silence",
+        "normal-form",
+    ] {
+        let name = format!("{pack}.toml");
+        let init = socsim(
+            dir.path(),
+            ["init", "--module-pack", pack, "-o", name.as_str()],
+        );
+        assert_success(&init);
+        let validate = socsim(dir.path(), ["validate", name.as_str()]);
+        assert_success(&validate);
+    }
+}
+
+#[test]
+fn every_bundled_scenario_for_compiled_features_validates() {
+    let dir = TempDir::new("all_scenarios_validate");
+    let scenarios_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
+    let mut scenarios: Vec<PathBuf> = fs::read_dir(scenarios_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension() == Some(OsStr::new("toml")))
+        .filter(|path| {
+            cfg!(feature = "pack-organizational-silence-llm")
+                || path.file_name() != Some(OsStr::new("org_silence_llm.toml"))
+        })
+        .collect();
+    scenarios.sort();
+
+    for scenario in scenarios {
+        let validate = socsim(dir.path(), ["validate", scenario.to_str().unwrap()]);
+        assert_success(&validate);
+    }
+}
+
+#[cfg(feature = "pack-organizational-silence-llm")]
+#[test]
+fn llm_bundled_scenario_validates_when_its_feature_is_compiled() {
+    let dir = TempDir::new("llm_scenario_validate");
+    let scenario =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/org_silence_llm.toml");
+    let validate = socsim(dir.path(), ["validate", scenario.to_str().unwrap()]);
+    assert_success(&validate);
+}
+
+#[test]
+fn run_selects_metrics_in_requested_order_for_single_and_multiple_seeds() {
+    let dir = TempDir::new("normal_form_selected_metrics");
+    let selected = vec![
+        "game.regret".to_owned(),
+        "game.mean_payoff".to_owned(),
+        "game.played_share.a0".to_owned(),
+        "game.regret".to_owned(),
+    ];
+    let scenario_path = small_normal_form(dir.path(), "selected.toml", selected);
+
+    let single = socsim(dir.path(), ["run", scenario_path.to_str().unwrap()]);
+    assert_success(&single);
+    assert_eq!(
+        series_header(&single),
+        [
+            "t",
+            "game.regret",
+            "game.mean_payoff",
+            "game.played_share.a0"
+        ]
+    );
+
+    let multiple = socsim(
+        dir.path(),
+        ["run", scenario_path.to_str().unwrap(), "--seeds", "0..2"],
+    );
+    assert_success(&multiple);
+    assert_eq!(
+        summary_metric_keys(&multiple),
+        ["game.regret", "game.mean_payoff", "game.played_share.a0"]
+    );
+}
+
+#[test]
+fn run_with_empty_metrics_keeps_all_series_columns() {
+    let dir = TempDir::new("normal_form_all_metrics");
+    let scenario_path = small_normal_form(dir.path(), "all.toml", Vec::new());
+
+    let output = socsim(dir.path(), ["run", scenario_path.to_str().unwrap()]);
+    assert_success(&output);
+    let header = series_header(&output);
+    assert!(header.len() > 4, "expected all metric columns: {header:?}");
+    assert!(header.iter().any(|key| key == "game.payoff_sd"));
+    assert!(header.iter().any(|key| key == "game.played_share.a1"));
+
+    let multiple = socsim(
+        dir.path(),
+        ["run", scenario_path.to_str().unwrap(), "--seeds", "0..2"],
+    );
+    assert_success(&multiple);
+    let keys = summary_metric_keys(&multiple);
+    assert!(keys.len() > 3, "expected all summary metrics: {keys:?}");
+    assert!(keys.iter().any(|key| key == "game.payoff_sd"));
+    assert!(keys.iter().any(|key| key == "game.played_share.a1"));
+}
+
+#[test]
+fn sweep_selects_metrics_in_stdout_and_csv_order() {
+    let dir = TempDir::new("normal_form_sweep_selected_metrics");
+    let scenario_path = small_normal_form(
+        dir.path(),
+        "sweep.toml",
+        vec!["game.regret".to_owned(), "game.mean_payoff".to_owned()],
+    );
+    let out_dir = dir.path().join("out");
+
+    let output = socsim(
+        dir.path(),
+        [
+            "sweep",
+            scenario_path.to_str().unwrap(),
+            "--param",
+            "world.history_len=2,3",
+            "--seeds",
+            "0..2",
+            "-o",
+            out_dir.to_str().unwrap(),
+        ],
+    );
+    assert_success(&output);
+    assert_eq!(
+        summary_metric_keys(&output),
+        [
+            "game.regret",
+            "game.mean_payoff",
+            "game.regret",
+            "game.mean_payoff"
+        ]
+    );
+
+    for entry in fs::read_dir(&out_dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension() != Some(OsStr::new("csv")) {
+            continue;
+        }
+        let text = fs::read_to_string(path).unwrap();
+        let keys: Vec<&str> = text
+            .lines()
+            .skip(1)
+            .filter_map(|line| line.split(',').next())
+            .collect();
+        assert_eq!(keys, ["game.regret", "game.mean_payoff"]);
+    }
+}
+
+#[test]
+fn validate_rejects_unknown_normal_form_metric_with_patterns() {
+    let dir = TempDir::new("normal_form_unknown_metric");
+    let scenario_path = small_normal_form(dir.path(), "unknown.toml", vec!["game.nope".to_owned()]);
+
+    let output = socsim(dir.path(), ["validate", scenario_path.to_str().unwrap()]);
+    assert_exit_one(&output);
+    let error = stderr(&output);
+    assert!(error.contains("game.nope"), "{error}");
+    assert!(error.contains("game.played_share.{action}"), "{error}");
+    assert!(error.contains("game.mean_payoff"), "{error}");
+}
+
+#[test]
+fn pattern_match_without_a_recorded_metric_fails_run_and_sweep_after_execution() {
+    let dir = TempDir::new("normal_form_absent_metric");
+    let scenario_path = small_normal_form(
+        dir.path(),
+        "absent.toml",
+        vec!["game.played_share.a9".to_owned()],
+    );
+
+    let validate = socsim(dir.path(), ["validate", scenario_path.to_str().unwrap()]);
+    assert_success(&validate);
+
+    let run = socsim(dir.path(), ["run", scenario_path.to_str().unwrap()]);
+    assert_exit_one(&run);
+    let run_error = stderr(&run);
+    assert!(run_error.contains("game.played_share.a9"), "{run_error}");
+    assert!(run_error.contains("game.played_share.a0"), "{run_error}");
+    assert!(dir.path().join("logs/ipd_tft_vs_fp_42.jsonl").is_file());
+
+    let out_dir = dir.path().join("out");
+    let sweep = socsim(
+        dir.path(),
+        [
+            "sweep",
+            scenario_path.to_str().unwrap(),
+            "--param",
+            "world.history_len=2",
+            "--seeds",
+            "0..1",
+            "-o",
+            out_dir.to_str().unwrap(),
+        ],
+    );
+    assert_exit_one(&sweep);
+    let sweep_error = stderr(&sweep);
+    assert!(
+        sweep_error.contains("game.played_share.a9"),
+        "{sweep_error}"
+    );
+    assert!(
+        sweep_error.contains("game.played_share.a0"),
+        "{sweep_error}"
+    );
+    assert!(!out_dir.exists());
+}
+
+#[test]
+fn unknown_metric_without_patterns_fails_after_writing_full_jsonl() {
+    let dir = TempDir::new("opinion_unknown_metric");
+    let mut scenario = Scenario::parse(include_str!(
+        "../../../scenarios/opinion_dynamics_baseline.toml"
+    ))
+    .expect("bundled opinion scenario parses");
+    scenario.simulation.t_max = 1;
+    scenario.output.metrics = vec!["opinion.nope".to_owned()];
+    let log_path = dir.path().join(format!(
+        "logs/{}_{}.jsonl",
+        scenario.simulation.name, scenario.simulation.seed
+    ));
+    let scenario_path = write_scenario(dir.path(), "opinion.toml", scenario);
+
+    let output = socsim(dir.path(), ["run", scenario_path.to_str().unwrap()]);
+    assert_exit_one(&output);
+    let error = stderr(&output);
+    assert!(error.contains("opinion.nope"), "{error}");
+    assert!(error.contains("clusters"), "{error}");
+    let log = fs::read_to_string(&log_path).expect("JSONL is written before validation fails");
+    assert!(log.contains(r#""key":"clusters""#), "{log}");
+    assert!(log.contains(r#""key":"variance""#), "{log}");
 }
 
 #[test]

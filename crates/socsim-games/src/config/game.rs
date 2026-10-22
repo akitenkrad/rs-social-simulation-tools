@@ -13,10 +13,10 @@ use crate::catalog::{
 use crate::continuous::{BertrandDifferentiated, Cournot, PublicGoodsContinuous};
 use crate::GameWorld;
 use crate::{
-    uniform_initial_actions, ContinuousEquilibrium, ContinuousMetricsOptions, ContinuousSpec,
-    EquilibriumTarget, ExperimentState, FiniteGame, FiniteSpec, GameError, GameSimFactory,
-    InitialActions, MatrixError, MatrixGame, MetricsOptions, MixedSource, ProportionalImitation,
-    StageGame, Update,
+    uniform_initial_actions, ContinuousEquilibrium, ContinuousMetrics, ContinuousMetricsOptions,
+    ContinuousSpec, EquilibriumTarget, ExperimentState, FiniteGame, FiniteSpec, GameError,
+    GameMetrics, GameSimFactory, InitialActions, MatrixError, MatrixGame, MetricsOptions,
+    MixedSource, ProportionalImitation, StageGame, Update,
 };
 use socsim_config::Scenario;
 use socsim_runner::Trial;
@@ -162,6 +162,10 @@ pub(crate) mod sealed {
 
         /// Reads the `game_metrics` mechanism.
         fn read_metrics(reader: &mut ParamReader<'_>) -> Result<Self::Metrics, GameError>;
+
+        /// Builds the configured metrics mechanism and returns its column
+        /// patterns without constructing or running a simulation.
+        fn metric_patterns(game: &Self, metrics: &Self::Metrics) -> Result<Vec<String>, GameError>;
 
         /// Sets the metrics of a factory.
         fn attach_metrics<X: ExperimentState, M, P, D>(
@@ -606,6 +610,14 @@ impl sealed::SpecGame for FiniteSpec {
         Ok(options)
     }
 
+    fn metric_patterns(game: &Self, metrics: &Self::Metrics) -> Result<Vec<String>, GameError> {
+        Ok(GameMetrics::new(game, metrics.clone())?
+            .describe()
+            .into_iter()
+            .map(|(pattern, _)| pattern)
+            .collect())
+    }
+
     fn attach_metrics<X: ExperimentState, M, P, D>(
         factory: GameSimFactory<Self, X, M, P, D>,
         metrics: &Self::Metrics,
@@ -733,6 +745,14 @@ impl sealed::SpecGame for ContinuousSpec {
             options = options.stop(tol, window);
         }
         Ok(options)
+    }
+
+    fn metric_patterns(game: &Self, metrics: &Self::Metrics) -> Result<Vec<String>, GameError> {
+        Ok(ContinuousMetrics::new(game, metrics.clone())?
+            .describe()
+            .into_iter()
+            .map(|(pattern, _)| pattern)
+            .collect())
     }
 
     fn attach_metrics<X: ExperimentState, M, P, D>(

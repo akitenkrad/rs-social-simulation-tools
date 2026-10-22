@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use socsim_config::Scenario;
+use socsim_config::{metric_key_matches, Scenario};
 use socsim_runner::{summarize, SweepAxis};
 
 // ── CLI top level ─────────────────────────────────────────────────────────────
@@ -199,21 +199,23 @@ fn cmd_run(scenario_path: &Path, seeds_arg: Option<&str>, parallel: bool) -> Res
         .run_seeds(&scenario, &seeds, parallel)
         .context("simulation run failed")?;
 
+    // Persist complete logs before requested-key validation can fail.
+    for result in &results {
+        write_jsonl_log(&scenario, result)?;
+    }
+    validate_recorded_metrics(&scenario.output.metrics, &results)?;
+
     if results.len() == 1 {
         // Single-seed: print metric time series (condensed).
         let r = &results[0];
         println!("\nSeed {} — {} events recorded\n", r.seed, r.event_count);
-        print_series(r);
+        print_series(r, &scenario.output.metrics);
     } else {
         // Multi-seed: print cross-seed summary.
         let summary = summarize(&results);
+        let summary = select_summary_metrics(summary, &scenario.output.metrics);
         println!("\nCross-seed summary ({} seeds):\n", results.len());
         print_summary_table(&summary);
-    }
-
-    // Write JSONL logs.
-    for r in &results {
-        write_jsonl_log(&scenario, r)?;
     }
 
     Ok(())
@@ -294,9 +296,15 @@ fn cmd_sweep(
         println!("  {} = {:?}", axis.param_key, axis.values);
     }
 
-    let rows = pack
+    let mut rows = pack
         .run_sweep_rows(&scenario, &axes, &seeds, parallel)
         .context("sweep failed")?;
+    validate_sweep_metrics(&scenario.output.metrics, &rows)?;
+    if !scenario.output.metrics.is_empty() {
+        for row in &mut rows {
+            row.summary = row.summary.select_metrics(&scenario.output.metrics);
+        }
+    }
 
     std::fs::create_dir_all(out_dir)
         .with_context(|| format!("failed to create output dir '{}'", out_dir.display()))?;
@@ -389,10 +397,96 @@ fn check_scenario(pack: &dyn packs::CliPack, scenario: &Scenario, path: &Path) -
         let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
         scenario.validate(&name_refs)?;
         pack.validate(scenario)?;
+        if !scenario.output.metrics.is_empty() {
+            if let Some(patterns) = pack.metric_patterns(scenario)? {
+                let unknown: Vec<String> = unique_metric_keys(&scenario.output.metrics)
+                    .into_iter()
+                    .filter(|key| {
+                        !patterns
+                            .iter()
+                            .any(|pattern| metric_key_matches(pattern, key))
+                    })
+                    .map(str::to_owned)
+                    .collect();
+                if !unknown.is_empty() {
+                    anyhow::bail!(
+                        "unknown [output] metric key(s) for pack '{}': [{}]; available metric patterns: [{}]",
+                        pack.name(),
+                        unknown.join(", "),
+                        patterns.join(", ")
+                    );
+                }
+            }
+        }
         Ok(())
     })();
 
     result.with_context(|| format!("validation failed for '{}'", path.display()))
+}
+
+fn unique_metric_keys(metrics: &[String]) -> Vec<&str> {
+    let mut unique = Vec::new();
+    for metric in metrics {
+        if !unique.contains(&metric.as_str()) {
+            unique.push(metric.as_str());
+        }
+    }
+    unique
+}
+
+fn validate_recorded_metrics(
+    requested: &[String],
+    results: &[socsim_runner::RunResult],
+) -> Result<()> {
+    if requested.is_empty() {
+        return Ok(());
+    }
+    let mut recorded: Vec<&str> = results
+        .iter()
+        .flat_map(|result| result.series.keys().map(String::as_str))
+        .collect();
+    recorded.sort_unstable();
+    recorded.dedup();
+    validate_requested_metrics(requested, &recorded)
+}
+
+fn validate_sweep_metrics(requested: &[String], rows: &[packs::SweepRow]) -> Result<()> {
+    if requested.is_empty() {
+        return Ok(());
+    }
+    let mut recorded: Vec<&str> = rows
+        .iter()
+        .flat_map(|row| row.summary.metrics.iter().map(|metric| metric.key.as_str()))
+        .collect();
+    recorded.sort_unstable();
+    recorded.dedup();
+    validate_requested_metrics(requested, &recorded)
+}
+
+fn validate_requested_metrics(requested: &[String], recorded: &[&str]) -> Result<()> {
+    let missing: Vec<&str> = unique_metric_keys(requested)
+        .into_iter()
+        .filter(|key| !recorded.contains(key))
+        .collect();
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "[output] metric key(s) not recorded: [{}]; recorded metric keys: [{}]",
+            missing.join(", "),
+            recorded.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn select_summary_metrics(
+    summary: socsim_runner::Summary,
+    requested: &[String],
+) -> socsim_runner::Summary {
+    if requested.is_empty() {
+        summary
+    } else {
+        summary.select_metrics(requested)
+    }
 }
 
 /// Parse a seed range string `"A..B"` into a sorted `Vec<u64>`.
@@ -600,9 +694,17 @@ fn write_jsonl_log(scenario: &Scenario, result: &socsim_runner::RunResult) -> Re
 }
 
 /// Print a condensed metric series table for a single run.
-fn print_series(result: &socsim_runner::RunResult) {
-    let mut keys: Vec<&str> = result.series.keys().map(|s| s.as_str()).collect();
-    keys.sort();
+fn print_series(result: &socsim_runner::RunResult, requested: &[String]) {
+    let keys: Vec<&str> = if requested.is_empty() {
+        let mut keys: Vec<&str> = result.series.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        keys
+    } else {
+        unique_metric_keys(requested)
+            .into_iter()
+            .filter(|key| result.series.contains_key(*key))
+            .collect()
+    };
 
     // Header
     print!("{:<6}", "t");

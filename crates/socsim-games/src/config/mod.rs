@@ -281,6 +281,19 @@ impl<G: ScenarioGame, X: ExperimentState> ScenarioConfig<G, X> {
         self.continuation_probability
     }
 
+    /// Returns the metric column patterns described by the configured
+    /// `game_metrics` mechanism without running a simulation.
+    pub fn metric_patterns(&self) -> Result<Vec<String>, GameError> {
+        let Some(metrics) = &self.metrics else {
+            return Ok(Vec::new());
+        };
+        let mut patterns = G::metric_patterns(&self.game, metrics)?;
+        if self.aggregate_history_len.is_none() {
+            patterns.retain(|pattern| pattern != "game.aggregate.{name}");
+        }
+        Ok(patterns)
+    }
+
     /// A [`GameSimFactory`] configured as the scenario describes, for `seed`
     /// (which fixes the network and the uniform initial actions).
     ///

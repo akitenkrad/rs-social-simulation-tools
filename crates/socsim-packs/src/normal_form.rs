@@ -106,6 +106,16 @@ impl NormalFormPack {
         }
     }
 
+    /// Returns the metric column patterns described by the scenario's
+    /// `game_metrics` mechanism without running the simulation.
+    pub fn metric_patterns(&self, scenario: &Scenario) -> Result<Vec<String>> {
+        match selected_family(scenario)? {
+            GameFamily::Finite => finite_factory().metric_patterns(scenario),
+            GameFamily::Continuous => continuous_factory().metric_patterns(scenario),
+            other => unsupported_family(other),
+        }
+    }
+
     /// Runs all requested trial seeds with the factory selected by
     /// `[world.game] kind`.
     ///
